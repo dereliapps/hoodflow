@@ -20,61 +20,61 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>HoodFlow — Safe stock automation on Robinhood Chain<\/title>/i);
-  assert.match(html, /Stock automation,/);
-  assert.match(html, /clearly explained\./);
+  assert.match(html, /<title>HoodFlow — Buy stock tokens on Robinhood Chain<\/title>/i);
+  assert.match(html, /Robinhood Chain stock-token explorer/);
   assert.match(html, /Buy INTC with USDG/);
-  assert.match(html, /Set it\. Cap it\./);
+  assert.match(html, /Buy onchain\./);
   assert.match(html, /HoodFlow workspace loading/);
   assert.match(html, /Preparing your/);
   assert.match(html, /safe workspace\./);
   assert.match(html, /Loading official assets/);
   assert.match(html, /Permission Center/);
-  assert.match(html, /Strategy workspace/);
-  assert.match(html, /13 full-fill assets open/);
-  assert.match(html, /13 direct-buy routes/);
+  assert.match(html, /Your orders/);
+  assert.match(html, /Every verified route is open/);
+  assert.match(html, /All verified buy routes open/);
   assert.match(html, /ROBINHOOD CHAIN [/] MAINNET/);
-  assert.match(html, /V12 MAINNET ROUTING/);
+  assert.match(html, /V13 MAINNET ROUTING/);
   assert.match(html, /Three steps\. You stay in control\./);
-  assert.match(html, /Mainnet direct buy is ready/);
+  assert.match(html, /Buy Now is live on Robinhood Chain mainnet/);
   assert.match(html, /Robinhood Chain/);
   assert.match(html, /og\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
 test("ships a bounded, interactive Robinhood mainnet experience", async () => {
-  const [page, layout, css, packageJson, priceRoute, priceLib] = await Promise.all([
+  const [page, layout, css, packageJson, priceRoute, priceLib, historyRoute] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../app/api/prices/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/robinhood-prices.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/history/route.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /"use client"/);
   assert.match(page, /createStrategy/);
   assert.match(page, /toggleStrategy/);
-  assert.match(page, /copyStrategy/);
+  assert.match(page, /applyTemplate/);
   assert.match(page, /exportActivity/);
-  assert.match(page, /hoodflow-device-orders-v2/);
+  assert.match(page, /hoodflow-mainnet-orders-v3/);
   assert.match(page, /window\.localStorage\.setItem/);
   assert.match(page, /Wallet keys and account data are never stored/);
   assert.match(page, /wallet_switchEthereumChain/);
   assert.match(page, /Robinhood Chain mainnet/);
-  assert.match(page, /Shadow Mode is on/);
+  assert.doesNotMatch(page, /\bShadow\b/i);
   assert.match(page, /PERMISSION CENTER/);
-  assert.match(page, /Pause local drafts/);
-  assert.match(page, /EXECUTION PREVIEW/);
+  assert.match(page, /RECEIPTS SAVED ON THIS DEVICE/);
+  assert.match(page, /ORDER REVIEW/);
   assert.match(page, /Spending limits stay enforced onchain/);
   assert.match(page, /25\/25 engine, oracle and adapter safety tests passing/);
   assert.match(page, /Best quote across 3 reviewed V4 pool configurations/);
   assert.match(page, /2\/2 capped executions, replay blocked/);
   assert.match(page, /Twenty-five assets/);
-  assert.match(page, /13 direct-buy routes/);
+  assert.match(page, /All 15 full-fill V3\/V4 routes are enabled/);
   assert.match(page, /Full-fill ready/);
   assert.match(page, /MSFT stays blocked after a deterministic-fork partial fill/);
-  assert.match(page, /Copy as draft/);
+  assert.match(page, /Use template/);
   assert.match(page, /Know every status/);
   assert.match(page, /Independent audit/);
   assert.match(page, /Production RPC \+ oracle map/);
@@ -86,14 +86,18 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /LIVE TOKEN PRICES/);
   assert.match(page, /Stale — blocked/);
   assert.match(page, /CHAINLINK \/ ROBINHOOD MAINNET/);
+  assert.match(page, /The chart contains real Chainlink rounds/);
+  assert.match(page, /openAsset/);
+  assert.match(page, /\/api\/history\?ticker=/);
+  assert.match(page, /TOKEN CONTRACT/);
   assert.doesNotMatch(page, /price:\s*211\.18/);
   assert.match(page, /DIRECT BUY LIVE/);
-  assert.match(page, /version-badge">V12/);
+  assert.match(page, /version-badge">V13/);
   assert.match(page, /PERMIT2_TYPES/);
   assert.match(page, /buildDirectBuyCalldata/);
   assert.match(page, /Buy INTC with USDG/);
-  assert.match(page, /13 ROUTES OPEN/);
-  assert.match(layout, /HoodFlow — Safe stock automation/);
+  assert.match(page, /MAINNET BUYING LIVE/);
+  assert.match(layout, /HoodFlow — Buy stock tokens/);
   assert.match(layout, /Instrument_Sans/);
   assert.match(layout, /IBM_Plex_Mono/);
   assert.match(layout, /summary_large_image/);
@@ -102,11 +106,17 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(css, /launch-fallback/);
   assert.match(css, /\.price-source-bar/);
   assert.match(css, /\.price-cell\.stale/);
+  assert.match(css, /\.asset-detail-grid/);
+  assert.match(css, /\.history-chart/);
+  assert.doesNotMatch(css, /\.shadow-toggle|\.status-button\.shadow/i);
   assert.match(css, /@media \(max-width: 620px\)/);
   assert.match(priceLib, /0xfeaf968c/);
   assert.match(priceLib, /0x7706ba52/);
   assert.match(priceLib, /pauseResult === false/);
   assert.match(priceRoute, /stale-while-revalidate/);
+  assert.match(historyRoute, /0x9a6fc8f5/);
+  assert.match(historyRoute, /ROUND_COUNT = 32/);
+  assert.match(historyRoute, /decodeLatestRoundData/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 
   await access(new URL("../public/og.png", import.meta.url));

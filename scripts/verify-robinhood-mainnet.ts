@@ -27,6 +27,12 @@ const stateViewAbi = [
 const quoterAbi = [
   "function quoteExactInputSingle(((address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks) poolKey,bool zeroForOne,uint128 exactAmount,bytes hookData) params) returns (uint256 amountOut,uint256 gasEstimate)",
 ] as const;
+const v3FactoryAbi = [
+  "function getPool(address tokenA,address tokenB,uint24 fee) view returns (address pool)",
+] as const;
+const v3QuoterAbi = [
+  "function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns (uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)",
+] as const;
 const quoteAmountIn = 1_000_000n;
 const supportedPools = [
   { fee: 500, tickSpacing: 10 },
@@ -34,6 +40,7 @@ const supportedPools = [
   { fee: 10_000, tickSpacing: 200 },
 ] as const;
 const abiCoder = AbiCoder.defaultAbiCoder();
+const v3VerifiedAssets = infrastructure.v3VerifiedAssets as Readonly<Record<string, number>>;
 
 const network = await provider.getNetwork();
 if (network.chainId !== expectedChainId) {
@@ -84,6 +91,16 @@ const stateView = new Contract(
 const quoter = new Contract(
   getAddress(infrastructure.contracts.quoter),
   quoterAbi,
+  provider,
+);
+const v3Factory = new Contract(
+  getAddress(infrastructure.contracts.v3Factory),
+  v3FactoryAbi,
+  provider,
+);
+const v3Quoter = new Contract(
+  getAddress(infrastructure.contracts.v3Quoter),
+  v3QuoterAbi,
   provider,
 );
 async function scanAsset(symbol: string) {
@@ -139,18 +156,60 @@ async function scanAsset(symbol: string) {
       return leftQuote === rightQuote ? 0 : leftQuote > rightQuote ? -1 : 1;
     })[0] ?? null;
 
+    const v3Fee = v3VerifiedAssets[symbol];
+    let v3Route: null | {
+      protocol: "V3";
+      pool: string;
+      fee: number;
+      quoteAmountIn: string;
+      quoteAmountOut: string;
+    } = null;
+    if (Number.isInteger(v3Fee) && v3Fee > 0) {
+      const pool = getAddress(await v3Factory.getPool(usdG, token, v3Fee));
+      if (pool !== ZeroAddress && await provider.getCode(pool) !== "0x") {
+        try {
+          const quote = await v3Quoter.quoteExactInputSingle.staticCall({
+            tokenIn: usdG,
+            tokenOut: token,
+            amountIn: quoteAmountIn,
+            fee: v3Fee,
+            sqrtPriceLimitX96: 0,
+          });
+          const amountOut = BigInt(quote[0]);
+          if (amountOut > 0n) {
+            v3Route = {
+              protocol: "V3",
+              pool,
+              fee: v3Fee,
+              quoteAmountIn: quoteAmountIn.toString(),
+              quoteAmountOut: amountOut.toString(),
+            };
+          }
+        } catch {
+          // A configured V3 pool must still produce a live exact-input quote.
+        }
+      }
+    }
+
+    const v4Route = bestPool && {
+      protocol: "V4" as const,
+      fee: bestPool.fee,
+      tickSpacing: bestPool.tickSpacing,
+      hooks: bestPool.hooks,
+      quoteAmountIn: quoteAmountIn.toString(),
+      quoteAmountOut: bestPool.quoteAmountOut!,
+    };
+    const bestRoute = [v4Route, v3Route].filter((route): route is NonNullable<typeof route> => Boolean(route)).sort(
+      (left, right) => BigInt(left.quoteAmountOut) > BigInt(right.quoteAmountOut) ? -1 : 1,
+    )[0] ?? null;
+
     return {
       symbol,
       type: infrastructure.assetTypes.etfs.includes(symbol) ? "ETF" : "STOCK",
       token,
-      executable: bestPool !== null,
-      bestRoute: bestPool && {
-        fee: bestPool.fee,
-        tickSpacing: bestPool.tickSpacing,
-        hooks: bestPool.hooks,
-        quoteAmountIn: quoteAmountIn.toString(),
-        quoteAmountOut: bestPool.quoteAmountOut,
-      },
+      executable: bestRoute !== null,
+      bestRoute,
+      v3Pool: v3Route?.pool ?? null,
       pools,
     };
 }

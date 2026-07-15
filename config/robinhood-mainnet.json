@@ -6,6 +6,8 @@
     "v2Factory": "0x8bceaa40b9acdfaedf85adf4ff01f5ad6517937f",
     "v2Router02": "0x89e5db8b5aa49aa85ac63f691524311aeb649eba",
     "v3Factory": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+    "v3Quoter": "0x33e885ed0ec9bf04ecfb19341582aadcb4c8a9e7",
+    "v3SwapRouter02": "0xcaf681a66d020601342297493863e78c959e5cb2",
     "universalRouter": "0x8876789976decbfcbbbe364623c63652db8c0904",
     "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
     "poolManager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
@@ -48,7 +50,11 @@
     "CUSO": "USO"
   },
   "launchAssets": ["AAPL", "NVDA", "GOOGL", "TSLA"],
-  "forkVerifiedAssets": ["AAPL", "AMD", "AMZN", "GOOGL", "INTC", "META", "MU", "NVDA", "SNDK", "SPCX", "TSLA", "QQQ", "SPY"],
+  "forkVerifiedAssets": ["AAPL", "AMD", "AMZN", "GOOGL", "INTC", "META", "MU", "NVDA", "SNDK", "SPCX", "TSLA", "QQQ", "SGOV", "SLV", "SPY"],
+  "v3VerifiedAssets": {
+    "SGOV": 100,
+    "SLV": 3000
+  },
   "sources": {
     "network": "https://docs.robinhood.com/chain/connecting/",
     "tokens": "https://docs.robinhood.com/chain/contracts/",

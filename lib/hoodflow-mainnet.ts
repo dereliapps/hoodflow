@@ -1,4 +1,4 @@
-import { AbiCoder, ZeroAddress, getAddress } from "ethers";
+import { AbiCoder, ZeroAddress, getAddress, solidityPacked } from "ethers";
 
 import infrastructure from "../config/robinhood-mainnet.json" with { type: "json" };
 
@@ -23,6 +23,7 @@ export const WATCH_ONLY_ASSETS = Object.keys(ROBINHOOD_TOKENS).filter(
 export const UNIVERSAL_ROUTER_ADDRESS = getAddress(infrastructure.contracts.universalRouter);
 export const PERMIT2_ADDRESS = getAddress(infrastructure.contracts.permit2);
 export const V4_QUOTER_ADDRESS = getAddress(infrastructure.contracts.quoter);
+export const V3_QUOTER_ADDRESS = getAddress(infrastructure.contracts.v3Quoter);
 export const USDG_ADDRESS = ROBINHOOD_TOKENS.USDG;
 export const USDG_DECIMALS = 6;
 export const STOCK_TOKEN_DECIMALS = 18;
@@ -34,6 +35,8 @@ export const V4_POOL_CANDIDATES = [
 ] as const;
 
 export type PoolCandidate = (typeof V4_POOL_CANDIDATES)[number];
+
+export const V3_ROUTE_FEES = infrastructure.v3VerifiedAssets as Readonly<Record<string, number>>;
 
 export const ERC20_ABI = [
   "function balanceOf(address account) view returns (uint256)",
@@ -48,6 +51,10 @@ export const PERMIT2_ABI = [
 
 export const V4_QUOTER_ABI = [
   "function quoteExactInputSingle(((address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks) poolKey,bool zeroForOne,uint128 exactAmount,bytes hookData) params) returns (uint256 amountOut,uint256 gasEstimate)",
+] as const;
+
+export const V3_QUOTER_ABI = [
+  "function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns (uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)",
 ] as const;
 
 export const UNIVERSAL_ROUTER_ABI = [
@@ -91,6 +98,10 @@ export type PermitSingle = {
 
 export function isRoutedAsset(ticker: string): boolean {
   return ROUTED_ASSETS.includes(ticker) && Boolean(ROBINHOOD_TOKENS[ticker]);
+}
+
+export function isV3RoutedAsset(ticker: string): boolean {
+  return Number.isInteger(V3_ROUTE_FEES[ticker]) && V3_ROUTE_FEES[ticker] > 0;
 }
 
 export function buildQuoteParams(tokenOut: string, amountIn: bigint, route: PoolCandidate) {
@@ -150,6 +161,35 @@ export function buildDirectBuyCalldata(args: {
 
   return {
     commands: "0x0a10",
+    inputs: [permitInput, swapInput],
+  };
+}
+
+export function buildV3DirectBuyCalldata(args: {
+  tokenOut: string;
+  recipient: string;
+  amountIn: bigint;
+  minAmountOut: bigint;
+  fee: number;
+  permit: PermitSingle;
+  signature: string;
+}) {
+  const coder = AbiCoder.defaultAbiCoder();
+  const path = solidityPacked(
+    ["address", "uint24", "address"],
+    [USDG_ADDRESS, args.fee, getAddress(args.tokenOut)],
+  );
+  const swapInput = coder.encode(
+    ["address", "uint256", "uint256", "bytes", "bool", "uint256[]"],
+    [getAddress(args.recipient), args.amountIn, args.minAmountOut, path, true, []],
+  );
+  const permitInput = coder.encode(
+    ["tuple(tuple(address token,uint160 amount,uint48 expiration,uint48 nonce) details,address spender,uint256 sigDeadline)", "bytes"],
+    [args.permit, args.signature],
+  );
+
+  return {
+    commands: "0x0a00",
     inputs: [permitInput, swapInput],
   };
 }

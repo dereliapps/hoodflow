@@ -14,17 +14,17 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: new URL(origin),
-    title: "HoodFlow — Safe stock automation on Robinhood Chain",
-    description: "Buy INTC and 12 other full-fill verified stock tokens with USDG through protected Robinhood Chain mainnet orders.",
+    title: "HoodFlow — Buy stock tokens on Robinhood Chain",
+    description: "Explore 25 official stock tokens, inspect real Chainlink price history, and buy every full-fill verified asset with USDG on Robinhood Chain mainnet.",
     openGraph: {
-      title: "HoodFlow — Stock automation, clearly explained.",
-      description: "Live V4 quotes, exact Permit2 order permissions and direct-to-wallet stock token delivery on Robinhood Chain.",
+      title: "HoodFlow — Robinhood Chain stock-token explorer",
+      description: "Real onchain prices, verified history, protected V4 routing and direct-to-wallet delivery.",
       images: [{ url: `${origin}/og.png`, width: 1920, height: 1080, alt: "HoodFlow portfolio automation dashboard" }],
     },
     twitter: {
       card: "summary_large_image",
-      title: "HoodFlow — Stock automation, clearly explained.",
-      description: "Live V4 quotes, exact Permit2 order permissions and direct-to-wallet stock token delivery on Robinhood Chain.",
+      title: "HoodFlow — Robinhood Chain stock-token explorer",
+      description: "Real onchain prices, verified history, protected V4 routing and direct-to-wallet delivery.",
       images: [`${origin}/og.png`],
     },
   };
