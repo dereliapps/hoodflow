@@ -8,6 +8,8 @@
 - Every strategy has an exact tranche, total budget, interval, expiry and maximum slippage.
 - A keeper cannot execute early, execute twice in a catch-up burst, or exceed the total budget.
 - Both input and output Chainlink-compatible feeds must be positive, complete and inside their heartbeat.
+- Sequencer downtime and the configured recovery grace period block all quoting and execution.
+- Canonical stock tokens configured for pause checks must report `oraclePaused() == false`.
 - The adapter receives an exact, temporary allowance that is reset to zero after use.
 - The production-candidate V4 adapter constructs the Universal Router action plan internally and permits only one hookless direct pool hop.
 - V4 pools are limited to the reviewed 0.05%, 0.30% and 1.00% fee/tick-spacing combinations.
@@ -17,9 +19,9 @@
 
 ## Verification evidence
 
-- 23 local engine and adapter scenarios pass.
-- Official Robinhood mainnet contract/token bytecode and metadata are checked by `npm run infra:verify:mainnet`.
-- AAPL/USDG, NVDA/USDG, GOOGL/USDG and TSLA/USDG execute through the official V4 Universal Router on a local fork via `npm run infra:verify:fork`.
+- 25 local engine, oracle and adapter scenarios pass.
+- All 25 canonical Robinhood stock/ETF tokens, USDG and 8 protocol contracts are checked by `npm run infra:verify:mainnet`.
+- The 13 routes available at the latest snapshot execute through the official V4 Universal Router on a local fork via `npm run infra:verify:fork`.
 - The fork verification performs no real-chain broadcast.
 
 ## Mainnet blockers

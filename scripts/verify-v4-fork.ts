@@ -41,9 +41,18 @@ await adapter.waitForDeployment();
 const routeAmount = 1_000_000n;
 const routes = [
   { symbol: "AAPL", fee: 500, tickSpacing: 10 },
-  { symbol: "NVDA", fee: 3_000, tickSpacing: 60 },
+  { symbol: "AMD", fee: 10_000, tickSpacing: 200 },
+  { symbol: "AMZN", fee: 3_000, tickSpacing: 60 },
   { symbol: "GOOGL", fee: 3_000, tickSpacing: 60 },
+  { symbol: "INTC", fee: 10_000, tickSpacing: 200 },
+  { symbol: "META", fee: 3_000, tickSpacing: 60 },
+  { symbol: "MU", fee: 10_000, tickSpacing: 200 },
+  { symbol: "NVDA", fee: 3_000, tickSpacing: 60 },
+  { symbol: "SNDK", fee: 10_000, tickSpacing: 200 },
+  { symbol: "SPCX", fee: 10_000, tickSpacing: 200 },
   { symbol: "TSLA", fee: 3_000, tickSpacing: 60 },
+  { symbol: "QQQ", fee: 10_000, tickSpacing: 200 },
+  { symbol: "SPY", fee: 3_000, tickSpacing: 60 },
 ] as const;
 const requiredUsdG = routeAmount * BigInt(routes.length);
 const poolManagerBalance = BigInt(await usdG.balanceOf(poolManagerAddress));
@@ -90,6 +99,7 @@ for (const route of routes) {
     amountOut: amountOut.toString(),
     gasUsed: receipt?.gasUsed.toString(),
   });
+  console.log(`fork route passed: ${route.symbol}`);
 }
 
 console.log(JSON.stringify({

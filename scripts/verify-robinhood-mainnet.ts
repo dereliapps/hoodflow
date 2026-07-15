@@ -1,17 +1,17 @@
 import {
+  AbiCoder,
   Contract,
-  Interface,
   JsonRpcProvider,
   ZeroAddress,
   getAddress,
-  zeroPadValue,
+  keccak256,
 } from "ethers";
 import infrastructure from "../config/robinhood-mainnet.json" with { type: "json" };
 
 try {
   process.loadEnvFile?.();
 } catch {
-  // A provider URL may also be supplied by CI or a secrets manager.
+  // CI or a secrets manager may inject the provider URL instead.
 }
 
 const rpcUrl = process.env.ROBINHOOD_MAINNET_RPC_URL?.trim() || infrastructure.rpcUrl;
@@ -21,29 +21,19 @@ const erc20Abi = [
   "function symbol() view returns (string)",
   "function decimals() view returns (uint8)",
 ] as const;
-const v3FactoryAbi = [
-  "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)",
-] as const;
-const v2FactoryAbi = [
-  "function getPair(address tokenA, address tokenB) view returns (address pair)",
-] as const;
-const v2PairAbi = [
-  "function token0() view returns (address)",
-  "function token1() view returns (address)",
-  "function getReserves() view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)",
-] as const;
-const v3PoolAbi = [
-  "function token0() view returns (address)",
-  "function token1() view returns (address)",
-  "function liquidity() view returns (uint128)",
-] as const;
-const canonicalV3Fees = [100, 500, 3_000, 10_000] as const;
-const v4PoolManagerInterface = new Interface([
-  "event Initialize(bytes32 indexed id, address indexed currency0, address indexed currency1, uint24 fee, int24 tickSpacing, address hooks, uint160 sqrtPriceX96, int24 tick)",
-]);
 const stateViewAbi = [
   "function getLiquidity(bytes32 poolId) view returns (uint128 liquidity)",
 ] as const;
+const quoterAbi = [
+  "function quoteExactInputSingle(((address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks) poolKey,bool zeroForOne,uint128 exactAmount,bytes hookData) params) returns (uint256 amountOut,uint256 gasEstimate)",
+] as const;
+const quoteAmountIn = 1_000_000n;
+const supportedPools = [
+  { fee: 500, tickSpacing: 10 },
+  { fee: 3_000, tickSpacing: 60 },
+  { fee: 10_000, tickSpacing: 200 },
+] as const;
+const abiCoder = AbiCoder.defaultAbiCoder();
 
 const network = await provider.getNetwork();
 if (network.chainId !== expectedChainId) {
@@ -52,6 +42,10 @@ if (network.chainId !== expectedChainId) {
 
 const contractEntries = Object.entries(infrastructure.contracts);
 const tokenEntries = Object.entries(infrastructure.tokens);
+const canonicalAssets = [
+  ...infrastructure.assetTypes.stocks,
+  ...infrastructure.assetTypes.etfs,
+];
 const codeResults = await Promise.all(
   [...contractEntries, ...tokenEntries].map(async ([name, rawAddress]) => {
     const address = getAddress(rawAddress);
@@ -66,7 +60,10 @@ const tokenResults = await Promise.all(
     const address = getAddress(rawAddress);
     const token = new Contract(address, erc20Abi, provider);
     const [onchainSymbol, decimals] = await Promise.all([token.symbol(), token.decimals()]);
-    if (String(onchainSymbol).toUpperCase() !== configuredSymbol) {
+    const expectedSymbol = infrastructure.onchainSymbolAliases[
+      configuredSymbol as keyof typeof infrastructure.onchainSymbolAliases
+    ] ?? configuredSymbol;
+    if (String(onchainSymbol).toUpperCase() !== expectedSymbol) {
       throw new Error(`${configuredSymbol} symbol mismatch: received ${String(onchainSymbol)}`);
     }
     if (Number(decimals) < 1 || Number(decimals) > 18) {
@@ -76,165 +73,116 @@ const tokenResults = await Promise.all(
   }),
 );
 
-const usdG = getAddress(infrastructure.tokens.USDG);
-const v3Factory = new Contract(
-  getAddress(infrastructure.contracts.v3Factory),
-  v3FactoryAbi,
-  provider,
-);
-const v3RouteResults = await Promise.all(
-  tokenEntries
-    .filter(([symbol]) => symbol !== "USDG")
-    .map(async ([symbol, rawAddress]) => {
-      const token = getAddress(rawAddress);
-      const pools = await Promise.all(
-        canonicalV3Fees.map(async (fee) => {
-          const poolAddress = getAddress(await v3Factory.getPool(usdG, token, fee));
-          if (poolAddress === ZeroAddress) return null;
-
-          const code = await provider.getCode(poolAddress);
-          if (code === "0x") throw new Error(`${symbol}/${fee} pool has no bytecode`);
-          const pool = new Contract(poolAddress, v3PoolAbi, provider);
-          const [token0, token1, liquidity] = await Promise.all([
-            pool.token0(),
-            pool.token1(),
-            pool.liquidity(),
-          ]);
-          const endpoints = new Set([getAddress(token0), getAddress(token1)]);
-          if (!endpoints.has(usdG) || !endpoints.has(token)) {
-            throw new Error(`${symbol}/${fee} pool endpoints do not match the configured route`);
-          }
-          return {
-            fee,
-            address: poolAddress,
-            liquidity: liquidity.toString(),
-            executable: liquidity > 0n,
-          };
-        }),
-      );
-      const deployedPools = pools.filter((pool) => pool !== null);
-      const executablePools = deployedPools.filter((pool) => pool.executable);
-      return {
-        pair: `${symbol}/USDG`,
-        executable: executablePools.length > 0,
-        pools: deployedPools,
-      };
-    }),
-);
-
-const v2Factory = new Contract(
-  getAddress(infrastructure.contracts.v2Factory),
-  v2FactoryAbi,
-  provider,
-);
-const v2RouteResults = await Promise.all(
-  tokenEntries
-    .filter(([symbol]) => symbol !== "USDG")
-    .map(async ([symbol, rawAddress]) => {
-      const token = getAddress(rawAddress);
-      const pairAddress = getAddress(await v2Factory.getPair(usdG, token));
-      if (pairAddress === ZeroAddress) {
-        return { pair: `${symbol}/USDG`, executable: false, pool: null };
-      }
-      const code = await provider.getCode(pairAddress);
-      if (code === "0x") throw new Error(`${symbol}/USDG V2 pair has no bytecode`);
-      const pair = new Contract(pairAddress, v2PairAbi, provider);
-      const [token0, token1, reserves] = await Promise.all([
-        pair.token0(),
-        pair.token1(),
-        pair.getReserves(),
-      ]);
-      const endpoints = new Set([getAddress(token0), getAddress(token1)]);
-      if (!endpoints.has(usdG) || !endpoints.has(token)) {
-        throw new Error(`${symbol}/USDG V2 pair endpoints do not match the configured route`);
-      }
-      const reserve0 = BigInt(reserves[0]);
-      const reserve1 = BigInt(reserves[1]);
-      return {
-        pair: `${symbol}/USDG`,
-        executable: reserve0 > 0n && reserve1 > 0n,
-        pool: {
-          address: pairAddress,
-          reserve0: reserve0.toString(),
-          reserve1: reserve1.toString(),
-        },
-      };
-    }),
-);
-
 const latestBlock = await provider.getBlockNumber();
+const usdG = getAddress(infrastructure.tokens.USDG);
 const stateView = new Contract(
   getAddress(infrastructure.contracts.stateView),
   stateViewAbi,
   provider,
 );
-const initializeTopic = v4PoolManagerInterface.getEvent("Initialize")!.topicHash;
-const v4RouteResults = await Promise.all(
-  tokenEntries
-    .filter(([symbol]) => symbol !== "USDG")
-    .map(async ([symbol, rawAddress]) => {
-      const token = getAddress(rawAddress);
-      const [currency0, currency1] =
-        BigInt(usdG) < BigInt(token) ? [usdG, token] : [token, usdG];
-      const logs = await provider.getLogs({
-        address: getAddress(infrastructure.contracts.poolManager),
-        topics: [
-          initializeTopic,
-          null,
-          zeroPadValue(currency0, 32),
-          zeroPadValue(currency1, 32),
-        ],
-        fromBlock: 0,
-        toBlock: latestBlock,
-      });
-      const pools = await Promise.all(
-        logs.map(async (log) => {
-          const parsed = v4PoolManagerInterface.parseLog(log);
-          if (!parsed) throw new Error(`Unable to parse ${symbol}/USDG V4 initialization`);
-          const poolId = String(parsed.args.id);
-          const liquidity = BigInt(await stateView.getLiquidity(poolId));
-          const fee = Number(parsed.args.fee);
-          const tickSpacing = Number(parsed.args.tickSpacing);
-          const hooks = getAddress(parsed.args.hooks);
-          const adapterCompatible = hooks === ZeroAddress
-            && ((fee === 500 && tickSpacing === 10)
-              || (fee === 3_000 && tickSpacing === 60)
-              || (fee === 10_000 && tickSpacing === 200));
-          return {
-            id: poolId,
-            fee,
-            tickSpacing,
-            hooks,
-            liquidity: liquidity.toString(),
-            adapterCompatible,
-            executable: liquidity > 0n && adapterCompatible,
-            initializedAtBlock: log.blockNumber,
-          };
-        }),
-      );
-      return {
-        pair: `${symbol}/USDG`,
-        executable: pools.some((pool) => pool.executable),
-        pools,
-      };
-    }),
+const quoter = new Contract(
+  getAddress(infrastructure.contracts.quoter),
+  quoterAbi,
+  provider,
 );
+async function scanAsset(symbol: string) {
+    const token = getAddress(
+      infrastructure.tokens[symbol as keyof typeof infrastructure.tokens],
+    );
+    const [currency0, currency1] =
+      BigInt(usdG) < BigInt(token) ? [usdG, token] : [token, usdG];
+    const zeroForOne = usdG === currency0;
+    const pools = await Promise.all(
+      supportedPools.map(async ({ fee, tickSpacing }) => {
+        const hooks = ZeroAddress;
+        const id = keccak256(abiCoder.encode(
+          ["tuple(address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks)"],
+          [[currency0, currency1, fee, tickSpacing, hooks]],
+        ));
+        const liquidity = BigInt(await stateView.getLiquidity(id));
 
-for (const [index, token] of tokenEntries.filter(([symbol]) => symbol !== "USDG").entries()) {
-  const symbol = token[0];
-  if (!v4RouteResults[index].executable) {
-    throw new Error(`${symbol}/USDG has no active V4 pool compatible with the bounded adapter`);
+        let quoteAmountOut: bigint | null = null;
+        let quoteGasEstimate: bigint | null = null;
+        if (liquidity > 0n) {
+          try {
+            const quote = await quoter.quoteExactInputSingle.staticCall([
+              [currency0, currency1, fee, tickSpacing, hooks],
+              zeroForOne,
+              quoteAmountIn,
+              "0x",
+            ]);
+            quoteAmountOut = BigInt(quote[0]);
+            quoteGasEstimate = BigInt(quote[1]);
+          } catch {
+            // A pool can be initialized yet still fail a real quote; it is not execution-ready.
+          }
+        }
+
+        return {
+          id,
+          fee,
+          tickSpacing,
+          hooks,
+          liquidity: liquidity.toString(),
+          quoteAmountOut: quoteAmountOut?.toString() ?? null,
+          quoteGasEstimate: quoteGasEstimate?.toString() ?? null,
+          adapterCompatible: true,
+          executable: quoteAmountOut !== null && quoteAmountOut > 0n,
+        };
+      }),
+    );
+    const executablePools = pools.filter((pool) => pool.executable);
+    const bestPool = executablePools.sort((left, right) => {
+      const leftQuote = BigInt(left.quoteAmountOut ?? 0);
+      const rightQuote = BigInt(right.quoteAmountOut ?? 0);
+      return leftQuote === rightQuote ? 0 : leftQuote > rightQuote ? -1 : 1;
+    })[0] ?? null;
+
+    return {
+      symbol,
+      type: infrastructure.assetTypes.etfs.includes(symbol) ? "ETF" : "STOCK",
+      token,
+      executable: bestPool !== null,
+      bestRoute: bestPool && {
+        fee: bestPool.fee,
+        tickSpacing: bestPool.tickSpacing,
+        hooks: bestPool.hooks,
+        quoteAmountIn: quoteAmountIn.toString(),
+        quoteAmountOut: bestPool.quoteAmountOut,
+      },
+      pools,
+    };
+}
+
+const routeResults: Awaited<ReturnType<typeof scanAsset>>[] = [];
+const scanConcurrency = 5;
+for (let offset = 0; offset < canonicalAssets.length; offset += scanConcurrency) {
+  const batch = canonicalAssets.slice(offset, offset + scanConcurrency);
+  routeResults.push(...await Promise.all(batch.map(scanAsset)));
+}
+
+for (const symbol of infrastructure.launchAssets) {
+  const route = routeResults.find((candidate) => candidate.symbol === symbol);
+  if (!route?.executable) {
+    throw new Error(`${symbol}/USDG has no quoted V4 route compatible with the adapter`);
   }
 }
 
+const executableAssets = routeResults.filter((route) => route.executable);
 console.log(JSON.stringify({
   verified: true,
   chainId: Number(network.chainId),
   latestBlock,
   bytecodeChecks: codeResults.length,
+  canonicalAssetCount: canonicalAssets.length,
+  executableAssetCount: executableAssets.length,
+  launchAssetCount: infrastructure.launchAssets.length,
   contracts: codeResults.filter(({ name }) => name in infrastructure.contracts),
   tokens: tokenResults,
-  directV2Routes: v2RouteResults,
-  directV3Routes: v3RouteResults,
-  directV4Routes: v4RouteResults,
+  routes: routeResults.map(({ pools, ...route }) => ({
+    ...route,
+    initializedPoolCount: pools.length,
+    compatiblePoolCount: pools.filter((pool) => pool.adapterCompatible).length,
+    quotedPoolCount: pools.filter((pool) => pool.executable).length,
+  })),
 }, null, 2));

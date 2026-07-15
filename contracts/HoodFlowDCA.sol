@@ -12,6 +12,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {IPriceFeed} from "./interfaces/IPriceFeed.sol";
 import {ISwapAdapter} from "./interfaces/ISwapAdapter.sol";
+import {IStockToken} from "./interfaces/IStockToken.sol";
 
 /// @title HoodFlow DCA Engine
 /// @notice Non-custodial, allowance-based recurring swaps with bounded execution.
@@ -27,6 +28,8 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
     uint48 public constant MAX_START_DELAY = 30 days;
     uint48 public constant MAX_STRATEGY_DURATION = 366 days;
     uint48 public constant SWAP_DEADLINE_WINDOW = 5 minutes;
+    uint48 public constant MIN_SEQUENCER_GRACE_PERIOD = 5 minutes;
+    uint48 public constant MAX_SEQUENCER_GRACE_PERIOD = 1 days;
 
     enum StrategyStatus {
         Active,
@@ -55,6 +58,7 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
         uint8 tokenDecimals;
         uint8 feedDecimals;
         bool allowed;
+        bool checkOraclePause;
     }
 
     error ZeroAddress();
@@ -66,6 +70,9 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
     error StrategyNotExecutable(uint256 strategyId);
     error OracleInvalid(address token);
     error OracleStale(address token, uint256 updatedAt);
+    error TokenOraclePaused(address token);
+    error SequencerDown();
+    error SequencerGracePeriod(uint256 startedAt);
     error TransferAmountMismatch(uint256 expected, uint256 received);
     error SlippageExceeded(uint256 minimum, uint256 received);
 
@@ -92,7 +99,14 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
     );
     event StrategyStatusChanged(uint256 indexed strategyId, StrategyStatus status);
     event KeeperUpdated(address indexed keeper, bool allowed);
-    event TokenConfigUpdated(address indexed token, address indexed feed, uint48 heartbeat, bool allowed);
+    event TokenConfigUpdated(
+        address indexed token,
+        address indexed feed,
+        uint48 heartbeat,
+        bool allowed,
+        bool checkOraclePause
+    );
+    event SequencerConfigUpdated(address indexed feed, uint48 gracePeriod);
     event SwapAdapterUpdated(address indexed previousAdapter, address indexed newAdapter);
     event GuardianUpdated(address indexed previousGuardian, address indexed newGuardian);
     event ProtocolFeeUpdated(address indexed recipient, uint16 feeBps);
@@ -105,6 +119,8 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
     uint256 public keeperCount;
     uint256 public allowedTokenCount;
     ISwapAdapter public swapAdapter;
+    IPriceFeed public sequencerUptimeFeed;
+    uint48 public sequencerGracePeriod;
     address public guardian;
     address public feeRecipient;
     uint16 public protocolFeeBps;
@@ -162,7 +178,13 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
         emit KeeperUpdated(keeper, allowed);
     }
 
-    function setTokenConfig(address token, address feed, uint48 heartbeat, bool allowed)
+    function setTokenConfig(
+        address token,
+        address feed,
+        uint48 heartbeat,
+        bool allowed,
+        bool checkOraclePause
+    )
         external
         onlyOwner
         whenPaused
@@ -173,6 +195,10 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
         uint8 tokenDecimals = IERC20Metadata(token).decimals();
         uint8 feedDecimals = IPriceFeed(feed).decimals();
         if (tokenDecimals > 18 || feedDecimals > 18) revert InvalidConfiguration();
+        if (checkOraclePause) {
+            try IStockToken(token).oraclePaused() returns (bool) { }
+            catch { revert InvalidConfiguration(); }
+        }
 
         if (tokenConfigs[token].allowed != allowed) {
             allowedTokenCount = allowed ? allowedTokenCount + 1 : allowedTokenCount - 1;
@@ -182,9 +208,24 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
             heartbeat: heartbeat,
             tokenDecimals: tokenDecimals,
             feedDecimals: feedDecimals,
-            allowed: allowed
+            allowed: allowed,
+            checkOraclePause: checkOraclePause
         });
-        emit TokenConfigUpdated(token, feed, heartbeat, allowed);
+        emit TokenConfigUpdated(token, feed, heartbeat, allowed, checkOraclePause);
+    }
+
+    function setSequencerConfig(address feed, uint48 gracePeriod) external onlyOwner whenPaused {
+        if (feed == address(0)) revert ZeroAddress();
+        if (feed.code.length == 0) revert InvalidConfiguration();
+        if (
+            gracePeriod < MIN_SEQUENCER_GRACE_PERIOD
+                || gracePeriod > MAX_SEQUENCER_GRACE_PERIOD
+        ) revert InvalidConfiguration();
+        IPriceFeed candidate = IPriceFeed(feed);
+        candidate.latestRoundData();
+        sequencerUptimeFeed = candidate;
+        sequencerGracePeriod = gracePeriod;
+        emit SequencerConfigUpdated(feed, gracePeriod);
     }
 
     function setSwapAdapter(address newAdapter) external onlyOwner whenPaused {
@@ -215,7 +256,10 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     function unpauseEverything() external onlyOwner {
-        if (address(swapAdapter) == address(0) || keeperCount == 0 || allowedTokenCount < 2) {
+        if (
+            address(swapAdapter) == address(0) || address(sequencerUptimeFeed) == address(0)
+                || keeperCount == 0 || allowedTokenCount < 2
+        ) {
             revert InvalidConfiguration();
         }
         _unpause();
@@ -375,6 +419,7 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
         returns (uint256)
     {
         if (slippageBps > MAX_SLIPPAGE_BPS) revert InvalidConfiguration();
+        _checkSequencer();
         TokenConfig memory inConfig = tokenConfigs[tokenIn];
         TokenConfig memory outConfig = tokenConfigs[tokenOut];
         if (!inConfig.allowed) revert TokenNotAllowed(tokenIn);
@@ -425,6 +470,9 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     function _readPrice(address token, TokenConfig memory config) internal view returns (uint256) {
+        if (config.checkOraclePause && IStockToken(token).oraclePaused()) {
+            revert TokenOraclePaused(token);
+        }
         (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) =
             config.priceFeed.latestRoundData();
         if (answer <= 0 || updatedAt == 0 || updatedAt > block.timestamp || answeredInRound < roundId) {
@@ -432,5 +480,16 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
         }
         if (block.timestamp - updatedAt > config.heartbeat) revert OracleStale(token, updatedAt);
         return uint256(answer);
+    }
+
+    function _checkSequencer() internal view {
+        (, int256 answer, uint256 startedAt,,) = sequencerUptimeFeed.latestRoundData();
+        if (answer != 0) revert SequencerDown();
+        if (startedAt == 0 || startedAt > block.timestamp) {
+            revert OracleInvalid(address(sequencerUptimeFeed));
+        }
+        if (block.timestamp - startedAt <= sequencerGracePeriod) {
+            revert SequencerGracePeriod(startedAt);
+        }
     }
 }
