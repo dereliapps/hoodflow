@@ -13,6 +13,7 @@ import {
 } from "ethers";
 import {
   ERC20_ABI,
+  HOODFLOW_DCA_ADDRESS,
   HOODFLOW_ENGINE_ABI,
   PERMIT2_ABI,
   PERMIT2_ADDRESS,
@@ -85,7 +86,7 @@ declare global {
   }
 }
 
-const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_HOODFLOW_CONTRACT_ADDRESS?.trim() ?? "";
+const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_HOODFLOW_CONTRACT_ADDRESS?.trim() || HOODFLOW_DCA_ADDRESS;
 const contractConfigured = /^0x[a-fA-F0-9]{40}$/.test(CONTRACT_ADDRESS);
 const ORDER_STORAGE_KEY = "hoodflow-mainnet-orders-v3";
 const MAX_UINT128 = (1n << 128n) - 1n;
@@ -1169,7 +1170,7 @@ export default function Home() {
           <div className="inner-heading"><div><p className="eyebrow">PERMISSION CENTER</p><h1>You hold the keys.</h1><p>Review direct-buy receipts and recurring-engine status in one place.</p></div></div>
           <div className="control-grid">
             <article className="control-card control-score"><span>PRODUCT READINESS</span><strong>15<span>/15 buy routes</span></strong><p>Direct USDG buys are fork-verified across Uniswap V3 and V4. The recurring engine remains a separate gated release.</p><div className="score-line"><i /></div></article>
-            <article className="control-card"><span>ROUTE INFRA</span><strong>15 full-fill</strong><p>15 routes live · 36 bytecode checks · protected fork swaps</p><b className="control-ok">VERIFIED</b></article>
+            <article className="control-card"><span>ROUTE INFRA</span><strong>15 full-fill</strong><p>15 routes live · 39 bytecode checks · protected fork swaps</p><b className="control-ok">VERIFIED</b></article>
             <article className="control-card"><span>RECURRING ENGINE</span><strong>{contractStatus}</strong><p>{contractConfigured ? compactAddress(CONTRACT_ADDRESS) : "Direct buys work without a HoodFlow engine."}</p><b className={`control-ok ${contractReady ? "" : "warning"}`}>{contractReady ? "ONCHAIN" : "GATED"}</b></article>
           </div>
           <div className="readiness-board">
@@ -1177,7 +1178,7 @@ export default function Home() {
             {[
               ["01", "Protocol core", "27/27 engine, oracle and adapter safety tests passing", "complete"],
               ["02", "Bounded V4 adapter", "Hookless direct pools, fixed actions, temporary approvals", "complete"],
-              ["03", "Canonical asset registry", "20 stocks + 5 ETFs and 36 bytecode targets verified", "complete"],
+              ["03", "Canonical asset registry", "20 stocks + 5 ETFs and 39 bytecode targets verified", "complete"],
               ["04", "Dynamic route engine", "Best quote across 3 reviewed V4 pool configurations", "complete"],
               ["05", "Oracle defense", "Staleness, invalid-round and stock-token pause guards", "complete"],
               ["06", "Keeper + product", "Preflight simulation, spending limits and kill switch UX", "complete"],

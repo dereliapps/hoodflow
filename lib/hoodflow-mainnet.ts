@@ -24,6 +24,7 @@ export const UNIVERSAL_ROUTER_ADDRESS = getAddress(infrastructure.contracts.univ
 export const PERMIT2_ADDRESS = getAddress(infrastructure.contracts.permit2);
 export const V4_QUOTER_ADDRESS = getAddress(infrastructure.contracts.quoter);
 export const V3_QUOTER_ADDRESS = getAddress(infrastructure.contracts.v3Quoter);
+export const HOODFLOW_DCA_ADDRESS = getAddress(infrastructure.contracts.hoodFlowDca);
 export const USDG_ADDRESS = ROBINHOOD_TOKENS.USDG;
 export const USDG_DECIMALS = 6;
 export const STOCK_TOKEN_DECIMALS = 18;
