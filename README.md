@@ -33,10 +33,16 @@ npm run infra:verify:fork
 npm run infra:verify:canary
 npm run keeper:dry-run
 npm run launch:preflight
+npm run mainnet:preflight
+npm run mainnet:verify:deployment
 ```
 
 `infra:verify:mainnet` performs read-only RPC checks. `infra:verify:fork` executes the reviewed routes, while `infra:verify:canary` runs the complete engine twice with a 2 USDG lifetime cap. Both use a deterministic local Robinhood mainnet fork and never broadcast to the real chain. Route availability is dynamic and must be rechecked before deployment.
 
 ## Mainnet launch gates
 
-The remaining release gates are a capped, monitored canary with production-grade RPC/oracle inputs and an independent smart-contract audit followed by timelocked multisig ownership. Do not place a funded private key in this repository.
+`mainnet:preflight` is a fail-closed, read-only release check. It requires two independent production RPCs, separated roles, official Uniswap addresses, canonical token/oracle policies, a pinned source commit, independent audit evidence, a confirmed funded testnet canary and a completed monitoring/pause drill. It rejects a funded mainnet key and never broadcasts.
+
+After a separately reviewed paused deployment, `mainnet:verify:deployment` checks ownership acceptance, exact configuration, adapter wiring, pause state, zero custody and zero ERC-20/Permit2 allowances. The full ceremony and incident procedure are in [MAINNET_RUNBOOK.md](MAINNET_RUNBOOK.md).
+
+The remaining external gates are a capped, monitored public-network canary with production-grade RPC/oracle inputs and an independent smart-contract audit followed by timelocked multisig ownership. Do not place a funded private key in this repository.

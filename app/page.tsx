@@ -392,7 +392,7 @@ export default function Home() {
       </div>}
       <header className="topbar">
         <button className="brand" onClick={() => setView("overview")} aria-label="HoodFlow home">
-          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V8</b>
+          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V9</b>
         </button>
         <nav className="main-nav" aria-label="Main navigation">
           {navigation.map((item) => <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>{item}</button>)}
@@ -412,7 +412,7 @@ export default function Home() {
           <div className="market-state"><span><i /> TESTNET RPC ONLINE</span><span>Block #{networkBlock}</span><span>25/25 safety tests · 13 full-fill routes</span></div>
           <div className="page-heading">
             <div><p className="eyebrow">AUTOMATION WITHOUT CUSTODY</p><h1>Set it. Cap it.<br /><span>Let it run.</span></h1><p className="lede">Build self-running stock-token strategies with hard spending limits, live health checks and a kill switch you control.</p></div>
-            <div className="hero-command"><button className="primary-action" onClick={() => openComposer()}><span>+</span> Build an automation</button><div className="hero-proof"><span>V8 SAFE WORKSPACE</span><strong>25 official assets indexed</strong><small>13 full-fill ready · 2/2 canary runs · 0 broadcast</small></div></div>
+            <div className="hero-command"><button className="primary-action" onClick={() => openComposer()}><span>+</span> Build an automation</button><div className="hero-proof"><span>V9 RELEASE GATE</span><strong>25 official assets indexed</strong><small>13 full-fill ready · 2/2 fork canary · 0 broadcast</small></div></div>
           </div>
 
           <div className="feature-dock">
@@ -522,12 +522,12 @@ export default function Home() {
         <section className="page inner-page controls-page">
           <div className="inner-heading"><div><p className="eyebrow">PERMISSION CENTER</p><h1>You hold the keys.</h1><p>Review every allowance, expiry and safety condition before it can execute.</p></div><button className="danger-action" onClick={() => setConfirmStop(true)}>Pause everything</button></div>
           <div className="control-grid">
-            <article className="control-card control-score"><span>PROTOCOL READINESS</span><strong>7<span>/9 gates</span></strong><p>Core, routes, oracle defense and the full-engine fork canary are complete.</p><div className="score-line"><i /></div></article>
-            <article className="control-card"><span>MAINNET INFRA</span><strong>13 full-fill</strong><p>13 quote-ready now · 34 bytecode checks · local fork swaps</p><b className="control-ok">VERIFIED</b></article>
+            <article className="control-card control-score"><span>LAUNCH READINESS</span><strong>7<span>/11 gates</span></strong><p>The engine is ready. Four external production gates still keep mainnet locked.</p><div className="score-line"><i /></div></article>
+            <article className="control-card"><span>ROUTE INFRA</span><strong>13 full-fill</strong><p>13 quote-ready now · 34 bytecode checks · local fork swaps</p><b className="control-ok">VERIFIED</b></article>
             <article className="control-card"><span>CONTRACT</span><strong>{contractStatus}</strong><p>{contractConfigured ? compactAddress(CONTRACT_ADDRESS) : "No live contract is being claimed."}</p><b className={`control-ok ${contractConfigured && contractStatus !== "Bytecode verified" ? "warning" : ""}`}>{contractStatus === "Bytecode verified" ? "ONCHAIN" : "GATED"}</b></article>
           </div>
           <div className="readiness-board">
-            <div className="readiness-head"><div><p className="eyebrow">MAINNET GATES</p><h2>Ship only when every gate is green.</h2></div><span>7 of 9 complete</span></div>
+            <div className="readiness-head"><div><p className="eyebrow">MAINNET RELEASE GATE</p><h2>Ship only when every gate is green.</h2></div><span>7 of 11 complete</span></div>
             {[
               ["01", "Protocol core", "25/25 engine, oracle and adapter safety tests passing", "complete"],
               ["02", "Bounded V4 adapter", "Hookless direct pools, fixed actions, temporary approvals", "complete"],
@@ -536,8 +536,10 @@ export default function Home() {
               ["05", "Oracle defense", "Sequencer grace period, staleness and token pause guards", "complete"],
               ["06", "Keeper + product", "Preflight simulation, spending limits and kill switch UX", "complete"],
               ["07", "Full-engine fork canary", "2/2 capped executions, replay blocked, zero custody and allowances", "complete"],
-              ["08", "Funded network canary", "Run the same 1 USDG tranche with a 2 USDG lifetime cap", "pending"],
-              ["09", "Independent audit", "Resolve findings and move ownership to timelocked multisig", "locked"],
+              ["08", "Production RPC + oracle map", "Two independent RPCs and current Chainlink feeds/heartbeats", "pending"],
+              ["09", "Multisig + pause drill", "Timelocked owner, separate guardian and monitored response rehearsal", "pending"],
+              ["10", "Funded network canary", "Run a 1 USDG tranche with a 2 USDG lifetime cap on public testnet", "pending"],
+              ["11", "Independent audit", "Resolve findings and pin the final report hash to this release", "locked"],
             ].map((gate) => <div className="readiness-row" key={gate[0]}><span>{gate[0]}</span><p><strong>{gate[1]}</strong><small>{gate[2]}</small></p><b className={`gate-${gate[3]}`}>{gate[3]}</b></div>)}
           </div>
           <div className="permissions-card">
