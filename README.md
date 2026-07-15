@@ -7,7 +7,8 @@ HoodFlow is a non-custodial automation engine and strategy marketplace concept f
 - Product UI, browser-wallet connection, shadow strategies and permission controls are implemented.
 - `HoodFlowDCA` and the bounded Uniswap adapters have 25 passing safety tests.
 - All 20 canonical stock tokens and 5 ETFs, plus 8 protocol contracts, are checked read-only (34 bytecode targets including USDG).
-- At the latest verification snapshot, 13 assets returned executable V4 quotes. Every one completed a local mainnet-fork swap through the official Universal Router and Permit2.
+- At the latest verification snapshot, 14 assets returned a V4 quote; 13 completed a full-input mainnet-fork swap through the official Universal Router and Permit2. MSFT remains watch-only because its quoted pool partially filled and the adapter correctly rejected the residual input.
+- A full-engine AAPL/USDG fork canary completed two capped executions, blocked an early replay, finished its exact lifetime budget, and left zero protocol custody or residual allowances.
 - No mainnet transaction has been broadcast. Mainnet remains locked pending a monitored canary and independent audit.
 
 ## Safety model
@@ -29,10 +30,12 @@ npm test
 npm run contracts:compile
 npm run infra:verify:mainnet
 npm run infra:verify:fork
+npm run infra:verify:canary
 npm run keeper:dry-run
+npm run launch:preflight
 ```
 
-`infra:verify:mainnet` performs read-only RPC checks. `infra:verify:fork` creates a local Robinhood mainnet fork and executes the currently reviewed quoted routes without broadcasting to the real chain. Route availability is dynamic and must be rechecked before deployment.
+`infra:verify:mainnet` performs read-only RPC checks. `infra:verify:fork` executes the reviewed routes, while `infra:verify:canary` runs the complete engine twice with a 2 USDG lifetime cap. Both use a deterministic local Robinhood mainnet fork and never broadcast to the real chain. Route availability is dynamic and must be rechecked before deployment.
 
 ## Mainnet launch gates
 

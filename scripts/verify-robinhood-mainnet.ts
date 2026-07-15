@@ -46,6 +46,7 @@ const canonicalAssets = [
   ...infrastructure.assetTypes.stocks,
   ...infrastructure.assetTypes.etfs,
 ];
+const forkVerifiedAssets = new Set(infrastructure.forkVerifiedAssets);
 const codeResults = await Promise.all(
   [...contractEntries, ...tokenEntries].map(async ([name, rawAddress]) => {
     const address = getAddress(rawAddress);
@@ -169,18 +170,23 @@ for (const symbol of infrastructure.launchAssets) {
 }
 
 const executableAssets = routeResults.filter((route) => route.executable);
+const fullFillVerifiedAssets = executableAssets.filter((route) =>
+  forkVerifiedAssets.has(route.symbol)
+);
 console.log(JSON.stringify({
   verified: true,
   chainId: Number(network.chainId),
   latestBlock,
   bytecodeChecks: codeResults.length,
   canonicalAssetCount: canonicalAssets.length,
-  executableAssetCount: executableAssets.length,
+  quoteReadyAssetCount: executableAssets.length,
+  fullFillVerifiedAssetCount: fullFillVerifiedAssets.length,
   launchAssetCount: infrastructure.launchAssets.length,
   contracts: codeResults.filter(({ name }) => name in infrastructure.contracts),
   tokens: tokenResults,
   routes: routeResults.map(({ pools, ...route }) => ({
     ...route,
+    fullFillVerified: route.executable && forkVerifiedAssets.has(route.symbol),
     initializedPoolCount: pools.length,
     compatiblePoolCount: pools.filter((pool) => pool.adapterCompatible).length,
     quotedPoolCount: pools.filter((pool) => pool.executable).length,

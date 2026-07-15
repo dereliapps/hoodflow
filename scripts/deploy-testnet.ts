@@ -15,9 +15,10 @@ type TokenConfig = {
 };
 
 const REQUIRED_CHAIN_ID = 46_630n;
-const initialOwner = addressEnv("HOODFLOW_INITIAL_OWNER");
+const finalOwner = addressEnv("HOODFLOW_INITIAL_OWNER");
 const guardian = addressEnv("HOODFLOW_GUARDIAN");
-const swapAdapter = addressEnv("HOODFLOW_SWAP_ADAPTER");
+const universalRouter = addressEnv("HOODFLOW_UNIVERSAL_ROUTER");
+const permit2 = addressEnv("HOODFLOW_PERMIT2");
 const feeRecipient = addressEnv("HOODFLOW_FEE_RECIPIENT");
 const feeBps = integerEnv("HOODFLOW_INITIAL_FEE_BPS", 0, 100);
 const keepers = csvAddresses("HOODFLOW_KEEPERS");
@@ -40,8 +41,11 @@ const currentNetwork = await ethers.provider.getNetwork();
 if (currentNetwork.chainId !== REQUIRED_CHAIN_ID) {
   throw new Error(`Refusing deployment on chain ${currentNetwork.chainId}; expected ${REQUIRED_CHAIN_ID}`);
 }
-if ((await ethers.provider.getCode(swapAdapter)) === "0x") {
-  throw new Error("HOODFLOW_SWAP_ADAPTER has no deployed bytecode");
+if ((await ethers.provider.getCode(universalRouter)) === "0x") {
+  throw new Error("HOODFLOW_UNIVERSAL_ROUTER has no deployed bytecode");
+}
+if ((await ethers.provider.getCode(permit2)) === "0x") {
+  throw new Error("HOODFLOW_PERMIT2 has no deployed bytecode");
 }
 if ((await ethers.provider.getCode(sequencerFeed)) === "0x") {
   throw new Error("HOODFLOW_SEQUENCER_UPTIME_FEED has no deployed bytecode");
@@ -49,12 +53,15 @@ if ((await ethers.provider.getCode(sequencerFeed)) === "0x") {
 if (shouldUnpause && (keepers.length === 0 || tokenConfigs.length < 2)) {
   throw new Error("Refusing to unpause without a keeper and at least two configured tokens");
 }
+if (shouldUnpause && deployer.address.toLowerCase() !== finalOwner.toLowerCase()) {
+  throw new Error("Refusing to unpause before the final owner controls the deployment");
+}
 
 console.log(`Deploying from ${deployer.address} on Robinhood Chain Testnet...`);
 const hoodFlow = await ethers.deployContract("HoodFlowDCA", [
-  initialOwner,
+  deployer.address,
   guardian,
-  swapAdapter,
+  ethers.ZeroAddress,
   feeRecipient,
   feeBps,
 ]);
@@ -62,10 +69,15 @@ await hoodFlow.waitForDeployment();
 const contractAddress = await hoodFlow.getAddress();
 console.log(`HoodFlowDCA deployed at ${contractAddress}`);
 
-if (deployer.address.toLowerCase() !== initialOwner.toLowerCase()) {
-  console.log("Deployment remains paused: initial owner must complete configuration.");
-  process.exit(0);
-}
+const adapter = await ethers.deployContract("UniswapV4DirectAdapter", [
+  contractAddress,
+  universalRouter,
+  permit2,
+]);
+await adapter.waitForDeployment();
+const adapterAddress = await adapter.getAddress();
+await (await hoodFlow.setSwapAdapter(adapterAddress)).wait();
+console.log(`Bounded V4 adapter deployed at ${adapterAddress}`);
 
 await (
   await hoodFlow.setSequencerConfig(sequencerFeed, sequencerGracePeriod)
@@ -94,6 +106,11 @@ if (shouldUnpause) {
   console.log("Execution enabled after configuration.");
 } else {
   console.log("Deployment remains paused. Set HOODFLOW_UNPAUSE_AFTER_DEPLOY=true only after review.");
+}
+
+if (deployer.address.toLowerCase() !== finalOwner.toLowerCase()) {
+  await (await hoodFlow.transferOwnership(finalOwner)).wait();
+  console.log(`Ownership transfer pending acceptance by ${finalOwner}`);
 }
 
 function addressEnv(name: string) {

@@ -21,7 +21,8 @@
 
 - 25 local engine, oracle and adapter scenarios pass.
 - All 25 canonical Robinhood stock/ETF tokens, USDG and 8 protocol contracts are checked by `npm run infra:verify:mainnet`.
-- The 13 routes available at the latest snapshot execute through the official V4 Universal Router on a local fork via `npm run infra:verify:fork`.
+- The 13 full-input routes verified at the latest snapshot execute through the official V4 Universal Router on a local fork via `npm run infra:verify:fork`.
+- A two-execution, 2 USDG full-engine canary verifies budget completion, replay protection, zero custody, and cleared allowances via `npm run infra:verify:canary`.
 - The fork verification performs no real-chain broadcast.
 
 ## Mainnet blockers
