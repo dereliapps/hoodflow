@@ -4,7 +4,7 @@ HoodFlow is a non-custodial automation engine and strategy marketplace concept f
 
 ## Current status
 
-- Product UI connects browser wallets to Robinhood Chain mainnet, reads ETH/USDG balances, and enables user-signed direct USDG buys for 15 full-fill verified assets.
+- Product UI connects injected browser wallets or WalletConnect QR/mobile sessions to Robinhood Chain mainnet, reads ETH/USDG balances, and enables user-signed direct USDG buys for 15 full-fill verified assets. WalletConnect is enabled at runtime with `WALLETCONNECT_PROJECT_ID`.
 - The asset matrix reads multiplier-adjusted token prices from 24 current Chainlink feeds on Robinhood Chain, refreshes every 30 seconds, and visibly guards stale or paused values. BE remains explicit as unavailable because the current Chainlink Robinhood registry does not list a BE feed.
 - `HoodFlowDCA` and the bounded Uniswap adapters have 25 passing safety tests.
 - All 20 canonical stock tokens and 5 ETFs, plus 10 protocol contracts, are checked read-only (36 bytecode targets including USDG).
