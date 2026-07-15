@@ -16,7 +16,7 @@ import {IStockToken} from "./interfaces/IStockToken.sol";
 
 /// @title HoodFlow DCA Engine
 /// @notice Non-custodial, allowance-based recurring swaps with bounded execution.
-/// @dev Testnet candidate. A professional audit and timelocked multisig are required before mainnet.
+/// @dev Deployment candidate. Keep the engine paused until its network configuration is verified.
 contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -110,6 +110,7 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
     event SwapAdapterUpdated(address indexed previousAdapter, address indexed newAdapter);
     event GuardianUpdated(address indexed previousGuardian, address indexed newGuardian);
     event ProtocolFeeUpdated(address indexed recipient, uint16 feeBps);
+    event ExecutionCapsUpdated(uint128 maxTrancheAmount, uint128 maxStrategyBudget);
 
     mapping(uint256 strategyId => Strategy) public strategies;
     mapping(address keeper => bool) public keepers;
@@ -118,12 +119,15 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
     uint256 public strategyCount;
     uint256 public keeperCount;
     uint256 public allowedTokenCount;
+    address public immutable settlementToken;
     ISwapAdapter public swapAdapter;
     IPriceFeed public sequencerUptimeFeed;
     uint48 public sequencerGracePeriod;
     address public guardian;
     address public feeRecipient;
     uint16 public protocolFeeBps;
+    uint128 public maxTrancheAmount;
+    uint128 public maxStrategyBudget;
 
     modifier onlyStrategyOwner(uint256 strategyId) {
         if (strategies[strategyId].owner != msg.sender) {
@@ -149,13 +153,20 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
         address initialGuardian,
         address initialSwapAdapter,
         address initialFeeRecipient,
-        uint16 initialFeeBps
+        uint16 initialFeeBps,
+        address initialSettlementToken,
+        uint128 initialMaxTrancheAmount,
+        uint128 initialMaxStrategyBudget
     ) Ownable(initialOwner) {
         if (
             initialOwner == address(0) || initialGuardian == address(0)
-                || initialFeeRecipient == address(0)
+                || initialFeeRecipient == address(0) || initialSettlementToken == address(0)
         ) revert ZeroAddress();
-        if (initialFeeBps > MAX_PROTOCOL_FEE_BPS) revert InvalidConfiguration();
+        if (
+            initialFeeBps > MAX_PROTOCOL_FEE_BPS || initialSettlementToken.code.length == 0
+                || initialMaxTrancheAmount == 0
+                || initialMaxStrategyBudget < initialMaxTrancheAmount
+        ) revert InvalidConfiguration();
         if (initialSwapAdapter != address(0) && initialSwapAdapter.code.length == 0) {
             revert InvalidConfiguration();
         }
@@ -164,6 +175,9 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
         swapAdapter = ISwapAdapter(initialSwapAdapter);
         feeRecipient = initialFeeRecipient;
         protocolFeeBps = initialFeeBps;
+        settlementToken = initialSettlementToken;
+        maxTrancheAmount = initialMaxTrancheAmount;
+        maxStrategyBudget = initialMaxStrategyBudget;
 
         // Critical configuration must be completed before the owner explicitly enables execution.
         _pause();
@@ -215,7 +229,13 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     function setSequencerConfig(address feed, uint48 gracePeriod) external onlyOwner whenPaused {
-        if (feed == address(0)) revert ZeroAddress();
+        if (feed == address(0)) {
+            if (gracePeriod != 0) revert InvalidConfiguration();
+            sequencerUptimeFeed = IPriceFeed(address(0));
+            sequencerGracePeriod = 0;
+            emit SequencerConfigUpdated(address(0), 0);
+            return;
+        }
         if (feed.code.length == 0) revert InvalidConfiguration();
         if (
             gracePeriod < MIN_SEQUENCER_GRACE_PERIOD
@@ -251,14 +271,26 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
         emit ProtocolFeeUpdated(newFeeRecipient, newFeeBps);
     }
 
+    function setExecutionCaps(uint128 newMaxTrancheAmount, uint128 newMaxStrategyBudget)
+        external
+        onlyOwner
+        whenPaused
+    {
+        if (newMaxTrancheAmount == 0 || newMaxStrategyBudget < newMaxTrancheAmount) {
+            revert InvalidConfiguration();
+        }
+        maxTrancheAmount = newMaxTrancheAmount;
+        maxStrategyBudget = newMaxStrategyBudget;
+        emit ExecutionCapsUpdated(newMaxTrancheAmount, newMaxStrategyBudget);
+    }
+
     function pauseEverything() external onlyGuardianOrOwner {
         _pause();
     }
 
     function unpauseEverything() external onlyOwner {
         if (
-            address(swapAdapter) == address(0) || address(sequencerUptimeFeed) == address(0)
-                || keeperCount == 0 || allowedTokenCount < 2
+            address(swapAdapter) == address(0) || keeperCount == 0 || allowedTokenCount < 2
         ) {
             revert InvalidConfiguration();
         }
@@ -445,9 +477,13 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
         uint48 expiresAt,
         uint16 maxSlippageBps
     ) internal view {
+        if (tokenIn != settlementToken) revert TokenNotAllowed(tokenIn);
         if (!tokenConfigs[tokenIn].allowed) revert TokenNotAllowed(tokenIn);
         if (!tokenConfigs[tokenOut].allowed) revert TokenNotAllowed(tokenOut);
-        if (tokenIn == tokenOut || amountPerExecution == 0 || totalBudget < amountPerExecution) {
+        if (
+            tokenIn == tokenOut || amountPerExecution == 0 || totalBudget < amountPerExecution
+                || amountPerExecution > maxTrancheAmount || totalBudget > maxStrategyBudget
+        ) {
             revert InvalidConfiguration();
         }
         if (totalBudget % amountPerExecution != 0) revert InvalidConfiguration();
@@ -483,6 +519,7 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     function _checkSequencer() internal view {
+        if (address(sequencerUptimeFeed) == address(0)) return;
         (, int256 answer, uint256 startedAt,,) = sequencerUptimeFeed.latestRoundData();
         if (answer != 0) revert SequencerDown();
         if (startedAt == 0 || startedAt > block.timestamp) {

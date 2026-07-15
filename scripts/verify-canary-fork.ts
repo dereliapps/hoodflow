@@ -65,15 +65,17 @@ if (BigInt(await fundedUsdG.balanceOf(poolManagerAddress)) < totalBudget) {
 await (await fundedUsdG.transfer(user.address, totalBudget)).wait();
 await ethers.provider.send("hardhat_stopImpersonatingAccount", [poolManagerAddress]);
 
-const usdGFeed = await ethers.deployContract("MockPriceFeed", [8, 100_000_000n]);
+const usdGFeed = await ethers.deployContract("FixedUsdFeed");
 const stockFeed = await ethers.deployContract("MockPriceFeed", [8, impliedStockPrice8]);
-const sequencerFeed = await ethers.deployContract("MockPriceFeed", [0, 0]);
 const hoodFlow: any = await ethers.deployContract("HoodFlowDCA", [
   owner.address,
   guardian.address,
   ethers.ZeroAddress,
   feeRecipient.address,
   protocolFeeBps,
+  usdGAddress,
+  25_000_000n,
+  500_000_000n,
 ]);
 const adapter: any = await ethers.deployContract("UniswapV4DirectAdapter", [
   await hoodFlow.getAddress(),
@@ -81,10 +83,8 @@ const adapter: any = await ethers.deployContract("UniswapV4DirectAdapter", [
   permit2Address,
 ]);
 
-const oldSequencerStart = (await time.latest()) - 2 * 60 * 60;
-await sequencerFeed.setAnswer(0, oldSequencerStart);
 await hoodFlow.setSwapAdapter(await adapter.getAddress());
-await hoodFlow.setSequencerConfig(await sequencerFeed.getAddress(), 60 * 60);
+await hoodFlow.setSequencerConfig(ethers.ZeroAddress, 0);
 await hoodFlow.setKeeper(keeper.address, true);
 await hoodFlow.setTokenConfig(
   usdGAddress,
@@ -133,7 +133,6 @@ if (!replayBlocked) throw new Error("Immediate canary replay was not blocked");
 
 await time.increase(60 * 60 + 1);
 const refreshedAt = await time.latest();
-await usdGFeed.setAnswer(100_000_000n, refreshedAt);
 await stockFeed.setAnswer(impliedStockPrice8, refreshedAt);
 await (await hoodFlow.connect(keeper).executeDCA(1, routeData)).wait();
 

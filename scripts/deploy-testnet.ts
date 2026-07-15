@@ -21,6 +21,9 @@ const universalRouter = addressEnv("HOODFLOW_UNIVERSAL_ROUTER");
 const permit2 = addressEnv("HOODFLOW_PERMIT2");
 const feeRecipient = addressEnv("HOODFLOW_FEE_RECIPIENT");
 const feeBps = integerEnv("HOODFLOW_INITIAL_FEE_BPS", 0, 100);
+const settlementToken = addressEnv("HOODFLOW_SETTLEMENT_TOKEN");
+const maxTrancheAmount = bigintEnv("HOODFLOW_MAX_TRANCHE_AMOUNT");
+const maxStrategyBudget = bigintEnv("HOODFLOW_MAX_STRATEGY_BUDGET");
 const keepers = csvAddresses("HOODFLOW_KEEPERS");
 const tokenConfigs = parseTokenConfigs();
 const sequencerFeed = addressEnv("HOODFLOW_SEQUENCER_UPTIME_FEED");
@@ -64,6 +67,9 @@ const hoodFlow = await ethers.deployContract("HoodFlowDCA", [
   ethers.ZeroAddress,
   feeRecipient,
   feeBps,
+  settlementToken,
+  maxTrancheAmount,
+  maxStrategyBudget,
 ]);
 await hoodFlow.waitForDeployment();
 const contractAddress = await hoodFlow.getAddress();
@@ -124,6 +130,14 @@ function integerEnv(name: string, min: number, max: number) {
   if (!Number.isInteger(value) || value < min || value > max) {
     throw new Error(`${name} must be an integer between ${min} and ${max}`);
   }
+  return value;
+}
+
+function bigintEnv(name: string) {
+  const raw = process.env[name]?.trim();
+  if (!raw || !/^\d+$/.test(raw)) throw new Error(`${name} must be a positive integer`);
+  const value = BigInt(raw);
+  if (value <= 0n || value > (1n << 128n) - 1n) throw new Error(`${name} is out of uint128 range`);
   return value;
 }
 

@@ -30,8 +30,12 @@ function validEnvironment(): NodeJS.ProcessEnv {
     HOODFLOW_RELEASE_APPROVERS: `${ADDRESS.approver1},${ADDRESS.approver2}`,
     HOODFLOW_UNIVERSAL_ROUTER: "0x8876789976decbfcbbbe364623c63652db8c0904",
     HOODFLOW_PERMIT2: "0x000000000022D473030F116dDEE9F6B43aC78BA3",
-    HOODFLOW_SEQUENCER_UPTIME_FEED: ADDRESS.sequencer,
-    HOODFLOW_SEQUENCER_GRACE_PERIOD_SECONDS: "3600",
+    HOODFLOW_SETTLEMENT_TOKEN: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+    HOODFLOW_MAX_TRANCHE_AMOUNT: "25000000",
+    HOODFLOW_MAX_STRATEGY_BUDGET: "500000000",
+    HOODFLOW_SEQUENCER_MODE: "none",
+    HOODFLOW_SEQUENCER_UPTIME_FEED: "",
+    HOODFLOW_SEQUENCER_GRACE_PERIOD_SECONDS: "0",
     HOODFLOW_TOKEN_CONFIGS: JSON.stringify([
       {
         token: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
@@ -64,7 +68,7 @@ test("accepts a complete fail-closed release environment", () => {
   const report = evaluateReleaseEnvironment(validEnvironment());
   assert.equal(report.ready, true);
   assert.equal(report.passed, report.total);
-  assert.equal(report.total, 14);
+  assert.equal(report.total, 15);
 });
 
 test("blocks a single public RPC and an unpaused deployment", () => {

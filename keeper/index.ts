@@ -6,6 +6,7 @@ import {
   getAddress,
   isAddress,
 } from "ethers";
+import { createServer } from "node:http";
 
 try {
   process.loadEnvFile?.();
@@ -36,17 +37,17 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const BPS_DENOMINATOR = 10_000n;
 const UINT128_MAX = (1n << 128n) - 1n;
 
-const chainId = BigInt(process.env.HOODFLOW_CHAIN_ID?.trim() || "46630");
+const chainId = requiredBigInt("HOODFLOW_CHAIN_ID");
 const dryRun = process.argv.includes("--dry-run");
-const rpcUrl = requiredEither("HOODFLOW_RPC_URL", "ROBINHOOD_TESTNET_RPC_URL");
+const rpcUrl = required("HOODFLOW_RPC_URL");
 const contractAddress = checkedAddress(required("HOODFLOW_CONTRACT_ADDRESS"));
 const quoterAddress = checkedAddress(required("HOODFLOW_V4_QUOTER"));
 const pollInterval = boundedInteger("KEEPER_POLL_INTERVAL_MS", 15_000, 3_000, 300_000);
 const confirmations = boundedInteger("KEEPER_CONFIRMATIONS", 1, 1, 20);
 const maxStrategies = boundedInteger("KEEPER_MAX_STRATEGIES", 500, 1, 10_000);
-const privateKey =
-  process.env.HOODFLOW_KEEPER_PRIVATE_KEY?.trim()
-  || process.env.ROBINHOOD_TESTNET_PRIVATE_KEY?.trim();
+const healthHost = process.env.KEEPER_HEALTH_HOST?.trim() || "127.0.0.1";
+const healthPort = boundedInteger("KEEPER_HEALTH_PORT", 8_787, 1_024, 65_535);
+const privateKey = process.env.HOODFLOW_KEEPER_PRIVATE_KEY?.trim();
 
 const provider = new JsonRpcProvider(rpcUrl, Number(chainId), { staticNetwork: true });
 const signer = privateKey ? new Wallet(privateKey, provider) : null;
@@ -55,11 +56,38 @@ const quoter = new Contract(quoterAddress, QUOTER_ABI, provider);
 const abiCoder = AbiCoder.defaultAbiCoder();
 
 let stopping = false;
+const health = {
+  ready: false,
+  lastScanAt: null as string | null,
+  lastSuccessAt: null as string | null,
+  lastError: null as string | null,
+};
+const healthServer = createServer((request, response) => {
+  if (request.method !== "GET" || request.url !== "/healthz") {
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: "not_found" }));
+    return;
+  }
+  const ready = health.ready && !stopping;
+  response.writeHead(ready ? 200 : 503, {
+    "content-type": "application/json",
+    "cache-control": "no-store",
+  });
+  response.end(JSON.stringify({
+    mode: dryRun ? "dry-run" : "execute",
+    chainId: chainId.toString(),
+    contract: contractAddress,
+    ...health,
+    ready,
+  }));
+});
 process.once("SIGINT", () => {
   stopping = true;
+  health.ready = false;
 });
 process.once("SIGTERM", () => {
   stopping = true;
+  health.ready = false;
 });
 
 await main();
@@ -84,6 +112,12 @@ async function main() {
     throw new Error(`Configured wallet ${signer.address} is not an approved keeper`);
   }
 
+  await new Promise<void>((resolve, reject) => {
+    healthServer.once("error", reject);
+    healthServer.listen(healthPort, healthHost, () => resolve());
+  });
+  health.ready = true;
+
   log("keeper_started", {
     mode: dryRun ? "dry-run" : "execute",
     chainId: chainId.toString(),
@@ -91,17 +125,24 @@ async function main() {
     quoter: quoterAddress,
     wallet: signer?.address ?? null,
     pollInterval,
+    health: `http://${healthHost}:${healthPort}/healthz`,
   });
 
   do {
     try {
+      health.lastScanAt = new Date().toISOString();
       await scanOnce();
+      health.lastSuccessAt = new Date().toISOString();
+      health.lastError = null;
     } catch (error) {
-      log("scan_error", { error: readableError(error) });
+      health.lastError = readableError(error);
+      log("scan_error", { error: health.lastError });
     }
     if (!stopping) await delay(pollInterval);
   } while (!stopping);
 
+  health.ready = false;
+  await new Promise<void>((resolve) => healthServer.close(() => resolve()));
   log("keeper_stopped", {});
 }
 
@@ -111,9 +152,11 @@ async function scanOnce() {
     return;
   }
 
-  const strategyCount = Number(await contract.strategyCount());
+  const strategyCount = BigInt(await contract.strategyCount());
   const protocolFeeBps = BigInt(await contract.protocolFeeBps());
-  const scanThrough = Math.min(strategyCount, maxStrategies);
+  const scanThrough = Number(strategyCount > BigInt(maxStrategies)
+    ? BigInt(maxStrategies)
+    : strategyCount);
   let readyCount = 0;
   let routedCount = 0;
 
@@ -190,7 +233,7 @@ async function scanOnce() {
   }
 
   log("scan_complete", {
-    strategyCount,
+    strategyCount: strategyCount.toString(),
     scanned: scanThrough,
     readyCount,
     routedCount,
@@ -245,15 +288,19 @@ function required(name: string) {
   return value;
 }
 
-function requiredEither(primary: string, fallback: string) {
-  const value = process.env[primary]?.trim() || process.env[fallback]?.trim();
-  if (!value) throw new Error(`${primary} (or ${fallback}) is required`);
-  return value;
-}
-
 function checkedAddress(value: string) {
   if (!isAddress(value)) throw new Error(`Invalid address: ${value}`);
   return getAddress(value);
+}
+
+function requiredBigInt(name: string) {
+  const raw = required(name);
+  if (!/^\d+$/.test(raw)) throw new Error(`${name} must be a positive integer`);
+  const value = BigInt(raw);
+  if (value <= 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`${name} is outside the supported range`);
+  }
+  return value;
 }
 
 function boundedInteger(name: string, fallback: number, min: number, max: number) {

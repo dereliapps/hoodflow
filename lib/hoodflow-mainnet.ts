@@ -63,6 +63,12 @@ export const UNIVERSAL_ROUTER_ABI = [
 
 export const HOODFLOW_ENGINE_ABI = [
   "function paused() view returns (bool)",
+  "function settlementToken() view returns (address)",
+  "function swapAdapter() view returns (address)",
+  "function keeperCount() view returns (uint256)",
+  "function allowedTokenCount() view returns (uint256)",
+  "function maxTrancheAmount() view returns (uint128)",
+  "function maxStrategyBudget() view returns (uint128)",
   "function tokenConfigs(address token) view returns (address priceFeed,uint48 heartbeat,uint8 tokenDecimals,uint8 feedDecimals,bool allowed,bool checkOraclePause)",
   "function createStrategy(address tokenIn,address tokenOut,uint128 amountPerExecution,uint128 totalBudget,uint48 interval,uint48 startAt,uint48 expiresAt,uint16 maxSlippageBps) returns (uint256 strategyId)",
   "function pauseStrategy(uint256 strategyId)",

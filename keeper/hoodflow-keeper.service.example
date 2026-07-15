@@ -1,0 +1,23 @@
+[Unit]
+Description=HoodFlow DCA keeper
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/hoodflow
+EnvironmentFile=/etc/hoodflow/keeper.env
+ExecStart=/usr/bin/npm run keeper:start
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/hoodflow
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
