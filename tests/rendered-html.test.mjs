@@ -25,6 +25,10 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(html, /clearly explained\./);
   assert.match(html, /Build an automation/);
   assert.match(html, /Set it\. Cap it\./);
+  assert.match(html, /HoodFlow workspace loading/);
+  assert.match(html, /Preparing your/);
+  assert.match(html, /safe workspace\./);
+  assert.match(html, /Loading official assets/);
   assert.match(html, /Permission Center/);
   assert.match(html, /Strategy workspace/);
   assert.match(html, /25 official assets indexed/);
@@ -50,6 +54,9 @@ test("ships a bounded, interactive testnet experience", async () => {
   assert.match(page, /toggleStrategy/);
   assert.match(page, /copyStrategy/);
   assert.match(page, /exportActivity/);
+  assert.match(page, /hoodflow-device-drafts-v1/);
+  assert.match(page, /window\.localStorage\.setItem/);
+  assert.match(page, /Wallet keys and account data are never stored/);
   assert.match(page, /wallet_switchEthereumChain/);
   assert.match(page, /Robinhood Chain Testnet/);
   assert.match(page, /Start in Shadow Mode/);
@@ -63,17 +70,19 @@ test("ships a bounded, interactive testnet experience", async () => {
   assert.match(page, /Twenty-five assets/);
   assert.match(page, /13 full-fill routes/);
   assert.match(page, /Full-fill ready/);
-  assert.match(page, /MSFT has a quote but remains blocked after a partial fill/);
+  assert.match(page, /MSFT stays blocked after a deterministic-fork partial fill/);
   assert.match(page, /Copy as draft/);
   assert.match(page, /Know every status/);
   assert.match(page, /Independent audit/);
   assert.match(page, /MAINNET LOCKED/);
-  assert.match(page, /version-badge">V7/);
+  assert.match(page, /version-badge">V8/);
   assert.match(layout, /HoodFlow — Safe stock automation/);
   assert.match(layout, /Instrument_Sans/);
   assert.match(layout, /IBM_Plex_Mono/);
   assert.match(layout, /summary_large_image/);
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
+  assert.match(css, /\.launch-screen/);
+  assert.match(css, /launch-fallback/);
   assert.match(css, /@media \(max-width: 620px\)/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 

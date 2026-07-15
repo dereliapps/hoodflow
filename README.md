@@ -7,7 +7,7 @@ HoodFlow is a non-custodial automation engine and strategy marketplace concept f
 - Product UI, browser-wallet connection, shadow strategies and permission controls are implemented.
 - `HoodFlowDCA` and the bounded Uniswap adapters have 25 passing safety tests.
 - All 20 canonical stock tokens and 5 ETFs, plus 8 protocol contracts, are checked read-only (34 bytecode targets including USDG).
-- At the latest verification snapshot, 14 assets returned a V4 quote; 13 completed a full-input mainnet-fork swap through the official Universal Router and Permit2. MSFT remains watch-only because its quoted pool partially filled and the adapter correctly rejected the residual input.
+- At the latest verification snapshot, 13 assets returned a V4 quote and all 13 completed a full-input mainnet-fork swap through the official Universal Router and Permit2. MSFT remains watch-only because its deterministic-fork route partially filled and the adapter correctly rejected the residual input; current-head quote availability may change between scans.
 - A full-engine AAPL/USDG fork canary completed two capped executions, blocked an early replay, finished its exact lifetime budget, and left zero protocol custody or residual allowances.
 - No mainnet transaction has been broadcast. Mainnet remains locked pending a monitored canary and independent audit.
 

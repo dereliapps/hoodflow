@@ -8,6 +8,7 @@ type StrategyKind = "DCA" | "Take profit" | "Rebalance";
 type StrategyStatus = "Prepared" | "Paused" | "Shadow";
 type MarketplaceSort = "featured" | "copied" | "risk";
 type InfoPanel = "docs" | "terms";
+type BootPhase = "loading" | "leaving" | "done";
 
 type Strategy = {
   id: number;
@@ -43,6 +44,7 @@ const TESTNET = {
 
 const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_HOODFLOW_CONTRACT_ADDRESS?.trim() ?? "";
 const contractConfigured = /^0x[a-fA-F0-9]{40}$/.test(CONTRACT_ADDRESS);
+const DRAFT_STORAGE_KEY = "hoodflow-device-drafts-v1";
 
 const assetMeta: Record<string, { name: string; color: string; price: number; move: string }> = {
   AAPL: { name: "Apple", color: "#e8edf2", price: 211.18, move: "+1.24%" },
@@ -127,7 +129,25 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "The wallet request was declined.";
 }
 
+function isStoredStrategy(value: unknown): value is Strategy {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<Strategy>;
+  return typeof item.id === "number"
+    && typeof item.name === "string"
+    && ["DCA", "Take profit", "Rebalance"].includes(item.kind ?? "")
+    && typeof item.asset === "string"
+    && typeof item.rule === "string"
+    && typeof item.next === "string"
+    && ["Prepared", "Paused", "Shadow"].includes(item.status ?? "")
+    && typeof item.spent === "string"
+    && typeof item.health === "number"
+    && typeof item.budget === "string"
+    && typeof item.expires === "string";
+}
+
 export default function Home() {
+  const [bootPhase, setBootPhase] = useState<BootPhase>("loading");
+  const [bootProgress, setBootProgress] = useState(12);
   const [view, setView] = useState<View>("overview");
   const [walletAddress, setWalletAddress] = useState("");
   const [walletBalance, setWalletBalance] = useState("");
@@ -150,6 +170,7 @@ export default function Home() {
   const [marketSearch, setMarketSearch] = useState("");
   const [marketSort, setMarketSort] = useState<MarketplaceSort>("featured");
   const [infoPanel, setInfoPanel] = useState<InfoPanel | null>(null);
+  const [draftsHydrated, setDraftsHydrated] = useState(false);
 
   const connected = Boolean(walletAddress);
   const preparedCount = useMemo(() => strategies.filter((item) => item.status === "Prepared").length, [strategies]);
@@ -158,6 +179,68 @@ export default function Home() {
     const price = assetMeta[draftAsset]?.price ?? 1;
     return (Number(draftAmount || 0) / price).toFixed(4);
   }, [draftAmount, draftAsset]);
+  const bootMessage = bootProgress < 40 ? "Loading official assets" : bootProgress < 75 ? "Checking safety controls" : bootProgress < 100 ? "Preparing your workspace" : "Workspace ready";
+
+  useEffect(() => {
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.body.classList.add("boot-locked");
+    if (reducedMotion) {
+      const finish = window.setTimeout(() => {
+        setBootProgress(100);
+        setBootPhase("done");
+        document.body.classList.remove("boot-locked");
+      }, 180);
+      return () => {
+        window.clearTimeout(finish);
+        document.body.classList.remove("boot-locked");
+      };
+    }
+
+    const timers = [
+      window.setTimeout(() => setBootProgress(34), 220),
+      window.setTimeout(() => setBootProgress(67), 560),
+      window.setTimeout(() => setBootProgress(88), 920),
+      window.setTimeout(() => setBootProgress(100), 1220),
+      window.setTimeout(() => setBootPhase("leaving"), 1370),
+      window.setTimeout(() => {
+        setBootPhase("done");
+        document.body.classList.remove("boot-locked");
+      }, 1740),
+    ];
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+      document.body.classList.remove("boot-locked");
+    };
+  }, []);
+
+  useEffect(() => {
+    const hydrate = window.setTimeout(() => {
+      try {
+        const saved = window.localStorage.getItem(DRAFT_STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved) as unknown;
+          if (Array.isArray(parsed)) {
+            const valid = parsed.filter(isStoredStrategy).slice(0, 50);
+            if (valid.length > 0) setStrategies(valid);
+          }
+        }
+      } catch {
+        // Private browsing or a corrupted draft must never block the workspace.
+      } finally {
+        setDraftsHydrated(true);
+      }
+    }, 0);
+    return () => window.clearTimeout(hydrate);
+  }, []);
+
+  useEffect(() => {
+    if (!draftsHydrated) return;
+    try {
+      window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(strategies.slice(0, 50)));
+    } catch {
+      // Device storage is optional; the in-memory workspace remains usable.
+    }
+  }, [draftsHydrated, strategies]);
 
   useEffect(() => {
     async function readNetwork() {
@@ -249,7 +332,7 @@ export default function Home() {
     }, ...current]);
     setComposerOpen(false);
     setView("strategies");
-    notify(status === "Shadow" ? "Shadow strategy started without moving funds" : "Authorization prepared; no transaction was broadcast");
+    notify(status === "Shadow" ? "Shadow strategy saved on this device without moving funds" : "Authorization draft saved; no transaction was broadcast");
   }
 
   function copyStrategy(name: string) {
@@ -295,9 +378,21 @@ export default function Home() {
 
   return (
     <main className="app-shell">
+      {bootPhase !== "done" && <div className={`launch-screen ${bootPhase === "leaving" ? "is-leaving" : ""}`} role="status" aria-live="polite" aria-label="HoodFlow workspace loading">
+        <div className="launch-grid" aria-hidden="true" />
+        <div className="launch-top"><div className="launch-brand"><span className="brand-mark"><i /><i /><i /></span><strong>hoodflow</strong></div><span>SECURE AUTOMATION LAYER / 08</span></div>
+        <div className="launch-center">
+          <div className="launch-orbit" aria-hidden="true"><div className="launch-core"><span className="brand-mark"><i /><i /><i /></span></div>{["AAPL", "NVDA", "TSLA", "GOOGL", "MSFT"].map((ticker, index) => <span className={`launch-logo launch-logo-${index + 1}`} key={ticker}><Mark ticker={ticker} /></span>)}</div>
+          <p>ROBINHOOD CHAIN / TESTNET</p>
+          <h1>Preparing your<br /><span>safe workspace.</span></h1>
+          <div className="launch-progress"><i style={{ "--progress": `${bootProgress}%` } as React.CSSProperties} /></div>
+          <div className="launch-status"><span><i />{bootMessage}</span><strong>{bootProgress.toString().padStart(3, "0")}%</strong></div>
+        </div>
+        <div className="launch-bottom"><span>NON-CUSTODIAL</span><span>MAINNET LOCKED</span><span>25 OFFICIAL ASSETS</span></div>
+      </div>}
       <header className="topbar">
         <button className="brand" onClick={() => setView("overview")} aria-label="HoodFlow home">
-          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V7</b>
+          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V8</b>
         </button>
         <nav className="main-nav" aria-label="Main navigation">
           {navigation.map((item) => <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>{item}</button>)}
@@ -317,7 +412,7 @@ export default function Home() {
           <div className="market-state"><span><i /> TESTNET RPC ONLINE</span><span>Block #{networkBlock}</span><span>25/25 safety tests · 13 full-fill routes</span></div>
           <div className="page-heading">
             <div><p className="eyebrow">AUTOMATION WITHOUT CUSTODY</p><h1>Set it. Cap it.<br /><span>Let it run.</span></h1><p className="lede">Build self-running stock-token strategies with hard spending limits, live health checks and a kill switch you control.</p></div>
-            <div className="hero-command"><button className="primary-action" onClick={() => openComposer()}><span>+</span> Build an automation</button><div className="hero-proof"><span>V7 SAFETY PREVIEW</span><strong>25 official assets indexed</strong><small>13 full-fill ready · 2/2 canary runs · 0 broadcast</small></div></div>
+            <div className="hero-command"><button className="primary-action" onClick={() => openComposer()}><span>+</span> Build an automation</button><div className="hero-proof"><span>V8 SAFE WORKSPACE</span><strong>25 official assets indexed</strong><small>13 full-fill ready · 2/2 canary runs · 0 broadcast</small></div></div>
           </div>
 
           <div className="feature-dock">
@@ -364,6 +459,7 @@ export default function Home() {
       {view === "strategies" && (
         <section className="page inner-page">
           <div className="inner-heading"><div><p className="eyebrow">AUTOMATION DESK</p><h1>Strategies</h1><p>Every rule, limit and execution state in one place.</p></div><button className="primary-action" onClick={() => openComposer()}><span>+</span> New strategy</button></div>
+          <div className="device-save-note"><span><i /> SAVED ON THIS DEVICE</span><p>Your strategy drafts survive refreshes on this browser. Wallet keys and account data are never stored.</p></div>
           <div className="summary-row"><div><span>Prepared</span><strong>{preparedCount}</strong></div><div><span>Shadow mode</span><strong>{shadowCount}</strong></div><div><span>Simulated volume</span><strong>$2,480</strong></div><div><span>Estimated fees</span><strong>$2.48</strong></div></div>
           <div className="table-card">
             <div className="table-head upgraded"><span>STRATEGY</span><span>RULE</span><span>NEXT ACTION</span><span>HEALTH</span><span>STATUS</span><span /></div>
@@ -379,7 +475,7 @@ export default function Home() {
             <div className="asset-totals"><div><strong>25</strong><span>OFFICIAL ASSETS</span></div><div><strong>13</strong><span>FULL-FILL READY</span></div><div><strong>12</strong><span>WATCH-ONLY</span></div></div>
           </div>
           <div className="asset-logo-cloud" aria-label="All supported brands">{assetRegistry.map((asset) => <Mark key={asset.ticker} ticker={asset.ticker} small />)}<span>20 stocks + 5 ETFs</span></div>
-          <div className="route-explainer"><div><b className="route-ready"><i />READY</b><p><strong>Can be simulated</strong><span>A full-input fork swap passed. The route is quoted again before every execution.</span></p></div><div><b className="route-watch"><i />WATCH</b><p><strong>Visible, never forced</strong><span>No order is prepared until a full-fill route passes. MSFT has a quote but remains blocked after a partial fill.</span></p></div></div>
+          <div className="route-explainer"><div><b className="route-ready"><i />READY</b><p><strong>Can be simulated</strong><span>A full-input fork swap passed. The route is quoted again before every execution.</span></p></div><div><b className="route-watch"><i />WATCH</b><p><strong>Visible, never forced</strong><span>No order is prepared until a full-fill route passes. MSFT stays blocked after a deterministic-fork partial fill, even when a live quote appears.</span></p></div></div>
           <div className="asset-toolbar">
             <div>{(["all", "routed", "registry"] as const).map((scope) => <button key={scope} className={assetScope === scope ? "selected" : ""} onClick={() => setAssetScope(scope)}>{scope === "all" ? "All 25" : scope === "routed" ? "Full-fill ready" : "Watch-only"}</button>)}</div>
             <label><span>Q</span><input aria-label="Search assets" placeholder="Ticker or company" value={assetSearch} onChange={(event) => setAssetSearch(event.target.value)} /></label>
@@ -427,7 +523,7 @@ export default function Home() {
           <div className="inner-heading"><div><p className="eyebrow">PERMISSION CENTER</p><h1>You hold the keys.</h1><p>Review every allowance, expiry and safety condition before it can execute.</p></div><button className="danger-action" onClick={() => setConfirmStop(true)}>Pause everything</button></div>
           <div className="control-grid">
             <article className="control-card control-score"><span>PROTOCOL READINESS</span><strong>7<span>/9 gates</span></strong><p>Core, routes, oracle defense and the full-engine fork canary are complete.</p><div className="score-line"><i /></div></article>
-            <article className="control-card"><span>MAINNET INFRA</span><strong>13 full-fill</strong><p>14 quote-ready · 34 bytecode checks · local fork swaps</p><b className="control-ok">VERIFIED</b></article>
+            <article className="control-card"><span>MAINNET INFRA</span><strong>13 full-fill</strong><p>13 quote-ready now · 34 bytecode checks · local fork swaps</p><b className="control-ok">VERIFIED</b></article>
             <article className="control-card"><span>CONTRACT</span><strong>{contractStatus}</strong><p>{contractConfigured ? compactAddress(CONTRACT_ADDRESS) : "No live contract is being claimed."}</p><b className={`control-ok ${contractConfigured && contractStatus !== "Bytecode verified" ? "warning" : ""}`}>{contractStatus === "Bytecode verified" ? "ONCHAIN" : "GATED"}</b></article>
           </div>
           <div className="readiness-board">
