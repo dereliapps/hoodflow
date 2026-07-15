@@ -1,6 +1,7 @@
 import { getAddress, isAddress } from "ethers";
 
 import robinhoodMainnet from "../../config/robinhood-mainnet.json" with { type: "json" };
+import { ROBINHOOD_PRICE_FEEDS } from "../../config/robinhood-price-feeds.js";
 
 export const MAINNET_CHAIN_ID = 4_663;
 export const TESTNET_CHAIN_ID = 46_630;
@@ -156,14 +157,28 @@ export function evaluateReleaseEnvironment(env: NodeJS.ProcessEnv): ReleaseRepor
 
   const canonicalTokens = Object.values(robinhoodMainnet.tokens).map((address) => address.toLowerCase());
   const usdG = robinhoodMainnet.tokens.USDG.toLowerCase();
+  const tickerByToken = new Map(Object.entries(robinhoodMainnet.tokens)
+    .map(([ticker, address]) => [address.toLowerCase(), ticker]));
   const tokenConfigsValid = config.tokenConfigs.length >= 2
     && uniqueAddresses(config.tokenConfigs.map((item) => item.token)).length === config.tokenConfigs.length
-    && config.tokenConfigs.every((item) => canonicalTokens.includes(item.token.toLowerCase())
-      && isConfiguredAddress(item.feed)
-      && Number.isInteger(item.heartbeat)
-      && item.heartbeat >= 60
-      && item.heartbeat <= 604_800
-      && (item.token.toLowerCase() === usdG || item.checkOraclePause));
+    && config.tokenConfigs.every((item) => {
+      const token = item.token.toLowerCase();
+      const ticker = tickerByToken.get(token);
+      const officialFeed = ticker && ticker !== "USDG"
+        ? ROBINHOOD_PRICE_FEEDS[ticker as keyof typeof ROBINHOOD_PRICE_FEEDS]
+        : null;
+      return canonicalTokens.includes(token)
+        && isConfiguredAddress(item.feed)
+        && Number.isInteger(item.heartbeat)
+        && item.heartbeat >= 60
+        && item.heartbeat <= 604_800
+        && (token === usdG || (
+          item.checkOraclePause
+          && officialFeed?.feed
+          && sameAddress(item.feed, officialFeed.feed)
+          && item.heartbeat === officialFeed.heartbeat
+        ));
+    });
   const hasUsdG = config.tokenConfigs.some((item) => item.token.toLowerCase() === usdG);
   const hasStockToken = config.tokenConfigs.some((item) => item.token.toLowerCase() !== usdG);
   gate(
@@ -171,8 +186,8 @@ export function evaluateReleaseEnvironment(env: NodeJS.ProcessEnv): ReleaseRepor
     "Canonical token oracle policy",
     tokenConfigsValid && hasUsdG && hasStockToken,
     tokenConfigsValid && hasUsdG && hasStockToken
-      ? `${config.tokenConfigs.length} canonical tokens; stock pause checks enabled`
-      : "Configure USDG plus a canonical stock/ETF with current feed, heartbeat and stock oracle-pause checks",
+      ? `${config.tokenConfigs.length} canonical tokens; Chainlink registry and pause checks matched`
+      : "Configure USDG plus a canonical stock/ETF using its current Chainlink feed, heartbeat and oracle-pause check",
   );
 
   const feeValid = Number.isInteger(config.feeBps) && config.feeBps >= 0 && config.feeBps <= 100;

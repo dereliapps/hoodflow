@@ -5,6 +5,7 @@ HoodFlow is a non-custodial automation engine and strategy marketplace concept f
 ## Current status
 
 - Product UI, browser-wallet connection, shadow strategies and permission controls are implemented.
+- The asset matrix reads multiplier-adjusted token prices from 24 current Chainlink feeds on Robinhood Chain, refreshes every 30 seconds, and visibly guards stale or paused values. BE remains explicit as unavailable because the current Chainlink Robinhood registry does not list a BE feed.
 - `HoodFlowDCA` and the bounded Uniswap adapters have 25 passing safety tests.
 - All 20 canonical stock tokens and 5 ETFs, plus 8 protocol contracts, are checked read-only (34 bytecode targets including USDG).
 - At the latest verification snapshot, 13 assets returned a V4 quote and all 13 completed a full-input mainnet-fork swap through the official Universal Router and Permit2. MSFT remains watch-only because its deterministic-fork route partially filled and the adapter correctly rejected the residual input; current-head quote availability may change between scans.
@@ -16,6 +17,7 @@ HoodFlow is a non-custodial automation engine and strategy marketplace concept f
 - The engine starts paused and cannot unpause without an adapter, keeper and at least two allowed tokens.
 - Keepers cannot change the strategy assets, tranche, budget, interval or slippage.
 - Stale or invalid oracle data, sequencer downtime/recovery and a stock token's own oracle pause block execution before funds move.
+- Displayed prices are informational onchain token prices, not DEX execution quotes or headline share prices; Robinhood's corporate-action multiplier is already included.
 - The keeper prices every reviewed V4 pool configuration and chooses the highest-output route; it skips execution when none quotes successfully.
 - The V4 adapter constructs a fixed three-action plan and accepts only hookless direct pools with reviewed fee/tick combinations.
 - ERC-20 and Permit2 allowances are exact and reset to zero after every successful swap.
