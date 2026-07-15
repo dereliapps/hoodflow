@@ -131,6 +131,14 @@ footer { min-height: 72px; border-top: 1px solid var(--line); padding: 0 4.5vw; 
 .asset-sell-action:hover { border-color: var(--green); color: var(--green); }
 .asset-trade-actions button:disabled { opacity: .45; cursor: not-allowed; }
 
+.independence-notice { margin: -38px 0 14px; min-height: 38px; display: flex; align-items: center; gap: 7px; padding: 9px 12px; border: 1px solid #d5d9d3; border-radius: 6px; background: #eef0eb; color: #6d7471; font-size: 8px; line-height: 1.4; }
+.independence-notice strong { color: #303735; font-weight: 680; }
+.independence-notice + .market-state { margin-top: 0; }
+.hero-risk { margin: 0; padding: 11px 12px; border: 1px solid #e2d5ac; border-radius: 6px; background: #faf4df; color: #6f6240; font-size: 8px; line-height: 1.45; }
+.hero-risk a { display: block; margin-top: 5px; color: #5c4d21; font-weight: 680; text-decoration: underline; text-underline-offset: 2px; }
+.info-copy a { color: #17683b; font-weight: 680; }
+.price-state.error { color: #9b3d2d; }
+
 @keyframes launch-float { from { transform: translateY(-3px) scale(.98); } to { transform: translateY(5px) scale(1.03); } }
 @keyframes launch-exit { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(1.025); visibility: hidden; } }
 @keyframes launch-fallback { 0%,82% { opacity: 1; visibility: visible; } 100% { opacity: 0; visibility: hidden; pointer-events: none; } }
