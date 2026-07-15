@@ -1,98 +1,38 @@
-# vinext-starter
+# HoodFlow
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+HoodFlow is a non-custodial automation engine and strategy marketplace concept for Robinhood Chain. Users keep assets in their wallets while each strategy enforces an asset pair, exact tranche, lifetime budget, interval, expiry and slippage ceiling onchain.
 
-## Prerequisites
+## Current status
 
-- Node.js `>=22.13.0`
+- Product UI, browser-wallet connection, shadow strategies and permission controls are implemented.
+- `HoodFlowDCA` and the bounded Uniswap adapters have 23 passing safety tests.
+- Official Robinhood mainnet tokens and Uniswap infrastructure are checked read-only.
+- The V4 adapter completed AAPL/USDG, NVDA/USDG, GOOGL/USDG and TSLA/USDG swaps on a local mainnet fork through the official Universal Router and Permit2.
+- No mainnet transaction has been broadcast. Mainnet remains locked pending a monitored canary and independent audit.
 
-## Quick Start
+## Safety model
+
+- The engine starts paused and cannot unpause without an adapter, keeper and at least two allowed tokens.
+- Keepers cannot change the strategy assets, tranche, budget, interval or slippage.
+- Stale or invalid oracle data blocks execution before funds move.
+- The V4 adapter constructs a fixed three-action plan and accepts only hookless direct pools with reviewed fee/tick combinations.
+- ERC-20 and Permit2 allowances are exact and reset to zero after every successful swap.
+- The guardian can pause immediately; only the owner can restart execution.
+
+## Commands
 
 ```bash
 npm install
 npm run dev
-npm run build
+npm test
+npm run contracts:compile
+npm run infra:verify:mainnet
+npm run infra:verify:fork
+npm run keeper:dry-run
 ```
 
-This starter does not use `wrangler.jsonc`.
+`infra:verify:mainnet` performs read-only RPC checks. `infra:verify:fork` creates a local Robinhood mainnet fork and executes the four reviewed routes without broadcasting to the real chain.
 
-## Included Shape
+## Mainnet launch gates
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
-```
-
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+The remaining release gates are a capped, monitored canary with production-grade RPC/oracle inputs and an independent smart-contract audit followed by timelocked multisig ownership. Do not place a funded private key in this repository.

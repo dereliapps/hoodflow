@@ -113,6 +113,7 @@ describe("HoodFlowDCA", function () {
     await expect(hoodFlow.connect(keeper).unpauseEverything())
       .to.be.revertedWithCustomError(hoodFlow, "OwnableUnauthorizedAccount")
       .withArgs(keeper.address);
+    await hoodFlow.setKeeper(keeper.address, true);
     await hoodFlow.connect(owner).unpauseEverything();
   });
 
