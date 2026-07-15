@@ -196,7 +196,7 @@ export default function Home() {
     <main className="app-shell">
       <header className="topbar">
         <button className="brand" onClick={() => setView("overview")} aria-label="HoodFlow home">
-          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span>
+          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V2</b>
         </button>
         <nav className="main-nav" aria-label="Main navigation">
           {navigation.map((item) => <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>{item}</button>)}
@@ -215,8 +215,14 @@ export default function Home() {
         <section className="page overview-page">
           <div className="market-state"><span><i /> US MARKET OPEN</span><span>Oracle updated 34s ago</span><span>Execution conditions normal</span></div>
           <div className="page-heading">
-            <div><p className="eyebrow">PORTFOLIO AUTOMATION</p><h1>Your portfolio,<br /><span>on schedule.</span></h1><p className="lede">Set the rule once. HoodFlow watches the market and executes only inside the limits you approve.</p></div>
-            <button className="primary-action" onClick={() => openComposer()}><span>+</span> New strategy</button>
+            <div><p className="eyebrow">AUTOMATION WITHOUT CUSTODY</p><h1>Set it. Cap it.<br /><span>Let it run.</span></h1><p className="lede">Build self-running stock-token strategies with hard spending limits, live health checks and a kill switch you control.</p></div>
+            <div className="hero-command"><button className="primary-action" onClick={() => openComposer()}><span>+</span> Build an automation</button><div className="hero-proof"><span>LIVE TESTNET</span><strong>3 safety layers</strong><small>Oracle · Slippage · Budget</small></div></div>
+          </div>
+
+          <div className="feature-dock">
+            <button onClick={() => openComposer()}><span>01</span><div><strong>Shadow Lab</strong><small>Simulate before funds move</small></div><b>&rarr;</b></button>
+            <button onClick={() => setView("controls")}><span>02</span><div><strong>Permission Center</strong><small>Inspect every spending cap</small></div><b>&rarr;</b></button>
+            <button onClick={() => setView("marketplace")}><span>03</span><div><strong>Proof Marketplace</strong><small>Copy verified performance</small></div><b>&rarr;</b></button>
           </div>
 
           <div className="overview-grid">
