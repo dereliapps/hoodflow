@@ -14,6 +14,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: new URL(origin),
+    icons: { icon: "/favicon.svg", shortcut: "/favicon.svg", apple: "/favicon.svg" },
     title: "HoodFlow — Buy stock tokens on Robinhood Chain",
     description: "Explore 25 official stock tokens, inspect real Chainlink price history, and buy every full-fill verified asset with USDG on Robinhood Chain mainnet.",
     openGraph: {

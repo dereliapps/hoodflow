@@ -114,11 +114,14 @@ export function isV3RoutedAsset(ticker: string): boolean {
 }
 
 export function buildQuoteParams(tokenOut: string, amountIn: bigint, route: PoolCandidate) {
+  return buildExactInputQuoteParams(USDG_ADDRESS, tokenOut, amountIn, route);
+}
+
+export function buildExactInputQuoteParams(tokenIn: string, tokenOut: string, amountIn: bigint, route: PoolCandidate) {
+  const normalizedIn = getAddress(tokenIn);
   const normalizedOut = getAddress(tokenOut);
-  const currency0 = USDG_ADDRESS.toLowerCase() < normalizedOut.toLowerCase()
-    ? USDG_ADDRESS
-    : normalizedOut;
-  const currency1 = currency0 === USDG_ADDRESS ? normalizedOut : USDG_ADDRESS;
+  const currency0 = normalizedIn.toLowerCase() < normalizedOut.toLowerCase() ? normalizedIn : normalizedOut;
+  const currency1 = currency0 === normalizedIn ? normalizedOut : normalizedIn;
 
   return {
     poolKey: {
@@ -128,7 +131,7 @@ export function buildQuoteParams(tokenOut: string, amountIn: bigint, route: Pool
       tickSpacing: route.tickSpacing,
       hooks: ZeroAddress,
     },
-    zeroForOne: currency0 === USDG_ADDRESS,
+    zeroForOne: currency0 === normalizedIn,
     exactAmount: amountIn,
     hookData: "0x",
   };
@@ -142,8 +145,28 @@ export function buildDirectBuyCalldata(args: {
   permit: PermitSingle;
   signature: string;
 }) {
+  return buildV4ExactInputCalldata({
+    tokenIn: USDG_ADDRESS,
+    tokenOut: args.tokenOut,
+    amountIn: args.amountIn,
+    minAmountOut: args.minAmountOut,
+    route: args.route,
+    permit: args.permit,
+    signature: args.signature,
+  });
+}
+
+export function buildV4ExactInputCalldata(args: {
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: bigint;
+  minAmountOut: bigint;
+  route: PoolCandidate;
+  permit: PermitSingle;
+  signature: string;
+}) {
   const coder = AbiCoder.defaultAbiCoder();
-  const quote = buildQuoteParams(args.tokenOut, args.amountIn, args.route);
+  const quote = buildExactInputQuoteParams(args.tokenIn, args.tokenOut, args.amountIn, args.route);
   const swapParams = {
     poolKey: quote.poolKey,
     zeroForOne: quote.zeroForOne,
@@ -159,7 +182,7 @@ export function buildDirectBuyCalldata(args: {
       ["tuple(tuple(address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks) poolKey,bool zeroForOne,uint128 amountIn,uint128 amountOutMinimum,uint256 minHopPriceX36,bytes hookData)"],
       [swapParams],
     ),
-    coder.encode(["address", "uint256"], [USDG_ADDRESS, args.amountIn]),
+    coder.encode(["address", "uint256"], [getAddress(args.tokenIn), args.amountIn]),
     coder.encode(["address", "uint256"], [getAddress(args.tokenOut), args.minAmountOut]),
   ];
   const swapInput = coder.encode(["bytes", "bytes[]"], [actions, actionParams]);
@@ -183,10 +206,32 @@ export function buildV3DirectBuyCalldata(args: {
   permit: PermitSingle;
   signature: string;
 }) {
+  return buildV3ExactInputCalldata({
+    tokenIn: USDG_ADDRESS,
+    tokenOut: args.tokenOut,
+    recipient: args.recipient,
+    amountIn: args.amountIn,
+    minAmountOut: args.minAmountOut,
+    fee: args.fee,
+    permit: args.permit,
+    signature: args.signature,
+  });
+}
+
+export function buildV3ExactInputCalldata(args: {
+  tokenIn: string;
+  tokenOut: string;
+  recipient: string;
+  amountIn: bigint;
+  minAmountOut: bigint;
+  fee: number;
+  permit: PermitSingle;
+  signature: string;
+}) {
   const coder = AbiCoder.defaultAbiCoder();
   const path = solidityPacked(
     ["address", "uint24", "address"],
-    [USDG_ADDRESS, args.fee, getAddress(args.tokenOut)],
+    [getAddress(args.tokenIn), args.fee, getAddress(args.tokenOut)],
   );
   const swapInput = coder.encode(
     ["address", "uint256", "uint256", "bytes", "bool", "uint256[]"],

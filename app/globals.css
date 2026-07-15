@@ -125,6 +125,12 @@ footer { min-height: 72px; border-top: 1px solid var(--line); padding: 0 4.5vw; 
 
 .kind-grid { grid-template-columns: repeat(2,1fr); }.kind-grid button:disabled, .composer button:disabled { cursor: not-allowed; }.primary-action:disabled { opacity: .55; transform: none; }.status-button.confirmed { background: #d9f5e4; color: #12663a; }.status-button:disabled { cursor: default; opacity: 1; }.preview-callout.mainnet-callout { border-color: #afd7bd; background: linear-gradient(105deg,#e1f7e8,#eef8ee); }.asset-buy { width: fit-content; border: 1px solid #b9dbc5; background: #e1f7e8; color: #125f36; border-radius: 5px; padding: 8px 10px; font-size: 8px; font-weight: 680; cursor: pointer; }.asset-buy:hover { background: #d4f2de; transform: translateY(-1px); }.transaction-step { display: flex; align-items: center; gap: 9px; min-height: 42px; margin: 0 0 12px; padding: 10px 12px; border: 1px solid #bcdcc7; background: #e6f5ea; border-radius: 6px; color: #175f37; font-size: 9px; }.transaction-step i { width: 8px; height: 8px; border-radius: 50%; border: 2px solid #96caa8; border-top-color: #17683b; animation: spin .8s linear infinite; }.receipt-link { display: block; text-align: center; text-decoration: none; }.mainnet-tag { color: #17683b; }.permission-row > button:disabled { opacity: .65; cursor: default; }
 
+.kind-grid { grid-template-columns: repeat(3,1fr); }
+.asset-trade-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.asset-sell-action { border: 1px solid #46504d; background: transparent; color: #eef3ef; border-radius: 5px; padding: 12px 10px; font-size: 9px; font-weight: 680; cursor: pointer; }
+.asset-sell-action:hover { border-color: var(--green); color: var(--green); }
+.asset-trade-actions button:disabled { opacity: .45; cursor: not-allowed; }
+
 @keyframes launch-float { from { transform: translateY(-3px) scale(.98); } to { transform: translateY(5px) scale(1.03); } }
 @keyframes launch-exit { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(1.025); visibility: hidden; } }
 @keyframes launch-fallback { 0%,82% { opacity: 1; visibility: visible; } 100% { opacity: 0; visibility: hidden; pointer-events: none; } }

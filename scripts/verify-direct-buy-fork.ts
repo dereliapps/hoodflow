@@ -18,7 +18,10 @@ import {
   V4_QUOTER_ABI,
   V4_QUOTER_ADDRESS,
   buildDirectBuyCalldata,
+  buildV4ExactInputCalldata,
   buildV3DirectBuyCalldata,
+  buildV3ExactInputCalldata,
+  buildExactInputQuoteParams,
   buildQuoteParams,
   type PermitSingle,
 } from "../lib/hoodflow-mainnet.js";
@@ -125,6 +128,55 @@ if (erc20Allowance !== 0n || permitAmountAfter !== 0n) {
   throw new Error("Exact direct-buy permissions were not fully consumed");
 }
 
+const sellQuotes = [];
+for (const route of V4_POOL_CANDIDATES) {
+  try {
+    const result = await quoter.quoteExactInputSingle.staticCall(
+      buildExactInputQuoteParams(intelAddress, USDG_ADDRESS, received, route),
+    ) as readonly [bigint, bigint];
+    const amountOut = BigInt(result[0]);
+    if (amountOut > 0n) sellQuotes.push({ route, amountOut });
+  } catch {
+    // An absent reverse pool is expected; at least one reviewed pool must quote.
+  }
+}
+if (sellQuotes.length === 0) throw new Error("INTC/USDG returned no live V4 sell quote");
+const bestSell = sellQuotes.reduce((current, quote) => quote.amountOut > current.amountOut ? quote : current);
+const minSellOut = bestSell.amountOut * 9_950n / 10_000n;
+const intelWithSigner = new Contract(intelAddress, ERC20_ABI, buyer);
+await (await intelWithSigner.approve(PERMIT2_ADDRESS, received)).wait();
+const sellPermitState = await permit2.allowance(buyer.address, intelAddress, UNIVERSAL_ROUTER_ADDRESS) as { nonce?: bigint; 2?: bigint };
+const sellBlock = await ethers.provider.getBlock("latest");
+if (!sellBlock) throw new Error("Fork has no latest block for sell");
+const sellPermit: PermitSingle = {
+  details: { token: intelAddress, amount: received, expiration: sellBlock.timestamp + 600, nonce: BigInt(sellPermitState.nonce ?? sellPermitState[2] ?? 0n) },
+  spender: UNIVERSAL_ROUTER_ADDRESS,
+  sigDeadline: sellBlock.timestamp + 600,
+};
+const sellSignature = await buyer.signTypedData(
+  { name: "Permit2", chainId: networkInfo.chainId, verifyingContract: PERMIT2_ADDRESS },
+  PERMIT2_TYPES,
+  sellPermit,
+);
+const sellCalldata = buildV4ExactInputCalldata({
+  tokenIn: intelAddress,
+  tokenOut: USDG_ADDRESS,
+  amountIn: received,
+  minAmountOut: minSellOut,
+  route: bestSell.route,
+  permit: sellPermit,
+  signature: sellSignature,
+});
+const usdGBeforeSell = BigInt(await usdG.balanceOf(buyer.address));
+const sellTransaction = await router.execute(sellCalldata.commands, sellCalldata.inputs, sellBlock.timestamp + 300);
+const sellReceipt = await sellTransaction.wait();
+const sellReceived = BigInt(await usdG.balanceOf(buyer.address)) - usdGBeforeSell;
+const sellTokenAllowanceAfter = BigInt(await intelWithSigner.allowance(buyer.address, PERMIT2_ADDRESS));
+const sellRouterPermit = await permit2.allowance(buyer.address, intelAddress, UNIVERSAL_ROUTER_ADDRESS) as { amount?: bigint; 0?: bigint };
+const sellRouterAllowanceAfter = BigInt(sellRouterPermit.amount ?? sellRouterPermit[0] ?? 0n);
+if (!sellReceipt || sellReceipt.status !== 1 || sellReceived < minSellOut) throw new Error("Direct INTC sell did not satisfy the protected minimum USDG output");
+if (sellTokenAllowanceAfter !== 0n || sellRouterAllowanceAfter !== 0n) throw new Error("Exact direct-sell permissions were not fully consumed");
+
 async function executeV3Buy(ticker: "SGOV" | "SLV") {
   const tokenAddress = ROBINHOOD_TOKENS[ticker];
   const fee = V3_ROUTE_FEES[ticker];
@@ -194,6 +246,48 @@ async function executeV3Buy(ticker: "SGOV" | "SLV") {
   if (inputAllowanceAfter !== 0n || routerAllowanceAfter !== 0n) {
     throw new Error(`${ticker} exact permissions were not fully consumed`);
   }
+  const reverseQuote = await v3Quoter.quoteExactInputSingle.staticCall({
+    tokenIn: tokenAddress,
+    tokenOut: USDG_ADDRESS,
+    amountIn: outputReceived,
+    fee,
+    sqrtPriceLimitX96: 0,
+  }) as readonly [bigint, bigint, bigint, bigint];
+  const reverseMinimum = BigInt(reverseQuote[0]) * 9_950n / 10_000n;
+  const outputWithSigner = new Contract(tokenAddress, ERC20_ABI, buyer);
+  await (await outputWithSigner.approve(PERMIT2_ADDRESS, outputReceived)).wait();
+  const reversePermitState = await permit2.allowance(buyer.address, tokenAddress, UNIVERSAL_ROUTER_ADDRESS) as { nonce?: bigint; 2?: bigint };
+  const reverseBlock = await ethers.provider.getBlock("latest");
+  if (!reverseBlock) throw new Error("Fork has no latest block for V3 sell");
+  const reversePermit: PermitSingle = {
+    details: { token: tokenAddress, amount: outputReceived, expiration: reverseBlock.timestamp + 600, nonce: BigInt(reversePermitState.nonce ?? reversePermitState[2] ?? 0n) },
+    spender: UNIVERSAL_ROUTER_ADDRESS,
+    sigDeadline: reverseBlock.timestamp + 600,
+  };
+  const reverseSignature = await buyer.signTypedData(
+    { name: "Permit2", chainId: networkInfo.chainId, verifyingContract: PERMIT2_ADDRESS },
+    PERMIT2_TYPES,
+    reversePermit,
+  );
+  const reverseCalldata = buildV3ExactInputCalldata({
+    tokenIn: tokenAddress,
+    tokenOut: USDG_ADDRESS,
+    recipient: buyer.address,
+    amountIn: outputReceived,
+    minAmountOut: reverseMinimum,
+    fee,
+    permit: reversePermit,
+    signature: reverseSignature,
+  });
+  const reverseUsdGBefore = BigInt(await usdG.balanceOf(buyer.address));
+  const reverseTransaction = await router.execute(reverseCalldata.commands, reverseCalldata.inputs, reverseBlock.timestamp + 300);
+  const reverseReceipt = await reverseTransaction.wait();
+  const reverseReceived = BigInt(await usdG.balanceOf(buyer.address)) - reverseUsdGBefore;
+  const reverseTokenAllowance = BigInt(await outputWithSigner.allowance(buyer.address, PERMIT2_ADDRESS));
+  const reverseRouterState = await permit2.allowance(buyer.address, tokenAddress, UNIVERSAL_ROUTER_ADDRESS) as { amount?: bigint; 0?: bigint };
+  const reverseRouterAllowance = BigInt(reverseRouterState.amount ?? reverseRouterState[0] ?? 0n);
+  if (!reverseReceipt || reverseReceipt.status !== 1 || reverseReceived < reverseMinimum) throw new Error(`${ticker} V3 sell did not satisfy the protected minimum output`);
+  if (reverseTokenAllowance !== 0n || reverseRouterAllowance !== 0n) throw new Error(`${ticker} V3 sell permissions were not fully consumed`);
   return {
     pair: `${ticker}/USDG`,
     fee,
@@ -201,6 +295,8 @@ async function executeV3Buy(ticker: "SGOV" | "SLV") {
     minimumOut: formatUnits(protectedOut, 18),
     received: formatUnits(outputReceived, 18),
     gasUsed: v3Receipt.gasUsed.toString(),
+    sellReceivedUsdG: formatUnits(reverseReceived, 6),
+    sellGasUsed: reverseReceipt.gasUsed.toString(),
   };
 }
 
@@ -220,5 +316,14 @@ console.log(JSON.stringify({
   erc20Permit2AllowanceAfter: erc20Allowance.toString(),
   routerPermitAllowanceAfter: permitAmountAfter.toString(),
   gasUsed: receipt.gasUsed.toString(),
+  sell: {
+    amountIn: formatUnits(received, 18),
+    minimumUsdG: formatUnits(minSellOut, 6),
+    receivedUsdG: formatUnits(sellReceived, 6),
+    route: bestSell.route,
+    erc20Permit2AllowanceAfter: sellTokenAllowanceAfter.toString(),
+    routerPermitAllowanceAfter: sellRouterAllowanceAfter.toString(),
+    gasUsed: sellReceipt.gasUsed.toString(),
+  },
   v3Routes: v3Results,
 }, null, 2));
