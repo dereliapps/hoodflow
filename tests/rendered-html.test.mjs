@@ -129,6 +129,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(priceRoute, /Price RPC returned no usable batches/);
   assert.match(historyRoute, /0x9a6fc8f5/);
   assert.match(historyRoute, /ROUND_COUNT = 32/);
+  assert.match(historyRoute, /HISTORY_BATCH_SIZE = 8/);
+  assert.match(historyRoute, /History RPC returned no usable batches/);
+  assert.match(page, /attempt < 3/);
   assert.match(historyRoute, /decodeLatestRoundData/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 
