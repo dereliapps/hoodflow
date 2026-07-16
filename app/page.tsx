@@ -503,7 +503,7 @@ export default function Home() {
     const initial = window.setTimeout(() => void refreshPrices(controller.signal), 0);
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") void refreshPrices(controller.signal);
-    }, 30_000);
+    }, 10_000);
     const refreshVisible = () => {
       if (document.visibilityState === "visible") void refreshPrices(controller.signal);
     };
@@ -1166,7 +1166,7 @@ export default function Home() {
 
           <div className="preview-callout mainnet-callout"><div><strong>Direct Stock Token Buy and Sell is live</strong><span>All 15 full-fill V3/V4 routes receive a fresh quote before every order. Tokens without verified liquidity remain visible and blocked.</span></div><b>MAINNET BETA</b></div>
 
-          <div className="price-tape-head"><span>LIVE TOKEN PRICES</span><button onClick={() => navigate("assets")}>Open all 25 <b>&rarr;</b></button></div>
+          <div className="price-tape-head"><span>ONCHAIN ORACLE PRICES</span><button onClick={() => navigate("assets")}>Open all 25 <b>&rarr;</b></button></div>
           <div className="price-tape">
             {priceSpotlight.map((ticker) => <button key={ticker} onClick={() => openAsset(ticker)}><Mark ticker={ticker} small /><p><span>{ticker}</span><strong>{formatPrice(priceBook[ticker]?.price)}</strong></p><small className={priceBook[ticker]?.status ?? "loading"}><i />{priceBook[ticker]?.status === "live" ? formatPriceAge(priceBook[ticker].updatedAt) : priceBook[ticker]?.status ?? "Syncing"}</small></button>)}
           </div>
@@ -1180,7 +1180,7 @@ export default function Home() {
             </article>
             <article className="stats-stack">
               <div className="stat-card"><span>YOUR MAINNET ORDERS</span><strong>{confirmedCount + preparedCount}</strong><small>{confirmedCount} confirmed buys · {preparedCount} recurring</small><div className="mini-bars"><i /><i /><i /><i /><i /><i /></div></div>
-              <div className="stat-card fee-card"><span>VERIFIED PRICE FEEDS</span><strong>{priceState === "loading" ? "—" : priceState === "error" ? "Unavailable" : priceCounts.live}</strong><small>{priceState === "error" ? "Trading disabled until verification completes" : "Chainlink token prices healthy"}</small><b className="delta">BLOCK #{networkBlock}</b></div>
+              <div className="stat-card fee-card"><span>VERIFIED PRICE FEEDS</span><strong>{priceState === "loading" ? "—" : priceState === "error" ? "Unavailable" : priceCounts.live}</strong><small>{priceState === "error" ? "Trading disabled until verification completes" : "Oracle reference · execution quoted live"}</small><b className="delta">BLOCK #{networkBlock}</b></div>
             </article>
           </div>
 
@@ -1226,9 +1226,9 @@ export default function Home() {
           </div>
           <div className="asset-logo-cloud" aria-label="All supported brands">{assetRegistry.map((asset) => <Mark key={asset.ticker} ticker={asset.ticker} small />)}<span>20 stocks + 5 ETFs</span></div>
           <div className={`price-source-bar ${priceState}`}>
-            <div><span><i /> CHAINLINK / ROBINHOOD MAINNET</span><strong>{priceState === "loading" ? "Syncing price feeds" : `${priceCounts.live} live · ${priceCounts.guarded} guarded · ${25 - priceCounts.available} unavailable`}</strong></div>
+            <div><span><i /> CHAINLINK ORACLE / ROBINHOOD MAINNET</span><strong>{priceState === "loading" ? "Syncing price feeds" : `${priceCounts.live} current · ${priceCounts.guarded} guarded · ${25 - priceCounts.available} unavailable`}</strong></div>
             <p><strong>Onchain token price</strong><span>Includes Robinhood&apos;s corporate-action multiplier, so it can differ from the headline share price.</span>{priceError && <small>{priceError}</small>}</p>
-            <div className="price-refresh"><span>{priceUpdatedAt ? `Synced ${new Date(priceUpdatedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}` : "Waiting for first sync"}</span><button onClick={() => void refreshPrices()} disabled={priceRefreshing}>{priceRefreshing ? "Syncing" : "Refresh"}</button></div>
+            <div className="price-refresh"><span>{priceUpdatedAt ? `Checked ${new Date(priceUpdatedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · every 10s` : "Waiting for first check"}</span><button onClick={() => void refreshPrices()} disabled={priceRefreshing}>{priceRefreshing ? "Checking" : "Check now"}</button></div>
           </div>
           <div className="route-explainer"><div><b className="route-ready"><i />READY</b><p><strong>Can be bought with USDG</strong><span>A full-input fork swap passed. All reviewed pools are quoted again before every mainnet order.</span></p></div><div><b className="route-watch"><i />WATCH</b><p><strong>Visible, never forced</strong><span>No order is enabled until a full-fill route passes. MSFT stays blocked after a deterministic-fork partial fill, even when a live quote appears.</span></p></div></div>
           <div className="asset-toolbar">
@@ -1241,7 +1241,7 @@ export default function Home() {
             {visibleAssets.map(({ ticker, name, type, fullFill }) => <article className="asset-catalog-row" key={ticker}><button className="asset-identity" onClick={() => openAsset(ticker)}><Mark ticker={ticker} /><p><strong>{ticker}</strong><small>{name}</small></p><span>Open →</span></button><PriceCell point={priceBook[ticker]} loading={priceState === "loading"} /><span className="asset-type">{type}</span><b className={fullFill ? "route-ready" : "route-watch"}><i />{fullFill ? "Ready" : "Watch-only"}</b>{fullFill ? <div className="asset-row-actions"><button onClick={() => openAsset(ticker)}>Details</button><button className="asset-buy" onClick={() => openComposer("Buy", ticker)}>Buy with USDG</button></div> : <button className="asset-details-only" onClick={() => openAsset(ticker)}>{ticker === "MSFT" ? "Partial fill · details" : "No route · details"}</button>}</article>)}
             {visibleAssets.length === 0 && <div className="empty-state"><strong>No matching asset</strong><span>Try another ticker or clear the current filter.</span></div>}
           </div>
-          <p className="asset-footnote">Prices are informational Chainlink token prices, not execution quotes or investment recommendations. A stale or paused feed is visibly guarded and cannot be used by the execution engine.</p>
+          <p className="asset-footnote">Oracle prices are checked every 10 seconds but update only when Chainlink publishes a new round. They are informational references, not execution quotes. Every Buy or Sell receives a fresh DEX quote before wallet confirmation.</p>
         </section>
       )}
 

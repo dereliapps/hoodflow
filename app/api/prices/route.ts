@@ -27,7 +27,7 @@ export async function GET() {
 
     return NextResponse.json(parseRobinhoodPriceResults(await response.json()), {
       headers: {
-        "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=120",
+        "cache-control": "public, max-age=5, s-maxage=5, stale-while-revalidate=15",
       },
     });
   } catch {

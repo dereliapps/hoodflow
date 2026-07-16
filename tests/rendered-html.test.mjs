@@ -84,9 +84,10 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /PUBLIC_ROBINHOOD_PRICE_RPC_URL/);
   assert.match(page, /parseRobinhoodPriceResults/);
   assert.match(page, /Onchain token price/);
-  assert.match(page, /LIVE TOKEN PRICES/);
+  assert.match(page, /ONCHAIN ORACLE PRICES/);
+  assert.match(page, /every 10s/);
   assert.match(page, /Stale — blocked/);
-  assert.match(page, /CHAINLINK \/ ROBINHOOD MAINNET/);
+  assert.match(page, /CHAINLINK ORACLE \/ ROBINHOOD MAINNET/);
   assert.match(page, /The chart contains real Chainlink rounds/);
   assert.match(page, /openAsset/);
   assert.match(page, /\/api\/history\?ticker=/);
@@ -123,6 +124,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(priceLib, /0x7706ba52/);
   assert.match(priceLib, /pauseResult === false/);
   assert.match(priceRoute, /stale-while-revalidate/);
+  assert.match(priceRoute, /max-age=5, s-maxage=5/);
   assert.match(historyRoute, /0x9a6fc8f5/);
   assert.match(historyRoute, /ROUND_COUNT = 32/);
   assert.match(historyRoute, /decodeLatestRoundData/);
