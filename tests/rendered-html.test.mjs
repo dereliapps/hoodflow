@@ -125,6 +125,8 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(priceLib, /pauseResult === false/);
   assert.match(priceRoute, /stale-while-revalidate/);
   assert.match(priceRoute, /max-age=5, s-maxage=5/);
+  assert.match(priceRoute, /PRICE_BATCH_SIZE = 8/);
+  assert.match(priceRoute, /Price RPC returned no usable batches/);
   assert.match(historyRoute, /0x9a6fc8f5/);
   assert.match(historyRoute, /ROUND_COUNT = 32/);
   assert.match(historyRoute, /decodeLatestRoundData/);
