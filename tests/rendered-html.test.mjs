@@ -28,7 +28,8 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(html, /Permission Center/);
   assert.match(html, /Strategy workspace/);
   assert.match(html, /25 canonical assets indexed/);
-  assert.match(html, /13 quoted now/);
+  assert.match(html, /13 full-fill routes/);
+  assert.match(html, /2\/2 canary runs/);
   assert.match(html, /Robinhood Chain Testnet/);
   assert.match(html, /og\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
@@ -55,8 +56,9 @@ test("ships a bounded, interactive testnet experience", async () => {
   assert.match(page, /Spending limits stay enforced onchain/);
   assert.match(page, /25\/25 engine, oracle and adapter safety tests passing/);
   assert.match(page, /Best quote across 3 reviewed V4 pool configurations/);
+  assert.match(page, /2\/2 capped executions, replay blocked/);
   assert.match(page, /Twenty-five assets/);
-  assert.match(page, /13 quoted now/);
+  assert.match(page, /13 full-fill routes/);
   assert.match(page, /Independent audit/);
   assert.match(page, /MAINNET LOCKED/);
   assert.match(page, /version-badge">V6/);

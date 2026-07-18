@@ -6,8 +6,23 @@ import { configVariable, defineConfig } from "hardhat/config";
 
 const robinhoodMainnetRpcUrl =
   process.env.ROBINHOOD_MAINNET_RPC_URL ?? "https://rpc.mainnet.chain.robinhood.com";
+const robinhoodForkBlockNumber = Number(
+  process.env.ROBINHOOD_FORK_BLOCK_NUMBER ?? "10453077",
+);
+if (!Number.isSafeInteger(robinhoodForkBlockNumber) || robinhoodForkBlockNumber <= 0) {
+  throw new Error("ROBINHOOD_FORK_BLOCK_NUMBER must be a positive integer");
+}
 
 export default defineConfig({
+  chainDescriptors: {
+    4663: {
+      name: "Robinhood Chain",
+      chainType: "l1",
+      hardforkHistory: {
+        shanghai: { blockNumber: 0 },
+      },
+    },
+  },
   plugins: [
     hardhatEthers,
     hardhatEthersChaiMatchers,
@@ -50,6 +65,7 @@ export default defineConfig({
       chainId: 31337,
       forking: {
         url: robinhoodMainnetRpcUrl,
+        blockNumber: robinhoodForkBlockNumber,
       },
     },
     robinhoodTestnet: {

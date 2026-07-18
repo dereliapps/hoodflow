@@ -48,6 +48,7 @@
     "CUSO": "USO"
   },
   "launchAssets": ["AAPL", "NVDA", "GOOGL", "TSLA"],
+  "forkVerifiedAssets": ["AAPL", "AMD", "AMZN", "GOOGL", "INTC", "META", "MU", "NVDA", "SNDK", "SPCX", "TSLA", "QQQ", "SPY"],
   "sources": {
     "network": "https://docs.robinhood.com/chain/connecting/",
     "tokens": "https://docs.robinhood.com/chain/contracts/",

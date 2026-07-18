@@ -124,28 +124,57 @@ async function scanOnce() {
     const strategy = await contract.strategies(strategyId);
     const grossAmount = BigInt(strategy.amountPerExecution);
     const swapAmount = grossAmount - (grossAmount * protocolFeeBps) / BPS_DENOMINATOR;
-    const route = await selectBestRoute(strategy.tokenIn, strategy.tokenOut, swapAmount);
-    if (!route) {
+    const routes = await quoteRoutes(strategy.tokenIn, strategy.tokenOut, swapAmount);
+    if (routes.length === 0) {
       log("strategy_skipped", { strategyId, reason: "no_quoted_v4_route" });
       continue;
     }
-    routedCount++;
 
+    if (dryRun || !signer) {
+      const route = routes[0];
+      routedCount++;
+      log("route_quoted", {
+        strategyId,
+        fee: route.fee,
+        tickSpacing: route.tickSpacing,
+        quotedAmountOut: route.amountOut.toString(),
+        action: "no_broadcast",
+      });
+      continue;
+    }
+
+    let selectedRoute: (typeof routes)[number] | null = null;
+    let estimatedGas = 0n;
+    for (const route of routes) {
+      try {
+        await contract.executeDCA.staticCall(strategyId, route.data);
+        estimatedGas = await contract.executeDCA.estimateGas(strategyId, route.data);
+        selectedRoute = route;
+        break;
+      } catch (error) {
+        log("route_preflight_failed", {
+          strategyId,
+          fee: route.fee,
+          tickSpacing: route.tickSpacing,
+          error: readableError(error),
+        });
+      }
+    }
+    if (!selectedRoute) {
+      log("strategy_skipped", { strategyId, reason: "all_quoted_routes_failed_preflight" });
+      continue;
+    }
+    routedCount++;
     log("route_selected", {
       strategyId,
-      fee: route.fee,
-      tickSpacing: route.tickSpacing,
-      quotedAmountOut: route.amountOut.toString(),
-      action: dryRun || !signer ? "no_broadcast" : "preflight",
+      fee: selectedRoute.fee,
+      tickSpacing: selectedRoute.tickSpacing,
+      quotedAmountOut: selectedRoute.amountOut.toString(),
+      action: "broadcast",
     });
 
-    if (dryRun || !signer) continue;
-
     try {
-      // eth_call catches oracle, allowance, balance and adapter failures before broadcast.
-      await contract.executeDCA.staticCall(strategyId, route.data);
-      const estimatedGas: bigint = await contract.executeDCA.estimateGas(strategyId, route.data);
-      const tx = await contract.executeDCA(strategyId, route.data, {
+      const tx = await contract.executeDCA(strategyId, selectedRoute.data, {
         gasLimit: (estimatedGas * 120n) / 100n,
       });
       log("transaction_submitted", { strategyId, hash: tx.hash });
@@ -168,8 +197,8 @@ async function scanOnce() {
   });
 }
 
-async function selectBestRoute(tokenIn: string, tokenOut: string, amountIn: bigint) {
-  if (amountIn <= 0n || amountIn > UINT128_MAX) return null;
+async function quoteRoutes(tokenIn: string, tokenOut: string, amountIn: bigint) {
+  if (amountIn <= 0n || amountIn > UINT128_MAX) return [];
 
   const input = getAddress(tokenIn);
   const output = getAddress(tokenOut);
@@ -205,10 +234,9 @@ async function selectBestRoute(tokenIn: string, tokenOut: string, amountIn: bigi
 
   return quotes
     .filter((quote): quote is NonNullable<typeof quote> => quote !== null)
-    .reduce<(NonNullable<(typeof quotes)[number]>) | null>(
-      (best, quote) => (!best || quote.amountOut > best.amountOut ? quote : best),
-      null,
-    );
+    .sort((left, right) => left.amountOut === right.amountOut
+      ? 0
+      : left.amountOut > right.amountOut ? -1 : 1);
 }
 
 function required(name: string) {
