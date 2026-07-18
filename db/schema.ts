@@ -1,4 +1,14 @@
-// Intentionally empty by default.
-// Add Drizzle tables here when the site actually needs a database.
-// See examples/d1/db/schema.ts for an opt-in example.
-export {};
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+
+export const analyticsEvents = sqliteTable("analytics_events", {
+  id: text("id").primaryKey(),
+  event: text("event").notNull(),
+  path: text("path").notNull(),
+  ticker: text("ticker"),
+  sessionId: text("session_id").notNull(),
+  referrer: text("referrer").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  index("analytics_event_time_idx").on(table.event, table.createdAt),
+  index("analytics_session_time_idx").on(table.sessionId, table.createdAt),
+]);
