@@ -2,6 +2,13 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  buildRobinhoodPriceRequests,
+  parseRobinhoodPriceResults,
+  PUBLIC_ROBINHOOD_PRICE_RPC_URL,
+  type PricePoint,
+  type PriceResponse,
+} from "@/lib/robinhood-prices";
 
 type View = "overview" | "strategies" | "assets" | "marketplace" | "activity" | "controls";
 type StrategyKind = "DCA" | "Take profit" | "Rebalance";
@@ -10,20 +17,6 @@ type MarketplaceSort = "featured" | "copied" | "risk";
 type InfoPanel = "docs" | "terms";
 type BootPhase = "loading" | "leaving" | "done";
 type PriceState = "loading" | "live" | "degraded" | "error";
-type PricePoint = {
-  price: number | null;
-  updatedAt: number | null;
-  ageSeconds: number | null;
-  heartbeat: number;
-  oraclePaused: boolean | null;
-  status: "live" | "stale" | "paused" | "unavailable";
-};
-type PriceResponse = {
-  fetchedAt: string;
-  availableCount: number;
-  liveCount: number;
-  prices: Record<string, PricePoint>;
-};
 
 type Strategy = {
   id: number;
@@ -160,6 +153,8 @@ function PriceCell({ point, loading }: { point?: PricePoint; loading: boolean })
     ? "Oracle paused"
     : point.status === "stale"
       ? "Stale — blocked"
+      : point.status === "unavailable"
+        ? "Oracle check failed"
       : formatPriceAge(point.updatedAt);
   return <div className={`price-cell ${point.status}`}><strong>{formatPrice(point.price)}</strong><small><i />{detail}</small></div>;
 }
@@ -218,14 +213,31 @@ export default function Home() {
   const refreshPrices = useCallback(async (signal?: AbortSignal) => {
     setPriceRefreshing(true);
     try {
-      const response = await fetch("/api/prices", {
-        headers: { accept: "application/json" },
-        cache: "no-store",
-        signal,
-      });
-      if (!response.ok) throw new Error(`Price service returned ${response.status}`);
-      const data = await response.json() as PriceResponse;
-      if (!data.prices || typeof data.prices !== "object") throw new Error("Invalid price response");
+      let data: PriceResponse | null = null;
+      try {
+        const response = await fetch("/api/prices", {
+          headers: { accept: "application/json" },
+          cache: "no-store",
+          signal,
+        });
+        if (response.ok) {
+          const candidate = await response.json() as PriceResponse;
+          if (candidate.prices && typeof candidate.prices === "object") data = candidate;
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") throw error;
+      }
+      if (!data) {
+        const rpcResponse = await fetch(PUBLIC_ROBINHOOD_PRICE_RPC_URL, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(buildRobinhoodPriceRequests()),
+          cache: "no-store",
+          signal,
+        });
+        if (!rpcResponse.ok) throw new Error(`Price RPC returned ${rpcResponse.status}`);
+        data = parseRobinhoodPriceResults(await rpcResponse.json());
+      }
       setPriceBook(data.prices);
       setPriceUpdatedAt(Date.parse(data.fetchedAt));
       setPriceState(data.liveCount >= 24 ? "live" : "degraded");
@@ -482,7 +494,7 @@ export default function Home() {
       </div>}
       <header className="topbar">
         <button className="brand" onClick={() => setView("overview")} aria-label="HoodFlow home">
-          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V10</b>
+          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V11</b>
         </button>
         <nav className="main-nav" aria-label="Main navigation">
           {navigation.map((item) => <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>{item}</button>)}
@@ -502,7 +514,7 @@ export default function Home() {
           <div className="market-state"><span><i /> TESTNET RPC ONLINE</span><span>Block #{networkBlock}</span><span className={`price-state ${priceState}`}>{priceState === "loading" ? "SYNCING PRICES" : `${priceCounts.live} ONCHAIN PRICES LIVE`}</span><span>25/25 safety tests · 13 full-fill routes</span></div>
           <div className="page-heading">
             <div><p className="eyebrow">AUTOMATION WITHOUT CUSTODY</p><h1>Set it. Cap it.<br /><span>Let it run.</span></h1><p className="lede">Build self-running stock-token strategies with hard spending limits, live health checks and a kill switch you control.</p></div>
-            <div className="hero-command"><button className="primary-action" onClick={() => openComposer()}><span>+</span> Build an automation</button><div className="hero-proof"><span>V10 LIVE PRICING</span><strong>25 official assets indexed</strong><small>24 Chainlink feeds · freshness guarded · 0 broadcast</small></div></div>
+            <div className="hero-command"><button className="primary-action" onClick={() => openComposer()}><span>+</span> Build an automation</button><div className="hero-proof"><span>V11 LIVE PRICING</span><strong>25 official assets indexed</strong><small>24 Chainlink feeds · freshness guarded · 0 broadcast</small></div></div>
           </div>
 
           <div className="feature-dock">
