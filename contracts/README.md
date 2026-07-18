@@ -9,12 +9,21 @@
 - A keeper cannot execute early, execute twice in a catch-up burst, or exceed the total budget.
 - Both input and output Chainlink-compatible feeds must be positive, complete and inside their heartbeat.
 - The adapter receives an exact, temporary allowance that is reset to zero after use.
+- The production-candidate V4 adapter constructs the Universal Router action plan internally and permits only one hookless direct pool hop.
+- V4 pools are limited to the reviewed 0.05%, 0.30% and 1.00% fee/tick-spacing combinations.
 - Output is measured from the user's real token balance; an adapter return value is not trusted.
 - A guardian can pause immediately, but only the owner can restart execution.
 - Adapter, token, keeper and fee changes are possible only while the protocol is paused.
 
+## Verification evidence
+
+- 23 local engine and adapter scenarios pass.
+- Official Robinhood mainnet contract/token bytecode and metadata are checked by `npm run infra:verify:mainnet`.
+- AAPL/USDG, NVDA/USDG, GOOGL/USDG and TSLA/USDG execute through the official V4 Universal Router on a local fork via `npm run infra:verify:fork`.
+- The fork verification performs no real-chain broadcast.
+
 ## Mainnet blockers
 
-This code is a testnet candidate, not audited production software. Before mainnet it still needs an independent audit, a timelocked multisig owner, a reviewed chain-specific swap adapter, canonical token/feed addresses, production monitoring, incident drills and a capped canary launch.
+This code is a testnet candidate, not audited production software. Before mainnet it still needs an independent audit, a timelocked multisig owner, canonical production feed addresses, production-grade RPC and monitoring, incident drills and a capped canary launch.
 
 Never place a funded private key in this repository. Copy `.env.example` to an ignored `.env` only on the deployment or keeper host, and use a dedicated low-balance testnet wallet.

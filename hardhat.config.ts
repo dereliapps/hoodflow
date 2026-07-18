@@ -4,6 +4,9 @@ import hardhatMocha from "@nomicfoundation/hardhat-mocha";
 import hardhatNetworkHelpers from "@nomicfoundation/hardhat-network-helpers";
 import { configVariable, defineConfig } from "hardhat/config";
 
+const robinhoodMainnetRpcUrl =
+  process.env.ROBINHOOD_MAINNET_RPC_URL ?? "https://rpc.mainnet.chain.robinhood.com";
+
 export default defineConfig({
   plugins: [
     hardhatEthers,
@@ -40,6 +43,14 @@ export default defineConfig({
       type: "edr-simulated",
       chainType: "l1",
       chainId: 31337,
+    },
+    robinhoodMainnetFork: {
+      type: "edr-simulated",
+      chainType: "l1",
+      chainId: 31337,
+      forking: {
+        url: robinhoodMainnetRpcUrl,
+      },
     },
     robinhoodTestnet: {
       type: "http",

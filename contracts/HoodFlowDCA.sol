@@ -102,6 +102,8 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
     mapping(address token => TokenConfig) public tokenConfigs;
 
     uint256 public strategyCount;
+    uint256 public keeperCount;
+    uint256 public allowedTokenCount;
     ISwapAdapter public swapAdapter;
     address public guardian;
     address public feeRecipient;
@@ -135,9 +137,12 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
     ) Ownable(initialOwner) {
         if (
             initialOwner == address(0) || initialGuardian == address(0)
-                || initialSwapAdapter == address(0) || initialFeeRecipient == address(0)
+                || initialFeeRecipient == address(0)
         ) revert ZeroAddress();
         if (initialFeeBps > MAX_PROTOCOL_FEE_BPS) revert InvalidConfiguration();
+        if (initialSwapAdapter != address(0) && initialSwapAdapter.code.length == 0) {
+            revert InvalidConfiguration();
+        }
 
         guardian = initialGuardian;
         swapAdapter = ISwapAdapter(initialSwapAdapter);
@@ -150,6 +155,9 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
 
     function setKeeper(address keeper, bool allowed) external onlyOwner whenPaused {
         if (keeper == address(0)) revert ZeroAddress();
+        if (keepers[keeper] != allowed) {
+            keeperCount = allowed ? keeperCount + 1 : keeperCount - 1;
+        }
         keepers[keeper] = allowed;
         emit KeeperUpdated(keeper, allowed);
     }
@@ -166,6 +174,9 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
         uint8 feedDecimals = IPriceFeed(feed).decimals();
         if (tokenDecimals > 18 || feedDecimals > 18) revert InvalidConfiguration();
 
+        if (tokenConfigs[token].allowed != allowed) {
+            allowedTokenCount = allowed ? allowedTokenCount + 1 : allowedTokenCount - 1;
+        }
         tokenConfigs[token] = TokenConfig({
             priceFeed: IPriceFeed(feed),
             heartbeat: heartbeat,
@@ -178,6 +189,7 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
 
     function setSwapAdapter(address newAdapter) external onlyOwner whenPaused {
         if (newAdapter == address(0)) revert ZeroAddress();
+        if (newAdapter.code.length == 0) revert InvalidConfiguration();
         address previous = address(swapAdapter);
         swapAdapter = ISwapAdapter(newAdapter);
         emit SwapAdapterUpdated(previous, newAdapter);
@@ -203,6 +215,9 @@ contract HoodFlowDCA is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     function unpauseEverything() external onlyOwner {
+        if (address(swapAdapter) == address(0) || keeperCount == 0 || allowedTokenCount < 2) {
+            revert InvalidConfiguration();
+        }
         _unpause();
     }
 
