@@ -389,7 +389,7 @@ export default function Home() {
   const activityRows = useMemo(() => strategies
     .filter((item) => item.txHash)
     .sort((left, right) => right.createdAt - left.createdAt), [strategies]);
-  const bootMessage = bootProgress < 32 ? "Loading official assets" : bootProgress < 60 ? "Syncing onchain prices" : bootProgress < 82 ? "Checking safety controls" : bootProgress < 100 ? "Preparing your workspace" : "Workspace ready";
+  const bootMessage = bootProgress < 32 ? "Loading token registry" : bootProgress < 60 ? "Verifying onchain prices" : bootProgress < 82 ? "Checking trade routes" : bootProgress < 100 ? "Preparing your workspace" : "Workspace ready";
 
   useEffect(() => {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -515,6 +515,21 @@ export default function Home() {
       document.removeEventListener("visibilitychange", refreshVisible);
     };
   }, [refreshPrices]);
+
+  useEffect(() => {
+    if (priceState !== "loading") return;
+    const timeout = window.setTimeout(() => {
+      setPriceState("error");
+      setPriceError("Price feed temporarily unavailable. Trading is disabled until verification completes.");
+    }, 7_000);
+    return () => window.clearTimeout(timeout);
+  }, [priceState]);
+
+  useEffect(() => {
+    if (networkBlock !== "Checking") return;
+    const timeout = window.setTimeout(() => setNetworkBlock("Unavailable"), 7_000);
+    return () => window.clearTimeout(timeout);
+  }, [networkBlock]);
 
   useEffect(() => {
     async function readNetwork() {
@@ -1101,7 +1116,7 @@ export default function Home() {
     if (marketSort === "risk") return [...filtered].sort((left, right) => left.risk.localeCompare(right.risk));
     return filtered;
   }, [marketSearch, marketSort]);
-  const navigation: View[] = ["overview", "strategies", "assets", "marketplace", "activity", "controls"];
+  const navigation: View[] = ["overview", "assets", "strategies", "activity", "marketplace", "controls"];
 
   return (
     <main className="app-shell">
@@ -1115,11 +1130,11 @@ export default function Home() {
           <div className="launch-progress"><i style={{ "--progress": `${bootProgress}%` } as React.CSSProperties} /></div>
           <div className="launch-status"><span><i />{bootMessage}</span><strong>{bootProgress.toString().padStart(3, "0")}%</strong></div>
         </div>
-        <div className="launch-bottom"><span>NON-CUSTODIAL</span><span>MAINNET BUYING LIVE</span><span>25 OFFICIAL ASSETS</span></div>
+        <div className="launch-bottom"><span>NON-CUSTODIAL</span><span>PROTECTED QUOTES</span><span>25 INDEXED TOKENS</span></div>
       </div>}
       <header className="topbar">
         <button className="brand" onClick={() => navigate("overview")} aria-label="HoodFlow home">
-          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V14</b>
+          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">MAINNET BETA</b>
         </button>
         <nav className="main-nav" aria-label="Main navigation">
           {navigation.map((item) => <button key={item} className={view === item || (item === "assets" && view === "asset") ? "active" : ""} onClick={() => navigate(item)}>{item}</button>)}
@@ -1136,10 +1151,11 @@ export default function Home() {
 
       {view === "overview" && (
         <section className="page overview-page">
-          <div className="market-state"><span><i /> ROBINHOOD MAINNET LIVE</span><span>Block #{networkBlock}</span><span className={`price-state ${priceState}`}>{priceState === "loading" ? "SYNCING PRICES" : `${priceCounts.live} ONCHAIN PRICES LIVE`}</span><span>All verified buy routes open · DCA: {contractStatus}</span></div>
+          <div className="independence-notice"><strong>Independent interface built on Robinhood Chain.</strong><span>Not affiliated with or endorsed by Robinhood Markets, Inc.</span></div>
+          <div className="market-state"><span><i /> CHAIN 4663 CONNECTED</span><span>Block #{networkBlock}</span><span className={`price-state ${priceState}`}>{priceState === "loading" ? "VERIFYING PRICES" : priceState === "error" ? "PRICE VERIFICATION UNAVAILABLE" : `${priceCounts.live} ONCHAIN PRICES VERIFIED`}</span><span>Direct Buy + Sell enabled only for verified routes</span></div>
           <div className="page-heading">
-            <div><p className="eyebrow">STOCK TOKENS WITHOUT CUSTODY</p><h1>Buy onchain.<br /><span>Keep custody.</span></h1><p className="lede">Explore every official Robinhood stock token, inspect verified Chainlink history, and buy through protected USDG routes from your own wallet.</p></div>
-            <div className="hero-command"><button className="primary-action" onClick={() => openComposer("Buy", "INTC")}><span>+</span> Buy INTC with USDG</button><div className="hero-proof"><span>V14 WALLETCONNECT</span><strong>Desktop, QR and mobile wallets</strong><small>Live quote · exact Permit2 order · slippage protected</small></div></div>
+            <div><p className="eyebrow">SELF-CUSTODY STOCK TOKEN TRADING</p><h1>Buy Stock Tokens<br /><span>directly from your wallet.</span></h1><p className="lede">Compare live Robinhood Chain liquidity, receive a protected USDG quote and keep every purchased token in self-custody.</p></div>
+            <div className="hero-command"><button className="primary-action" onClick={() => navigate("assets")}><span>+</span> Explore Stock Tokens</button><p className="hero-risk">Stock Tokens are not shares and may be restricted in your jurisdiction. Review eligibility and product risks before transacting. <a href="https://robinhood.com/eu/en/support/articles/about-stock-tokens/" target="_blank" rel="noreferrer">Learn about Stock Token risks ↗</a></p><div className="hero-proof"><span>SELF-CUSTODY ROUTING</span><strong>Desktop, QR and mobile wallets</strong><small>Live quote · exact Permit2 order · slippage protected</small></div></div>
           </div>
 
           <div className="feature-dock">
@@ -1148,7 +1164,7 @@ export default function Home() {
             <button onClick={() => navigate("assets")}><span>03</span><div><strong>Asset Explorer</strong><small>{priceState === "loading" ? "Syncing onchain prices" : `${priceCounts.available}/25 token prices available`}</small></div><b>&rarr;</b></button>
           </div>
 
-          <div className="preview-callout mainnet-callout"><div><strong>Buy Now is live on Robinhood Chain mainnet</strong><span>Every canonical asset has a detail page. All 15 full-fill V3/V4 routes are enabled; assets without safe liquidity remain visible and clearly blocked.</span></div><b>MAINNET LIVE</b></div>
+          <div className="preview-callout mainnet-callout"><div><strong>Direct Stock Token Buy and Sell is live</strong><span>All 15 full-fill V3/V4 routes receive a fresh quote before every order. Tokens without verified liquidity remain visible and blocked.</span></div><b>MAINNET BETA</b></div>
 
           <div className="price-tape-head"><span>LIVE TOKEN PRICES</span><button onClick={() => navigate("assets")}>Open all 25 <b>&rarr;</b></button></div>
           <div className="price-tape">
@@ -1164,7 +1180,7 @@ export default function Home() {
             </article>
             <article className="stats-stack">
               <div className="stat-card"><span>YOUR MAINNET ORDERS</span><strong>{confirmedCount + preparedCount}</strong><small>{confirmedCount} confirmed buys · {preparedCount} recurring</small><div className="mini-bars"><i /><i /><i /><i /><i /><i /></div></div>
-              <div className="stat-card fee-card"><span>LIVE INFRASTRUCTURE</span><strong>{priceCounts.live}</strong><small>Chainlink prices healthy</small><b className="delta">BLOCK #{networkBlock}</b></div>
+              <div className="stat-card fee-card"><span>VERIFIED PRICE FEEDS</span><strong>{priceState === "loading" ? "—" : priceState === "error" ? "Unavailable" : priceCounts.live}</strong><small>{priceState === "error" ? "Trading disabled until verification completes" : "Chainlink token prices healthy"}</small><b className="delta">BLOCK #{networkBlock}</b></div>
             </article>
           </div>
 
@@ -1206,7 +1222,7 @@ export default function Home() {
         <section className="page inner-page assets-page">
           <div className="asset-hero">
             <div><p className="eyebrow">ROBINHOOD ASSET MATRIX</p><h1>Twenty-five assets.<br /><span>Priced onchain.</span></h1><p>Every canonical Robinhood stock token and ETF is indexed with its real brand mark and multiplier-adjusted Chainlink token price. HoodFlow only enables assets that completed a full-input fork swap; everything else stays safely watch-only.</p></div>
-            <div className="asset-totals"><div><strong>25</strong><span>OFFICIAL ASSETS</span></div><div><strong>15</strong><span>FULL-FILL READY</span></div><div><strong>10</strong><span>WATCH-ONLY</span></div></div>
+            <div className="asset-totals"><div><strong>25</strong><span>INDEXED TOKENS</span></div><div><strong>15</strong><span>FULL-FILL READY</span></div><div><strong>10</strong><span>WATCH-ONLY</span></div></div>
           </div>
           <div className="asset-logo-cloud" aria-label="All supported brands">{assetRegistry.map((asset) => <Mark key={asset.ticker} ticker={asset.ticker} small />)}<span>20 stocks + 5 ETFs</span></div>
           <div className={`price-source-bar ${priceState}`}>
@@ -1308,7 +1324,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Robinhood Chain</span><div><button onClick={() => navigate("controls")}>Security</button><button onClick={() => setInfoPanel("docs")}>Quick guide</button><button onClick={() => setInfoPanel("terms")}>Mainnet terms</button></div><span className="chain-tag mainnet-tag"><i /> DIRECT BUY LIVE</span></footer>
+      <footer><span>HoodFlow Labs · Independent interface · Build 22</span><div><button onClick={() => navigate("controls")}>Security</button><button onClick={() => setInfoPanel("docs")}>Quick guide</button><button onClick={() => setInfoPanel("terms")}>Product risks</button></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setComposerOpen(false); }}>
@@ -1339,7 +1355,7 @@ export default function Home() {
 
       {walletModalOpen && !connected && <div className="confirm-backdrop wallet-connect-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !walletConnecting) setWalletModalOpen(false); }}><section className="wallet-connect-card" role="dialog" aria-modal="true" aria-labelledby="wallet-connect-title"><div className="composer-head"><div><p className="eyebrow">NON-CUSTODIAL CONNECTION</p><h2 id="wallet-connect-title">Choose your wallet.</h2></div><button aria-label="Close wallet options" onClick={() => setWalletModalOpen(false)} disabled={walletConnecting}>x</button></div><p className="wallet-connect-intro">HoodFlow never receives your private key. Your wallet signs every mainnet permission and transaction.</p><div className="wallet-connect-options"><button type="button" className="wallet-option wallet-option-wc" onClick={() => void connectWalletConnect()} disabled={walletConnecting || walletConnectReady !== true}><span className="wallet-option-icon">W</span><span><strong>WalletConnect</strong><small>{walletConnectReady === null ? "Checking availability…" : walletConnectReady ? "QR code · mobile deep link · 500+ wallets" : "Activation pending"}</small></span><b>{walletConnectReady ? "RECOMMENDED" : "NEEDS ID"}</b></button><button type="button" className="wallet-option" onClick={() => void connectBrowserWallet()} disabled={walletConnecting}><span className="wallet-option-icon browser">↗</span><span><strong>Browser wallet</strong><small>Robinhood Wallet · MetaMask · injected wallets</small></span><b>DESKTOP</b></button></div><div className="wallet-connect-foot"><span><i /> Robinhood Chain</span><strong>CHAIN ID 4663</strong></div></section></div>}
 
-      {infoPanel && <div className="confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setInfoPanel(null); }}><section className="info-card" role="dialog" aria-modal="true" aria-labelledby="info-title"><div className="composer-head"><div><p className="eyebrow">{infoPanel === "docs" ? "QUICK GUIDE" : "MAINNET TERMS"}</p><h2 id="info-title">{infoPanel === "docs" ? "Know every status." : "Clear before you sign."}</h2></div><button aria-label="Close information" onClick={() => setInfoPanel(null)}>x</button></div>{infoPanel === "docs" ? <div className="info-list"><article><span>01</span><p><strong>Buy now</strong><small>Quotes reviewed V4 pools and swaps USDG through the official Universal Router.</small></p></article><article><span>02</span><p><strong>Exact order permission</strong><small>Permit2 signs the selected USDG amount for ten minutes; the router consumes it in this order.</small></p></article><article><span>03</span><p><strong>Full-fill ready</strong><small>The complete input passed the official-router fork test. A fresh quote is still required.</small></p></article><article><span>04</span><p><strong>Watch-only</strong><small>The asset is visible, but HoodFlow blocks its order button.</small></p></article><article><span>05</span><p><strong>Recurring DCA</strong><small>Only activates when the HoodFlow engine address, bytecode and unpaused state are verified.</small></p></article></div> : <div className="info-copy"><p>Direct buys are user-signed Robinhood Chain mainnet transactions. Your wallet remains the sender and receiver.</p><p>Before signing, verify the USDG amount, Universal Router address and minimum output shown by your wallet. Network gas is paid in ETH.</p><p>Prices can move between quote and confirmation. The transaction reverts when output falls below your selected slippage limit.</p><p>Watch-only assets and stale or paused oracle states are blocked. Recurring automation remains unavailable until its engine is deployed and verified.</p></div>}<button className="drawer-action" onClick={() => setInfoPanel(null)}>Got it</button></section></div>}
+      {infoPanel && <div className="confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setInfoPanel(null); }}><section className="info-card" role="dialog" aria-modal="true" aria-labelledby="info-title"><div className="composer-head"><div><p className="eyebrow">{infoPanel === "docs" ? "QUICK GUIDE" : "PRODUCT RISKS"}</p><h2 id="info-title">{infoPanel === "docs" ? "Know every status." : "Understand before you trade."}</h2></div><button aria-label="Close information" onClick={() => setInfoPanel(null)}>x</button></div>{infoPanel === "docs" ? <div className="info-list"><article><span>01</span><p><strong>Buy or sell</strong><small>HoodFlow compares reviewed liquidity routes and returns a protected quote.</small></p></article><article><span>02</span><p><strong>Exact order permission</strong><small>Permit2 signs only the selected token amount for ten minutes.</small></p></article><article><span>03</span><p><strong>Full-fill ready</strong><small>The complete input passed a router fork test. A fresh quote is still required.</small></p></article><article><span>04</span><p><strong>Watch-only</strong><small>The token remains visible, but HoodFlow blocks trading until a route is verified.</small></p></article><article><span>05</span><p><strong>Recurring DCA</strong><small>A separate optional automation layer; direct Buy and Sell remain the primary product.</small></p></article></div> : <div className="info-copy"><p><strong>Stock Tokens are not shares.</strong> Robinhood describes them as derivative contracts that track an underlying security without granting shareholder rights.</p><p>Stock Tokens carry a high level of risk, may not be appropriate for every investor, and eligibility or jurisdictional restrictions can apply.</p><p>HoodFlow is an independent interface built on Robinhood Chain. It is not affiliated with or endorsed by Robinhood Markets, Inc.</p><p>Verify the token amount, minimum output and router address in your wallet before signing. Network gas is paid in ETH.</p><p><a href="https://robinhood.com/eu/en/support/articles/about-stock-tokens/" target="_blank" rel="noreferrer">Review Robinhood&apos;s Stock Token explanation and risks ↗</a></p></div>}<button className="drawer-action" onClick={() => setInfoPanel(null)}>Got it</button></section></div>}
 
       {toast && <div className="toast"><span>✓</span>{toast}</div>}
     </main>
