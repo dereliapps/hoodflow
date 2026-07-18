@@ -56,7 +56,9 @@ type Market = {
   transactions24h: number;
   pairAddress: string;
   pairUrl: string;
+  quoteAddress: string;
   quoteSymbol: string;
+  quoteDecimals: number;
   dex: string;
   poolCreatedAt: string | null;
   discovery: string[];
@@ -134,7 +136,9 @@ function parseGecko(response: GeckoResponse, discovery: string, trending = false
       transactions24h: buys + sells,
       pairAddress: String(attrs.address ?? ""),
       pairUrl: `https://www.geckoterminal.com/robinhood/pools/${attrs.address}`,
+      quoteAddress: String(selected.quote.address ?? "").toLowerCase(),
       quoteSymbol: String(selected.quote.symbol ?? ""),
+      quoteDecimals: Number.isInteger(Number(selected.quote.decimals)) ? Number(selected.quote.decimals) : 18,
       dex: String(pool.relationships?.dex?.data?.id ?? "Uniswap").replace(/-robinhood$/i, "").replace(/-/g, " "),
       poolCreatedAt: attrs.pool_created_at || null,
       discovery: [discovery],
@@ -169,11 +173,49 @@ function parseCanonical(pairs: DexPair[]): Market[] {
       transactions24h: finite(pair.txns?.h24?.buys) + finite(pair.txns?.h24?.sells),
       pairAddress: String(pair.pairAddress ?? ""),
       pairUrl: pair.url || `https://dexscreener.com/robinhood/${pair.pairAddress}`,
+      quoteAddress: String(tokenIsBase ? pair.quoteToken?.address ?? "" : pair.baseToken?.address ?? "").toLowerCase(),
       quoteSymbol: String(tokenIsBase ? pair.quoteToken?.symbol ?? "" : pair.baseToken?.symbol ?? ""),
+      quoteDecimals: String(tokenIsBase ? pair.quoteToken?.symbol ?? "" : pair.baseToken?.symbol ?? "").toUpperCase() === "USDG" ? 6 : 18,
       dex: String(pair.dexId ?? "Uniswap"),
       poolCreatedAt: pair.pairCreatedAt ? new Date(pair.pairCreatedAt).toISOString() : null,
       discovery: ["Canonical RWA"],
       canonical: true,
+      trendingRank: null,
+    } satisfies Market];
+  });
+}
+
+function parseTargetPairs(pairs: DexPair[], targetAddress: string): Market[] {
+  return pairs.flatMap((pair) => {
+    const baseAddress = pair.baseToken?.address?.toLowerCase();
+    const quoteAddress = pair.quoteToken?.address?.toLowerCase();
+    const tokenIsBase = baseAddress === targetAddress;
+    if (!tokenIsBase && quoteAddress !== targetAddress) return [];
+    const token = tokenIsBase ? pair.baseToken : pair.quoteToken;
+    const quote = tokenIsBase ? pair.quoteToken : pair.baseToken;
+    if (!token?.address || !token.symbol || !quote?.address || !quote.symbol) return [];
+    const change = nullableNumber(pair.priceChange?.h24);
+    return [{
+      address: targetAddress,
+      name: String(token.name || token.symbol).slice(0, 80),
+      symbol: String(token.symbol).slice(0, 20),
+      category: classify(targetAddress, String(token.name ?? ""), String(token.symbol)),
+      imageUrl: pair.info?.imageUrl || null,
+      priceUsd: tokenIsBase ? nullableNumber(pair.priceUsd) : null,
+      priceChange24h: tokenIsBase ? change : change !== null && change !== -100 ? (-change / (100 + change)) * 100 : null,
+      volume24h: finite(pair.volume?.h24),
+      liquidityUsd: finite(pair.liquidity?.usd),
+      marketCapUsd: nullableNumber(pair.marketCap) ?? nullableNumber(pair.fdv),
+      transactions24h: finite(pair.txns?.h24?.buys) + finite(pair.txns?.h24?.sells),
+      pairAddress: String(pair.pairAddress ?? ""),
+      pairUrl: pair.url || `https://dexscreener.com/robinhood/${pair.pairAddress}`,
+      quoteAddress: String(quote.address).toLowerCase(),
+      quoteSymbol: String(quote.symbol).slice(0, 20),
+      quoteDecimals: String(quote.symbol).toUpperCase() === "USDG" ? 6 : 18,
+      dex: String(pair.dexId ?? "Uniswap"),
+      poolCreatedAt: pair.pairCreatedAt ? new Date(pair.pairCreatedAt).toISOString() : null,
+      discovery: ["Contract lookup"],
+      canonical: canonicalRwa.has(targetAddress),
       trendingRank: null,
     } satisfies Market];
   });
@@ -207,7 +249,23 @@ async function fetchGecko(path: string) {
   return response.json() as Promise<GeckoResponse>;
 }
 
-export async function GET() {
+export async function GET(request?: Request) {
+  const lookupAddress = request ? new URL(request.url).searchParams.get("token")?.toLowerCase() : null;
+  if (lookupAddress) {
+    if (!/^0x[a-f0-9]{40}$/.test(lookupAddress)) return NextResponse.json({ markets: [], error: "Invalid token address." }, { status: 400 });
+    const [gecko, dex] = await Promise.allSettled([
+      fetchGecko(`/networks/robinhood/tokens/${lookupAddress}/pools?page=1&include=base_token%2Cquote_token`),
+      fetch(`https://api.dexscreener.com/token-pairs/v1/robinhood/${lookupAddress}`, { headers: { accept: "application/json" } }).then(async (response) => {
+        if (!response.ok) throw new Error(`DEX Screener ${response.status}`);
+        return response.json() as Promise<DexPair[]>;
+      }),
+    ]);
+    const markets = mergeMarkets([
+      ...(gecko.status === "fulfilled" ? parseGecko(gecko.value, "Contract lookup").filter((market) => market.address === lookupAddress) : []),
+      ...(dex.status === "fulfilled" ? parseTargetPairs(dex.value, lookupAddress) : []),
+    ]).sort((left, right) => right.volume24h - left.volume24h);
+    return NextResponse.json({ markets, updatedAt: Date.now() }, { headers: { "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=120" } });
+  }
   const canonicalAddresses = [...canonicalRwa.keys()].join(",");
   const requests = await Promise.allSettled([
     fetchGecko("/networks/robinhood/pools?page=1&include=base_token%2Cquote_token&order=h24_volume_usd_desc"),

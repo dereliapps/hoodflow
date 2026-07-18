@@ -22,11 +22,14 @@ export const WATCH_ONLY_ASSETS = Object.keys(ROBINHOOD_TOKENS).filter(
 
 export const UNIVERSAL_ROUTER_ADDRESS = getAddress(infrastructure.contracts.universalRouter);
 export const PERMIT2_ADDRESS = getAddress(infrastructure.contracts.permit2);
+export const V2_FACTORY_ADDRESS = getAddress(infrastructure.contracts.v2Factory);
 export const V4_QUOTER_ADDRESS = getAddress(infrastructure.contracts.quoter);
 export const V3_QUOTER_ADDRESS = getAddress(infrastructure.contracts.v3Quoter);
 export const HOODFLOW_DCA_ADDRESS = getAddress(infrastructure.contracts.hoodFlowDca);
 export const USDG_ADDRESS = ROBINHOOD_TOKENS.USDG;
 export const USDG_DECIMALS = 6;
+export const WETH_ADDRESS = getAddress("0x0bd7d308f8e1639fab988df18a8011f41eacad73");
+export const WETH_DECIMALS = 18;
 export const STOCK_TOKEN_DECIMALS = 18;
 
 export const V4_POOL_CANDIDATES = [
@@ -59,6 +62,15 @@ export const V4_QUOTER_ABI = [
 
 export const V3_QUOTER_ABI = [
   "function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns (uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)",
+] as const;
+
+export const V2_FACTORY_ABI = [
+  "function getPair(address tokenA,address tokenB) view returns (address pair)",
+] as const;
+
+export const V2_PAIR_ABI = [
+  "function token0() view returns (address)",
+  "function getReserves() view returns (uint112 reserve0,uint112 reserve1,uint32 blockTimestampLast)",
 ] as const;
 
 export const UNIVERSAL_ROUTER_ABI = [
@@ -247,6 +259,37 @@ export function buildV3ExactInputCalldata(args: {
 
   return {
     commands: "0x0a00",
+    inputs: [permitInput, swapInput],
+  };
+}
+
+export function buildV2ExactInputCalldata(args: {
+  tokenIn: string;
+  tokenOut: string;
+  recipient: string;
+  amountIn: bigint;
+  minAmountOut: bigint;
+  permit: PermitSingle;
+  signature: string;
+}) {
+  const coder = AbiCoder.defaultAbiCoder();
+  const swapInput = coder.encode(
+    ["address", "uint256", "uint256", "address[]", "bool"],
+    [
+      getAddress(args.recipient),
+      args.amountIn,
+      args.minAmountOut,
+      [getAddress(args.tokenIn), getAddress(args.tokenOut)],
+      true,
+    ],
+  );
+  const permitInput = coder.encode(
+    ["tuple(tuple(address token,uint160 amount,uint48 expiration,uint48 nonce) details,address spender,uint256 sigDeadline)", "bytes"],
+    [args.permit, args.signature],
+  );
+
+  return {
+    commands: "0x0a08",
     inputs: [permitInput, swapInput],
   };
 }
