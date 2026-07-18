@@ -27,9 +27,14 @@ import {
   V4_POOL_CANDIDATES,
   V4_QUOTER_ABI,
   V4_QUOTER_ADDRESS,
+  V3_QUOTER_ABI,
+  V3_QUOTER_ADDRESS,
+  V3_ROUTE_FEES,
   buildDirectBuyCalldata,
+  buildV3DirectBuyCalldata,
   buildQuoteParams,
   isRoutedAsset,
+  isV3RoutedAsset,
   type PoolCandidate,
   type PermitSingle,
 } from "@/lib/hoodflow-mainnet";
@@ -40,11 +45,12 @@ import {
   type PricePoint,
   type PriceResponse,
 } from "@/lib/robinhood-prices";
+import { ROBINHOOD_PRICE_FEEDS } from "@/config/robinhood-price-feeds";
 
-type View = "overview" | "strategies" | "assets" | "marketplace" | "activity" | "controls";
-type StrategyKind = "Buy" | "DCA" | "Take profit" | "Rebalance";
-type StrategyStatus = "Prepared" | "Paused" | "Shadow" | "Confirmed";
-type MarketplaceSort = "featured" | "copied" | "risk";
+type View = "overview" | "strategies" | "assets" | "asset" | "marketplace" | "activity" | "controls";
+type StrategyKind = "Buy" | "DCA";
+type StrategyStatus = "Prepared" | "Paused" | "Confirmed";
+type MarketplaceSort = "featured" | "cadence" | "risk";
 type InfoPanel = "docs" | "terms";
 type BootPhase = "loading" | "leaving" | "done";
 type PriceState = "loading" | "live" | "degraded" | "error";
@@ -55,14 +61,19 @@ type Strategy = {
   kind: StrategyKind;
   asset: string;
   rule: string;
-  next: string;
+  detail: string;
   status: StrategyStatus;
-  spent: string;
-  health: number;
   budget: string;
   expires: string;
+  createdAt: number;
   txHash?: string;
   chainStrategyId?: string;
+};
+
+type HistoryPoint = {
+  roundId: string;
+  price: number;
+  updatedAt: number;
 };
 
 declare global {
@@ -73,7 +84,7 @@ declare global {
 
 const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_HOODFLOW_CONTRACT_ADDRESS?.trim() ?? "";
 const contractConfigured = /^0x[a-fA-F0-9]{40}$/.test(CONTRACT_ADDRESS);
-const DRAFT_STORAGE_KEY = "hoodflow-device-orders-v2";
+const ORDER_STORAGE_KEY = "hoodflow-mainnet-orders-v3";
 const MAX_UINT128 = (1n << 128n) - 1n;
 
 const assetRegistry = [
@@ -98,8 +109,8 @@ const assetRegistry = [
   { ticker: "TSLA", name: "Tesla", type: "Stock", fullFill: true, logo: "/logos/TSLA.png" },
   { ticker: "USAR", name: "USA Rare Earth", type: "Stock", fullFill: false, logo: "/logos/USAR.png" },
   { ticker: "QQQ", name: "Invesco QQQ", type: "ETF", fullFill: true, logo: "/logos/QQQ.png" },
-  { ticker: "SGOV", name: "iShares 0-3 Month Treasury", type: "ETF", fullFill: false, logo: "/logos/SGOV.png" },
-  { ticker: "SLV", name: "iShares Silver Trust", type: "ETF", fullFill: false, logo: "/logos/SLV.png" },
+  { ticker: "SGOV", name: "iShares 0-3 Month Treasury", type: "ETF", fullFill: true, logo: "/logos/SGOV.png" },
+  { ticker: "SLV", name: "iShares Silver Trust", type: "ETF", fullFill: true, logo: "/logos/SLV.png" },
   { ticker: "SPY", name: "SPDR S&P 500", type: "ETF", fullFill: true, logo: "/logos/SPY.png" },
   { ticker: "CUSO", name: "United States Oil Fund", type: "ETF", fullFill: false, logo: "/logos/CUSO.png" },
 ] as const;
@@ -107,25 +118,11 @@ const assetRegistry = [
 const assetByTicker = Object.fromEntries(assetRegistry.map((asset) => [asset.ticker, asset])) as Record<string, (typeof assetRegistry)[number]>;
 const priceSpotlight = ["AAPL", "NVDA", "TSLA", "GOOGL", "SPY"] as const;
 
-const starterStrategies: Strategy[] = [
-  { id: 1, name: "Intel first buy", kind: "Buy", asset: "INTC", rule: "Buy once with 20 USDG", next: "Shadow quote preview", status: "Shadow", spent: "0 USDG", health: 100, budget: "20 USDG", expires: "Device preview" },
-  { id: 2, name: "Weekly Apple", kind: "DCA", asset: "AAPL", rule: "20 USDG · weekly · 12 buys", next: "Engine deploy pending", status: "Shadow", spent: "0 USDG", health: 96, budget: "240 USDG", expires: "Device preview" },
-  { id: 3, name: "NVDA trim", kind: "Take profit", asset: "NVDA", rule: "Sell 25% at +15%", next: "Shadow condition preview", status: "Shadow", spent: "0 USDG", health: 91, budget: "25% position", expires: "Device preview" },
-];
-
 const marketplace = [
-  { name: "Steady Tech", author: "0x71...93F2", desc: "Weekly equal-weight DCA across AAPL, NVDA and GOOGL.", assets: ["AAPL", "NVDA", "GOOGL"], users: 428, volume: "$184k", fee: "0.05%", risk: "Measured", drawdown: "-5.8%", age: "184 days" },
-  { name: "Three Kings", author: "0xA4...10BD", desc: "Momentum rotation with a strict 35% cap per position.", assets: ["NVDA", "AAPL", "GOOGL"], users: 216, volume: "$96k", fee: "0.08%", risk: "Active", drawdown: "-11.2%", age: "97 days" },
-  { name: "Cash Cushion", author: "0x22...7AE1", desc: "Moves gains into USDG whenever portfolio drift exceeds 10%.", assets: ["AAPL", "NVDA", "USDG"], users: 139, volume: "$61k", fee: "0.04%", risk: "Defensive", drawdown: "-3.1%", age: "221 days" },
+  { name: "Steady Tech", desc: "Start with a weekly AAPL DCA, then add NVDA and GOOGL as separate capped strategies.", assets: ["AAPL", "NVDA", "GOOGL"], cadence: "Weekly", risk: "Measured" },
+  { name: "Chip Basket", desc: "Build a capped semiconductor schedule across NVDA, AMD, MU and INTC.", assets: ["NVDA", "AMD", "MU", "INTC"], cadence: "Weekly", risk: "Active" },
+  { name: "Index Core", desc: "Use SPY or QQQ as a simple recurring core position with a fixed lifetime budget.", assets: ["SPY", "QQQ"], cadence: "Monthly", risk: "Core" },
 ];
-
-const activityEvents = [
-  { ticker: "AAPL", event: "DCA simulation", strategy: "Monday Apple", detail: "20 USDG -> 0.0947 AAPL", time: "2 minutes ago", status: "Preview" },
-  { ticker: "AAPL", event: "Oracle freshness checked", strategy: "Monday Apple", detail: "Age 34s · within registry heartbeat", time: "2 minutes ago", status: "Passed" },
-  { ticker: "NVDA", event: "Shadow execution", strategy: "NVDA trim", detail: "Target +15% · Current +9.4%", time: "Yesterday", status: "No action" },
-  { ticker: "4", event: "Strategy paused", strategy: "Core balance", detail: "Permission paused by owner", time: "12 Jul, 18:42", status: "Confirmed" },
-  { ticker: "AAPL", event: "Slippage protected", strategy: "Monday Apple", detail: "Quote 0.0951 · received 0.0950", time: "08 Jul, 09:30", status: "Passed" },
-] as const;
 
 function Mark({ ticker, small = false }: { ticker: string; small?: boolean }) {
   const asset = assetByTicker[ticker];
@@ -203,20 +200,51 @@ function PriceCell({ point, loading }: { point?: PricePoint; loading: boolean })
   return <div className={`price-cell ${point.status}`}><strong>{formatPrice(point.price)}</strong><small><i />{detail}</small></div>;
 }
 
+function PriceHistoryChart({ points, loading }: { points: HistoryPoint[]; loading: boolean }) {
+  if (loading) {
+    return <div className="history-chart empty"><span>Loading verified Chainlink rounds…</span></div>;
+  }
+  if (points.length < 2) {
+    return <div className="history-chart empty"><span>No historical rounds are available for this asset.</span></div>;
+  }
+  const prices = points.map((point) => point.price);
+  const low = Math.min(...prices);
+  const high = Math.max(...prices);
+  const spread = Math.max(high - low, high * 0.0025);
+  const coordinates = points.map((point, index) => {
+    const x = points.length === 1 ? 0 : index / (points.length - 1) * 100;
+    const y = 88 - (point.price - low) / spread * 76;
+    return `${x.toFixed(2)}% ${Math.max(8, Math.min(92, y)).toFixed(2)}%`;
+  });
+  const area = `polygon(${coordinates.join(",")}, 100% 100%, 0 100%)`;
+  const first = new Date(points[0].updatedAt * 1_000);
+  const last = new Date(points.at(-1)!.updatedAt * 1_000);
+  return <div className="history-chart" aria-label={`Onchain price history from ${first.toLocaleDateString()} to ${last.toLocaleDateString()}`}>
+    <div className="history-grid" />
+    <div className="history-area" style={{ clipPath: area }} />
+    {points.filter((_, index) => index % Math.max(1, Math.floor(points.length / 8)) === 0 || index === points.length - 1).map((point, index, visible) => {
+      const sourceIndex = points.indexOf(point);
+      const x = sourceIndex / (points.length - 1) * 100;
+      const y = 88 - (point.price - low) / spread * 76;
+      return <i key={point.roundId} className={index === visible.length - 1 ? "latest" : ""} style={{ left: `${x}%`, top: `${Math.max(8, Math.min(92, y))}%` }} />;
+    })}
+    <div className="history-axis"><span>{first.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span><span>{last.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></div>
+  </div>;
+}
+
 function isStoredStrategy(value: unknown): value is Strategy {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<Strategy>;
   return typeof item.id === "number"
     && typeof item.name === "string"
-    && ["Buy", "DCA", "Take profit", "Rebalance"].includes(item.kind ?? "")
+    && ["Buy", "DCA"].includes(item.kind ?? "")
     && typeof item.asset === "string"
     && typeof item.rule === "string"
-    && typeof item.next === "string"
-    && ["Prepared", "Paused", "Shadow", "Confirmed"].includes(item.status ?? "")
-    && typeof item.spent === "string"
-    && typeof item.health === "number"
+    && typeof item.detail === "string"
+    && ["Prepared", "Paused", "Confirmed"].includes(item.status ?? "")
     && typeof item.budget === "string"
-    && typeof item.expires === "string";
+    && typeof item.expires === "string"
+    && typeof item.createdAt === "number";
 }
 
 export default function Home() {
@@ -232,10 +260,8 @@ export default function Home() {
   const [composerOpen, setComposerOpen] = useState(false);
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null);
   const [kind, setKind] = useState<StrategyKind>("DCA");
-  const [strategies, setStrategies] = useState(starterStrategies);
+  const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [toast, setToast] = useState("");
-  const [copied, setCopied] = useState<string | null>(null);
-  const [shadowMode, setShadowMode] = useState(true);
   const [draftName, setDraftName] = useState("Monday Apple");
   const [draftAsset, setDraftAsset] = useState("AAPL");
   const [draftAmount, setDraftAmount] = useState("20");
@@ -244,7 +270,6 @@ export default function Home() {
   const [draftSlippage, setDraftSlippage] = useState("0.5");
   const [onchainBusy, setOnchainBusy] = useState(false);
   const [transactionStep, setTransactionStep] = useState("");
-  const [confirmStop, setConfirmStop] = useState(false);
   const [assetSearch, setAssetSearch] = useState("");
   const [assetScope, setAssetScope] = useState<"all" | "routed" | "registry">("all");
   const [marketSearch, setMarketSearch] = useState("");
@@ -256,10 +281,13 @@ export default function Home() {
   const [priceUpdatedAt, setPriceUpdatedAt] = useState<number | null>(null);
   const [priceRefreshing, setPriceRefreshing] = useState(false);
   const [priceError, setPriceError] = useState("");
+  const [selectedAssetTicker, setSelectedAssetTicker] = useState("AAPL");
+  const [priceHistory, setPriceHistory] = useState<HistoryPoint[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
 
   const connected = Boolean(walletAddress);
   const preparedCount = useMemo(() => strategies.filter((item) => item.status === "Prepared").length, [strategies]);
-  const shadowCount = useMemo(() => strategies.filter((item) => item.status === "Shadow").length, [strategies]);
   const confirmedCount = useMemo(() => strategies.filter((item) => item.status === "Confirmed").length, [strategies]);
   const draftTotalBudget = useMemo(() => {
     const amount = Number(draftAmount || 0);
@@ -320,6 +348,21 @@ export default function Home() {
       available: points.filter((point) => point.price !== null).length,
     };
   }, [priceBook]);
+  const selectedAsset = assetByTicker[selectedAssetTicker] ?? assetRegistry[0];
+  const historyStats = useMemo(() => {
+    if (priceHistory.length < 2) return null;
+    const prices = priceHistory.map((point) => point.price);
+    const first = prices[0];
+    const last = prices.at(-1)!;
+    return {
+      high: Math.max(...prices),
+      low: Math.min(...prices),
+      change: first > 0 ? (last - first) / first * 100 : 0,
+    };
+  }, [priceHistory]);
+  const activityRows = useMemo(() => strategies
+    .filter((item) => item.txHash)
+    .sort((left, right) => right.createdAt - left.createdAt), [strategies]);
   const bootMessage = bootProgress < 32 ? "Loading official assets" : bootProgress < 60 ? "Syncing onchain prices" : bootProgress < 82 ? "Checking safety controls" : bootProgress < 100 ? "Preparing your workspace" : "Workspace ready";
 
   useEffect(() => {
@@ -357,7 +400,7 @@ export default function Home() {
   useEffect(() => {
     const hydrate = window.setTimeout(() => {
       try {
-        const saved = window.localStorage.getItem(DRAFT_STORAGE_KEY);
+        const saved = window.localStorage.getItem(ORDER_STORAGE_KEY);
         if (saved) {
           const parsed = JSON.parse(saved) as unknown;
           if (Array.isArray(parsed)) {
@@ -377,11 +420,57 @@ export default function Home() {
   useEffect(() => {
     if (!draftsHydrated) return;
     try {
-      window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(strategies.slice(0, 50)));
+      window.localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(strategies.slice(0, 50)));
     } catch {
       // Device storage is optional; the in-memory workspace remains usable.
     }
   }, [draftsHydrated, strategies]);
+
+  useEffect(() => {
+    const syncAssetFromUrl = () => {
+      const ticker = new URL(window.location.href).searchParams.get("asset")?.toUpperCase();
+      if (ticker && assetByTicker[ticker]) {
+        setSelectedAssetTicker(ticker);
+        setView("asset");
+      } else if (view === "asset") {
+        setView("assets");
+      }
+    };
+    syncAssetFromUrl();
+    window.addEventListener("popstate", syncAssetFromUrl);
+    return () => window.removeEventListener("popstate", syncAssetFromUrl);
+  // URL state is initialized once and then updated through openAsset.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (view !== "asset") return;
+    const controller = new AbortController();
+    const start = window.setTimeout(() => {
+      setHistoryLoading(true);
+      setHistoryError("");
+      fetch(`/api/history?ticker=${encodeURIComponent(selectedAssetTicker)}`, {
+        headers: { accept: "application/json" },
+        cache: "no-store",
+        signal: controller.signal,
+      }).then(async (response) => {
+        const payload = await response.json() as { points?: HistoryPoint[]; error?: string };
+        if (!response.ok && !payload.points) throw new Error(payload.error || "History request failed");
+        setPriceHistory(Array.isArray(payload.points) ? payload.points : []);
+        setHistoryError(payload.error ?? "");
+      }).catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setPriceHistory([]);
+        setHistoryError("Historical Chainlink rounds are temporarily unavailable.");
+      }).finally(() => {
+        if (!controller.signal.aborted) setHistoryLoading(false);
+      });
+    }, 0);
+    return () => {
+      window.clearTimeout(start);
+      controller.abort();
+    };
+  }, [selectedAssetTicker, view]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -489,17 +578,37 @@ export default function Home() {
     }
   }
 
+  function openAsset(ticker: string) {
+    if (!assetByTicker[ticker]) return;
+    setSelectedAssetTicker(ticker);
+    setView("asset");
+    const url = new URL(window.location.href);
+    url.searchParams.set("asset", ticker);
+    window.history.pushState({}, "", `${url.pathname}${url.search}`);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function navigate(nextView: View) {
+    setView(nextView);
+    if (nextView !== "asset") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("asset");
+      window.history.pushState({}, "", `${url.pathname}${url.search}`);
+    }
+  }
+
   function openComposer(nextKind: StrategyKind = "Buy", nextAsset?: string) {
     setKind(nextKind);
-    const asset = nextAsset ?? (nextKind === "Buy" ? "INTC" : nextKind === "Take profit" ? "NVDA" : "AAPL");
-    setDraftName(nextKind === "Buy" ? `${asset} instant buy` : nextKind === "DCA" ? "Weekly Apple" : nextKind === "Take profit" ? "NVDA trim" : "Core balance");
+    const asset = nextAsset && (nextKind === "Buy" || !isV3RoutedAsset(nextAsset))
+      ? nextAsset
+      : nextKind === "Buy" ? "INTC" : "AAPL";
+    setDraftName(nextKind === "Buy" ? `${asset} instant buy` : `Weekly ${asset}`);
     setDraftAsset(asset);
-    setDraftAmount(nextKind === "Buy" || nextKind === "DCA" ? "20" : nextKind === "Take profit" ? "25" : "8");
-    setDraftFrequency(nextKind === "DCA" ? "Weekly" : nextKind === "Take profit" ? "15" : "24");
+    setDraftAmount("20");
+    setDraftFrequency("Weekly");
     setDraftExecutions("12");
     setDraftSlippage("0.5");
     setTransactionStep("");
-    setShadowMode(true);
     setComposerOpen(true);
   }
 
@@ -529,19 +638,7 @@ export default function Home() {
       }
       return;
     }
-    setStrategies((current) => current.map((item) => item.id === id ? { ...item, status: item.status === "Prepared" ? "Paused" : "Prepared" } : item));
-  }
-
-  function saveShadowStrategy() {
-    const rule = kind === "Buy" ? `Buy once with ${draftAmount} USDG` : kind === "DCA" ? `${draftAmount} USDG · ${draftFrequency.toLowerCase()} · ${draftExecutions} buys` : kind === "Take profit" ? `Sell ${draftAmount}% at +${draftFrequency}%` : `Rebalance at ${draftAmount}% drift`;
-    setStrategies((current) => [{
-      id: Date.now(), name: draftName, kind, asset: kind === "Rebalance" ? "4 assets" : draftAsset,
-      rule, next: "Simulating next execution", status: "Shadow",
-      spent: "0 USDG", health: 100, budget: kind === "Buy" || kind === "DCA" ? `${draftTotalBudget.toFixed(2)} USDG` : `${draftAmount}% position`, expires: "Device preview",
-    }, ...current]);
-    setComposerOpen(false);
-    setView("strategies");
-    notify("Shadow strategy saved on this device without moving funds");
+    notify("Only onchain recurring strategies can be paused or resumed.");
   }
 
   async function executeDirectBuy(provider: BrowserProvider, address: string) {
@@ -566,8 +663,23 @@ export default function Home() {
     if (usdGBalance < amountIn) throw new Error(`You need ${draftAmount} USDG; wallet balance is ${formatUnits(usdGBalance, USDG_DECIMALS)} USDG.`);
     if (gasBalance === 0n) throw new Error("A small ETH balance is required for Robinhood Chain gas.");
 
-    setTransactionStep("Finding the best live V4 quote…");
-    const quote = await getBestV4Quote(provider, tokenOutAddress, amountIn);
+    setTransactionStep("Finding the best live verified quote…");
+    const quote = isV3RoutedAsset(draftAsset)
+      ? await (async () => {
+          const quoter = new Contract(V3_QUOTER_ADDRESS, V3_QUOTER_ABI, provider);
+          const fee = V3_ROUTE_FEES[draftAsset];
+          const result = await quoter.quoteExactInputSingle.staticCall({
+            tokenIn: USDG_ADDRESS,
+            tokenOut: tokenOutAddress,
+            amountIn,
+            fee,
+            sqrtPriceLimitX96: 0,
+          }) as readonly [bigint, bigint, bigint, bigint];
+          const amountOut = BigInt(result[0]);
+          if (amountOut <= 0n) throw new Error("No live full-fill V3 quote is available for this amount.");
+          return { protocol: "V3" as const, fee, amountOut };
+        })()
+      : await getBestV4Quote(provider, tokenOutAddress, amountIn).then((result) => ({ protocol: "V4" as const, ...result }));
     const minAmountOut = quote.amountOut * BigInt(10_000 - slippageBps) / 10_000n;
     if (minAmountOut <= 0n) throw new Error("The protected output is zero.");
 
@@ -595,14 +707,24 @@ export default function Home() {
       PERMIT2_TYPES,
       permit,
     );
-    const calldata = buildDirectBuyCalldata({
-      tokenOut: tokenOutAddress,
-      amountIn,
-      minAmountOut,
-      route: quote.route as PoolCandidate,
-      permit,
-      signature,
-    });
+    const calldata = quote.protocol === "V3"
+      ? buildV3DirectBuyCalldata({
+          tokenOut: tokenOutAddress,
+          recipient: address,
+          amountIn,
+          minAmountOut,
+          fee: quote.fee,
+          permit,
+          signature,
+        })
+      : buildDirectBuyCalldata({
+          tokenOut: tokenOutAddress,
+          amountIn,
+          minAmountOut,
+          route: quote.route as PoolCandidate,
+          permit,
+          signature,
+        });
 
     setTransactionStep(`Confirm the ${draftAsset} buy in your wallet…`);
     const router = new Contract(UNIVERSAL_ROUTER_ADDRESS, UNIVERSAL_ROUTER_ABI, signer);
@@ -616,18 +738,19 @@ export default function Home() {
 
     setStrategies((current) => [{
       id: Date.now(), name: draftName, kind: "Buy", asset: draftAsset,
-      rule: `Buy once with ${draftAmount} USDG`, next: `${Number(formatUnits(received, STOCK_TOKEN_DECIMALS)).toFixed(6)} ${draftAsset} received`, status: "Confirmed",
-      spent: `${Number(draftAmount).toFixed(2)} USDG`, health: 100, budget: `${Number(draftAmount).toFixed(2)} USDG`, expires: "Completed", txHash: receipt.hash,
+      rule: `Buy once with ${draftAmount} USDG`, detail: `${Number(formatUnits(received, STOCK_TOKEN_DECIMALS)).toFixed(6)} ${draftAsset} received`, status: "Confirmed",
+      budget: `${Number(draftAmount).toFixed(2)} USDG`, expires: "Completed", createdAt: Date.now(), txHash: receipt.hash,
     }, ...current]);
     await refreshWalletBalances(address, provider);
     setComposerOpen(false);
-    setView("strategies");
+    navigate("strategies");
     notify(`${draftAsset} buy confirmed on Robinhood Chain`);
   }
 
   async function createOnchainDca(provider: BrowserProvider, address: string) {
     if (!contractConfigured || !contractReady) throw new Error(`Recurring engine is not live yet (${contractStatus}).`);
     if (!isRoutedAsset(draftAsset)) throw new Error(`${draftAsset} is not enabled for recurring execution.`);
+    if (isV3RoutedAsset(draftAsset)) throw new Error(`${draftAsset} is enabled for Buy Now, but not for recurring V4 execution.`);
     if (priceBook[draftAsset]?.status !== "live") throw new Error(`${draftAsset} oracle is not live. The strategy is blocked.`);
     const executions = Number.parseInt(draftExecutions, 10);
     if (!Number.isInteger(executions) || executions < 2 || executions > 52) throw new Error("Choose between 2 and 52 executions.");
@@ -688,22 +811,18 @@ export default function Home() {
     if (!chainStrategyId) throw new Error("Strategy transaction confirmed but its onchain ID was not found.");
     setStrategies((current) => [{
       id: Date.now(), name: draftName, kind: "DCA", asset: draftAsset,
-      rule: `${draftAmount} USDG · ${draftFrequency.toLowerCase()} · ${executions} buys`, next: "Keeper awaiting first execution", status: "Prepared",
-      spent: "0 USDG", health: 100, budget: `${formatUnits(totalBudget, USDG_DECIMALS)} USDG`, expires: new Date(expiresAt * 1_000).toLocaleDateString("en-GB"), txHash: receipt.hash, chainStrategyId,
+      rule: `${draftAmount} USDG · ${draftFrequency.toLowerCase()} · ${executions} buys`, detail: "Keeper awaiting first execution", status: "Prepared",
+      budget: `${formatUnits(totalBudget, USDG_DECIMALS)} USDG`, expires: new Date(expiresAt * 1_000).toLocaleDateString("en-GB"), createdAt: Date.now(), txHash: receipt.hash, chainStrategyId,
     }, ...current]);
     await refreshWalletBalances(address, provider);
     setComposerOpen(false);
-    setView("strategies");
+    navigate("strategies");
     notify("Recurring strategy confirmed on Robinhood Chain");
   }
 
   async function createStrategy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!draftName.trim()) return;
-    if (shadowMode || kind === "Take profit" || kind === "Rebalance") {
-      saveShadowStrategy();
-      return;
-    }
     if (!window.ethereum || !connected) {
       notify("Connect a Robinhood Chain mainnet wallet first.");
       return;
@@ -723,31 +842,30 @@ export default function Home() {
     }
   }
 
-  function copyStrategy(name: string) {
-    setCopied(name);
-    notify(`${name} copied as a safe, editable draft`);
-  }
-
-  function stopAllStrategies() {
-    setStrategies((current) => current.map((item) => item.status === "Confirmed" || item.chainStrategyId ? item : { ...item, status: "Paused" as const }));
-    setConfirmStop(false);
-    notify("All strategy permissions paused locally");
+  function applyTemplate(asset: string, cadence: string, name: string) {
+    openComposer("DCA", asset);
+    setDraftFrequency(cadence);
+    setDraftName(name);
   }
 
   function exportActivity() {
+    if (activityRows.length === 0) {
+      notify("No mainnet activity to export yet.");
+      return;
+    }
     const escapeCell = (value: string) => `"${value.replaceAll('"', '""')}"`;
     const rows = [
-      ["Asset", "Event", "Strategy", "Detail", "Time", "Status"],
-      ...activityEvents.map((event) => [event.ticker, event.event, event.strategy, event.detail, event.time, event.status]),
+      ["Asset", "Order", "Rule", "Result", "Time", "Status", "Mainnet receipt"],
+      ...activityRows.map((item) => [item.asset, item.name, item.rule, item.detail, new Date(item.createdAt).toISOString(), item.status, `${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${item.txHash}`]),
     ];
     const csv = rows.map((row) => row.map(escapeCell).join(",")).join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
-    link.download = "hoodflow-demo-activity.csv";
+    link.download = "hoodflow-mainnet-activity.csv";
     link.click();
     URL.revokeObjectURL(url);
-    notify("Demo activity CSV downloaded");
+    notify("Mainnet activity CSV downloaded");
   }
 
   const visibleAssets = assetRegistry.filter(({ ticker, name, fullFill }) => {
@@ -758,8 +876,8 @@ export default function Home() {
   const visibleMarketplace = useMemo(() => {
     const query = marketSearch.trim().toLowerCase();
     const filtered = marketplace.filter((item) => !query || [item.name, item.desc, ...item.assets].some((value) => value.toLowerCase().includes(query)));
-    if (marketSort === "copied") return [...filtered].sort((left, right) => right.users - left.users);
-    if (marketSort === "risk") return [...filtered].sort((left, right) => Math.abs(Number.parseFloat(left.drawdown)) - Math.abs(Number.parseFloat(right.drawdown)));
+    if (marketSort === "cadence") return [...filtered].sort((left, right) => left.cadence.localeCompare(right.cadence));
+    if (marketSort === "risk") return [...filtered].sort((left, right) => left.risk.localeCompare(right.risk));
     return filtered;
   }, [marketSearch, marketSort]);
   const navigation: View[] = ["overview", "strategies", "assets", "marketplace", "activity", "controls"];
@@ -776,14 +894,14 @@ export default function Home() {
           <div className="launch-progress"><i style={{ "--progress": `${bootProgress}%` } as React.CSSProperties} /></div>
           <div className="launch-status"><span><i />{bootMessage}</span><strong>{bootProgress.toString().padStart(3, "0")}%</strong></div>
         </div>
-        <div className="launch-bottom"><span>NON-CUSTODIAL</span><span>13 ROUTES OPEN</span><span>25 OFFICIAL ASSETS</span></div>
+        <div className="launch-bottom"><span>NON-CUSTODIAL</span><span>MAINNET BUYING LIVE</span><span>25 OFFICIAL ASSETS</span></div>
       </div>}
       <header className="topbar">
-        <button className="brand" onClick={() => setView("overview")} aria-label="HoodFlow home">
-          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V12</b>
+        <button className="brand" onClick={() => navigate("overview")} aria-label="HoodFlow home">
+          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V13</b>
         </button>
         <nav className="main-nav" aria-label="Main navigation">
-          {navigation.map((item) => <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>{item}</button>)}
+          {navigation.map((item) => <button key={item} className={view === item || (item === "assets" && view === "asset") ? "active" : ""} onClick={() => navigate(item)}>{item}</button>)}
         </nav>
         <div className="top-actions">
           <span className="network"><i /> Mainnet <b>#{networkBlock}</b></span>
@@ -792,59 +910,60 @@ export default function Home() {
       </header>
 
       <div className="mobile-nav">
-        {navigation.map((item) => <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>{item}</button>)}
+        {navigation.map((item) => <button key={item} className={view === item || (item === "assets" && view === "asset") ? "active" : ""} onClick={() => navigate(item)}>{item}</button>)}
       </div>
 
       {view === "overview" && (
         <section className="page overview-page">
-          <div className="market-state"><span><i /> MAINNET RPC ONLINE</span><span>Block #{networkBlock}</span><span className={`price-state ${priceState}`}>{priceState === "loading" ? "SYNCING PRICES" : `${priceCounts.live} ONCHAIN PRICES LIVE`}</span><span>13 direct-buy routes · recurring: {contractStatus}</span></div>
+          <div className="market-state"><span><i /> ROBINHOOD MAINNET LIVE</span><span>Block #{networkBlock}</span><span className={`price-state ${priceState}`}>{priceState === "loading" ? "SYNCING PRICES" : `${priceCounts.live} ONCHAIN PRICES LIVE`}</span><span>All verified buy routes open · DCA: {contractStatus}</span></div>
           <div className="page-heading">
-            <div><p className="eyebrow">AUTOMATION WITHOUT CUSTODY</p><h1>Set it. Cap it.<br /><span>Let it run.</span></h1><p className="lede">Build self-running stock-token strategies with hard spending limits, live health checks and a kill switch you control.</p></div>
-            <div className="hero-command"><button className="primary-action" onClick={() => openComposer("Buy", "INTC")}><span>+</span> Buy INTC with USDG</button><div className="hero-proof"><span>V12 MAINNET ROUTING</span><strong>13 full-fill assets open</strong><small>Live quote · exact Permit2 order · slippage protected</small></div></div>
+            <div><p className="eyebrow">STOCK TOKENS WITHOUT CUSTODY</p><h1>Buy onchain.<br /><span>Keep custody.</span></h1><p className="lede">Explore every official Robinhood stock token, inspect verified Chainlink history, and buy through protected USDG routes from your own wallet.</p></div>
+            <div className="hero-command"><button className="primary-action" onClick={() => openComposer("Buy", "INTC")}><span>+</span> Buy INTC with USDG</button><div className="hero-proof"><span>V13 MAINNET ROUTING</span><strong>Every verified route is open</strong><small>Live quote · exact Permit2 order · slippage protected</small></div></div>
           </div>
 
           <div className="feature-dock">
             <button onClick={() => openComposer("Buy")}><span>01</span><div><strong>USDG Buy</strong><small>Direct mainnet swap with live quote</small></div><b>&rarr;</b></button>
-            <button onClick={() => setView("controls")}><span>02</span><div><strong>Permission Center</strong><small>Inspect every spending cap</small></div><b>&rarr;</b></button>
-            <button onClick={() => setView("assets")}><span>03</span><div><strong>Asset Matrix</strong><small>{priceState === "loading" ? "Syncing onchain prices" : `${priceCounts.available}/25 token prices available`}</small></div><b>&rarr;</b></button>
+            <button onClick={() => navigate("controls")}><span>02</span><div><strong>Permission Center</strong><small>Inspect every spending cap</small></div><b>&rarr;</b></button>
+            <button onClick={() => navigate("assets")}><span>03</span><div><strong>Asset Explorer</strong><small>{priceState === "loading" ? "Syncing onchain prices" : `${priceCounts.available}/25 token prices available`}</small></div><b>&rarr;</b></button>
           </div>
 
-          <div className="preview-callout mainnet-callout"><div><strong>Mainnet direct buy is ready</strong><span>Buy INTC or 12 other verified assets with USDG. Recurring DCA stays locked until the HoodFlow engine is live.</span></div><b>13 ROUTES OPEN</b></div>
+          <div className="preview-callout mainnet-callout"><div><strong>Buy Now is live on Robinhood Chain mainnet</strong><span>Every canonical asset has a detail page. All 15 full-fill V3/V4 routes are enabled; assets without safe liquidity remain visible and clearly blocked.</span></div><b>MAINNET LIVE</b></div>
 
-          <div className="price-tape-head"><span>LIVE TOKEN PRICES</span><button onClick={() => setView("assets")}>Open all 25 <b>&rarr;</b></button></div>
+          <div className="price-tape-head"><span>LIVE TOKEN PRICES</span><button onClick={() => navigate("assets")}>Open all 25 <b>&rarr;</b></button></div>
           <div className="price-tape">
-            {priceSpotlight.map((ticker) => <button key={ticker} onClick={() => setView("assets")}><Mark ticker={ticker} small /><p><span>{ticker}</span><strong>{formatPrice(priceBook[ticker]?.price)}</strong></p><small className={priceBook[ticker]?.status ?? "loading"}><i />{priceBook[ticker]?.status === "live" ? formatPriceAge(priceBook[ticker].updatedAt) : priceBook[ticker]?.status ?? "Syncing"}</small></button>)}
+            {priceSpotlight.map((ticker) => <button key={ticker} onClick={() => openAsset(ticker)}><Mark ticker={ticker} small /><p><span>{ticker}</span><strong>{formatPrice(priceBook[ticker]?.price)}</strong></p><small className={priceBook[ticker]?.status ?? "loading"}><i />{priceBook[ticker]?.status === "live" ? formatPriceAge(priceBook[ticker].updatedAt) : priceBook[ticker]?.status ?? "Syncing"}</small></button>)}
           </div>
 
           <div className="overview-grid">
             <article className="balance-card dark-card">
-              <div className="card-label"><span>{connected ? "CONNECTED WALLET" : "SAMPLE PORTFOLIO"}</span><span className="live-label"><i /> {connected ? "MAINNET" : "PREVIEW"}</span></div>
-              <div className="balance-line"><strong>{connected ? `${walletUsdgBalance} USDG` : "$12,804.62"}</strong><span>{connected ? `${walletBalance} ETH gas · ${compactAddress(walletAddress)}` : "+$284.17 today"}</span></div>
-              <div className="chart" aria-label="Portfolio performance chart"><div className="chart-area" /><div className="chart-line" /><div className="chart-dot" /><div className="chart-labels"><span>09 JUL</span><span>11 JUL</span><span>13 JUL</span><span>TODAY</span></div></div>
-              <div className="balance-foot"><span>30D return <b>+7.42%</b></span><span>Automated volume <b>$2,480</b></span><span>Avg. slippage <b>0.08%</b></span></div>
+              <div className="card-label"><span>{connected ? "CONNECTED WALLET" : "YOUR MAINNET WALLET"}</span><span className="live-label"><i /> MAINNET</span></div>
+              <div className="balance-line"><strong>{connected ? `${walletUsdgBalance} USDG` : "— USDG"}</strong><span>{connected ? `${walletBalance} ETH gas · ${compactAddress(walletAddress)}` : "Connect to view real balances and sign orders"}</span></div>
+              <div className="wallet-facts"><div><span>CHAIN</span><strong>Robinhood / 4663</strong></div><div><span>BUY ROUTER</span><strong>Universal Router</strong></div><div><span>ORDER PERMISSION</span><strong>Exact amount / 10 min</strong></div><div><span>CUSTODY</span><strong>Your wallet</strong></div></div>
+              <button className="wallet-card-action" onClick={() => void connectWallet()}>{connected ? "Disconnect wallet" : "Connect mainnet wallet"}</button>
             </article>
             <article className="stats-stack">
-              <div className="stat-card"><span>ONCHAIN / PREPARED</span><strong>{confirmedCount + preparedCount}</strong><small>{confirmedCount} confirmed · {shadowCount} shadow</small><div className="mini-bars"><i /><i /><i /><i /><i /><i /></div></div>
-              <div className="stat-card fee-card"><span>STRATEGY HEALTH</span><strong>94</strong><small>All systems normal</small><b className="delta">HEALTHY</b></div>
+              <div className="stat-card"><span>YOUR MAINNET ORDERS</span><strong>{confirmedCount + preparedCount}</strong><small>{confirmedCount} confirmed buys · {preparedCount} recurring</small><div className="mini-bars"><i /><i /><i /><i /><i /><i /></div></div>
+              <div className="stat-card fee-card"><span>LIVE INFRASTRUCTURE</span><strong>{priceCounts.live}</strong><small>Chainlink prices healthy</small><b className="delta">BLOCK #{networkBlock}</b></div>
             </article>
           </div>
 
-          <div className="section-title how-title"><div><p className="eyebrow">HOW HOODFLOW WORKS</p><h2>Three steps. You stay in control.</h2></div><button onClick={() => setView("assets")}>See ready assets <span>&rarr;</span></button></div>
+          <div className="section-title how-title"><div><p className="eyebrow">HOW HOODFLOW WORKS</p><h2>Three steps. You stay in control.</h2></div><button onClick={() => navigate("assets")}>See every asset <span>&rarr;</span></button></div>
           <div className="how-grid">
-            <article><span>01</span><div><strong>Choose an asset</strong><p>Pick from 13 full-fill verified assets. Watch-only assets stay visible but cannot prepare an order.</p></div></article>
+            <article><span>01</span><div><strong>Choose an asset</strong><p>Pick from 15 full-fill verified assets across Uniswap V3 and V4. Watch-only assets stay visible without an unsafe order button.</p></div></article>
             <article><span>02</span><div><strong>Review the live quote</strong><p>HoodFlow checks all three reviewed V4 pools, then protects the order with your slippage limit.</p></div></article>
             <article><span>03</span><div><strong>Approve only the order</strong><p>Permit2 signs the exact USDG amount. The Universal Router sends the stock token straight to your wallet.</p></div></article>
           </div>
 
-          <div className="section-title"><div><p className="eyebrow">SAFE WORKSPACE</p><h2>Strategy workspace</h2></div><button onClick={() => setView("strategies")}>View all <span>&rarr;</span></button></div>
+          <div className="section-title"><div><p className="eyebrow">MAINNET HISTORY</p><h2>Your orders</h2></div><button onClick={() => navigate("strategies")}>View all <span>&rarr;</span></button></div>
           <div className="strategy-list">
             {strategies.slice(0, 3).map((item) => <StrategyRow key={item.id} item={item} onToggle={() => toggleStrategy(item.id)} onInspect={() => setSelectedStrategy(item)} />)}
+            {strategies.length === 0 && <div className="empty-state order-empty"><strong>No mainnet orders yet</strong><span>Connect a wallet and place your first protected USDG buy.</span><button onClick={() => openComposer("Buy", "INTC")}>Buy INTC</button></div>}
           </div>
 
           <div className="trust-strip">
             <div><span className="trust-icon">P</span><p><strong>Bounded permissions</strong><small>Every strategy has an asset allowlist, spending cap and expiry.</small></p></div>
-            <div><span className="trust-icon">S</span><p><strong>Shadow Mode first</strong><small>Simulate live conditions before a strategy can touch funds.</small></p></div>
-            <button onClick={() => setView("controls")}>Open controls &rarr;</button>
+            <div><span className="trust-icon">R</span><p><strong>Receipts, not promises</strong><small>Every completed buy links to its Robinhood Chain transaction.</small></p></div>
+            <button onClick={() => navigate("controls")}>Open controls &rarr;</button>
           </div>
         </section>
       )}
@@ -852,11 +971,12 @@ export default function Home() {
       {view === "strategies" && (
         <section className="page inner-page">
           <div className="inner-heading"><div><p className="eyebrow">AUTOMATION DESK</p><h1>Orders & strategies</h1><p>Every direct buy, rule, limit and execution state in one place.</p></div><button className="primary-action" onClick={() => openComposer()}><span>+</span> New order</button></div>
-          <div className="device-save-note"><span><i /> SAVED ON THIS DEVICE</span><p>Your strategy drafts survive refreshes on this browser. Wallet keys and account data are never stored.</p></div>
-          <div className="summary-row"><div><span>Confirmed buys</span><strong>{confirmedCount}</strong></div><div><span>Prepared DCA</span><strong>{preparedCount}</strong></div><div><span>Shadow mode</span><strong>{shadowCount}</strong></div><div><span>Engine</span><strong>{contractReady ? "Live" : "Pending"}</strong></div></div>
+          <div className="device-save-note"><span><i /> RECEIPTS SAVED ON THIS DEVICE</span><p>Only your confirmed transaction references and onchain strategy IDs are kept here. Wallet keys and account data are never stored.</p></div>
+          <div className="summary-row"><div><span>Confirmed buys</span><strong>{confirmedCount}</strong></div><div><span>Prepared DCA</span><strong>{preparedCount}</strong></div><div><span>Mainnet records</span><strong>{activityRows.length}</strong></div><div><span>DCA engine</span><strong>{contractReady ? "Live" : "Pending"}</strong></div></div>
           <div className="table-card">
-            <div className="table-head upgraded"><span>STRATEGY</span><span>RULE</span><span>NEXT ACTION</span><span>HEALTH</span><span>STATUS</span><span /></div>
+            <div className="table-head upgraded"><span>ORDER</span><span>RULE</span><span>RESULT / NEXT ACTION</span><span>CHAIN</span><span>STATUS</span><span /></div>
             {strategies.map((item) => <StrategyRow key={item.id} item={item} detailed onToggle={() => toggleStrategy(item.id)} onInspect={() => setSelectedStrategy(item)} />)}
+            {strategies.length === 0 && <div className="empty-state order-empty"><strong>No onchain orders saved</strong><span>Place a mainnet buy and its receipt will appear here.</span><button onClick={() => openComposer("Buy")}>New mainnet order</button></div>}
           </div>
         </section>
       )}
@@ -865,7 +985,7 @@ export default function Home() {
         <section className="page inner-page assets-page">
           <div className="asset-hero">
             <div><p className="eyebrow">ROBINHOOD ASSET MATRIX</p><h1>Twenty-five assets.<br /><span>Priced onchain.</span></h1><p>Every canonical Robinhood stock token and ETF is indexed with its real brand mark and multiplier-adjusted Chainlink token price. HoodFlow only enables assets that completed a full-input fork swap; everything else stays safely watch-only.</p></div>
-            <div className="asset-totals"><div><strong>25</strong><span>OFFICIAL ASSETS</span></div><div><strong>13</strong><span>FULL-FILL READY</span></div><div><strong>12</strong><span>WATCH-ONLY</span></div></div>
+            <div className="asset-totals"><div><strong>25</strong><span>OFFICIAL ASSETS</span></div><div><strong>15</strong><span>FULL-FILL READY</span></div><div><strong>10</strong><span>WATCH-ONLY</span></div></div>
           </div>
           <div className="asset-logo-cloud" aria-label="All supported brands">{assetRegistry.map((asset) => <Mark key={asset.ticker} ticker={asset.ticker} small />)}<span>20 stocks + 5 ETFs</span></div>
           <div className={`price-source-bar ${priceState}`}>
@@ -881,47 +1001,81 @@ export default function Home() {
           <p className="result-count">Showing {visibleAssets.length} of 25 assets</p>
           <div className="asset-table">
             <div className="asset-table-head"><span>ASSET</span><span>ONCHAIN PRICE</span><span>TYPE</span><span>STATUS</span><span>WHAT HOODFLOW WILL DO</span></div>
-            {visibleAssets.map(({ ticker, name, type, fullFill }) => <article className="asset-catalog-row" key={ticker}><div><Mark ticker={ticker} /><p><strong>{ticker}</strong><small>{name}</small></p></div><PriceCell point={priceBook[ticker]} loading={priceState === "loading"} /><span className="asset-type">{type}</span><b className={fullFill ? "route-ready" : "route-watch"}><i />{fullFill ? "Ready" : "Watch-only"}</b>{fullFill ? <button className="asset-buy" onClick={() => openComposer("Buy", ticker)}>Buy with USDG</button> : <p className="asset-policy">{ticker === "MSFT" ? "Partial fill detected — order blocked" : "No full-fill route — order blocked"}</p>}</article>)}
+            {visibleAssets.map(({ ticker, name, type, fullFill }) => <article className="asset-catalog-row" key={ticker}><button className="asset-identity" onClick={() => openAsset(ticker)}><Mark ticker={ticker} /><p><strong>{ticker}</strong><small>{name}</small></p><span>Open →</span></button><PriceCell point={priceBook[ticker]} loading={priceState === "loading"} /><span className="asset-type">{type}</span><b className={fullFill ? "route-ready" : "route-watch"}><i />{fullFill ? "Ready" : "Watch-only"}</b>{fullFill ? <div className="asset-row-actions"><button onClick={() => openAsset(ticker)}>Details</button><button className="asset-buy" onClick={() => openComposer("Buy", ticker)}>Buy with USDG</button></div> : <button className="asset-details-only" onClick={() => openAsset(ticker)}>{ticker === "MSFT" ? "Partial fill · details" : "No route · details"}</button>}</article>)}
             {visibleAssets.length === 0 && <div className="empty-state"><strong>No matching asset</strong><span>Try another ticker or clear the current filter.</span></div>}
           </div>
           <p className="asset-footnote">Prices are informational Chainlink token prices, not execution quotes or investment recommendations. A stale or paused feed is visibly guarded and cannot be used by the execution engine.</p>
         </section>
       )}
 
+      {view === "asset" && (
+        <section className="page inner-page asset-detail-page">
+          <button className="asset-back" onClick={() => navigate("assets")}>← All assets</button>
+          <div className="asset-detail-head">
+            <div className="asset-detail-title"><Mark ticker={selectedAsset.ticker} /><div><p className="eyebrow">{selectedAsset.type.toUpperCase()} TOKEN / ROBINHOOD MAINNET</p><h1>{selectedAsset.name} <span>{selectedAsset.ticker}</span></h1></div></div>
+            <div className={`asset-detail-status ${selectedAsset.fullFill ? "ready" : "watch"}`}><i /><span>{selectedAsset.fullFill ? "MAINNET BUY READY" : "WATCH-ONLY"}</span></div>
+          </div>
+          <div className="asset-detail-grid">
+            <article className="asset-chart-card">
+              <div className="asset-price-line"><div><span>ONCHAIN TOKEN PRICE</span><strong>{formatPrice(priceBook[selectedAsset.ticker]?.price)}</strong><small>{priceBook[selectedAsset.ticker]?.status === "live" ? formatPriceAge(priceBook[selectedAsset.ticker].updatedAt) : priceBook[selectedAsset.ticker]?.status ?? "Syncing"}</small></div>{historyStats && <div className={historyStats.change >= 0 ? "positive" : "negative"}><span>ROUND RANGE</span><strong>{historyStats.change >= 0 ? "+" : ""}{historyStats.change.toFixed(2)}%</strong><small>{priceHistory.length} verified rounds</small></div>}</div>
+              <PriceHistoryChart points={priceHistory} loading={historyLoading} />
+              <div className="asset-chart-foot"><div><span>RANGE LOW</span><strong>{historyStats ? formatPrice(historyStats.low) : "—"}</strong></div><div><span>RANGE HIGH</span><strong>{historyStats ? formatPrice(historyStats.high) : "—"}</strong></div><div><span>HEARTBEAT</span><strong>{Math.round((priceBook[selectedAsset.ticker]?.heartbeat ?? 86_400) / 3_600)}h</strong></div><div><span>ORACLE</span><strong>{priceBook[selectedAsset.ticker]?.oraclePaused === false ? "Active" : priceBook[selectedAsset.ticker]?.oraclePaused === true ? "Paused" : "Unavailable"}</strong></div></div>
+              {historyError && <p className="history-error">{historyError}</p>}
+            </article>
+            <aside className="asset-trade-card">
+              <p className="eyebrow">BUY WITH USDG</p>
+              <h2>{selectedAsset.fullFill ? `Buy ${selectedAsset.ticker} on mainnet` : `${selectedAsset.ticker} is not buyable yet`}</h2>
+              <p>{selectedAsset.fullFill ? `HoodFlow uses ${isV3RoutedAsset(selectedAsset.ticker) ? "the fork-verified Uniswap V3 pool" : "the best reviewed Uniswap V4 pool"}, signs an exact short-lived Permit2 order, and sends the token directly to your wallet.` : selectedAsset.ticker === "MSFT" ? "A quote exists, but the full router fork test detected a partial fill. HoodFlow blocks the order until complete-input execution is verified." : "No reviewed USDG pool can currently fill the complete input. The asset remains indexed and monitored without exposing your wallet to a forced route."}</p>
+              <div className="trade-route-facts"><div><span>NETWORK</span><strong>Robinhood Chain / 4663</strong></div><div><span>PAY</span><strong>USDG</strong></div><div><span>RECEIVE</span><strong>{selectedAsset.ticker} token</strong></div><div><span>ROUTE</span><strong>{selectedAsset.fullFill ? `${isV3RoutedAsset(selectedAsset.ticker) ? "V3" : "V4"} full-fill verified` : "Blocked"}</strong></div></div>
+              <button className="primary-action asset-trade-action" onClick={() => openComposer("Buy", selectedAsset.ticker)} disabled={!selectedAsset.fullFill || priceBook[selectedAsset.ticker]?.status !== "live"}>{selectedAsset.fullFill ? priceBook[selectedAsset.ticker]?.status === "live" ? `Buy ${selectedAsset.ticker} with USDG` : "Waiting for live oracle" : "No safe mainnet route"}</button>
+              {!connected && selectedAsset.fullFill && <button className="connect-inline" onClick={() => void connectWallet()}>Connect wallet first</button>}
+            </aside>
+          </div>
+          <div className="asset-contract-card">
+            <div><span>TOKEN CONTRACT</span><a href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/address/${ROBINHOOD_TOKENS[selectedAsset.ticker]}`} target="_blank" rel="noreferrer">{compactAddress(ROBINHOOD_TOKENS[selectedAsset.ticker])} ↗</a></div>
+            <div><span>CHAINLINK FEED</span><strong>{ROBINHOOD_PRICE_FEEDS[selectedAsset.ticker as keyof typeof ROBINHOOD_PRICE_FEEDS].feed ? compactAddress(ROBINHOOD_PRICE_FEEDS[selectedAsset.ticker as keyof typeof ROBINHOOD_PRICE_FEEDS].feed!) : "Not listed"}</strong></div>
+            <div><span>EXECUTION POLICY</span><strong>{selectedAsset.fullFill ? "Fresh quote + slippage floor" : "Order disabled"}</strong></div>
+            <div><span>CUSTODY</span><strong>Self-custody</strong></div>
+          </div>
+          <p className="asset-footnote">The chart contains real Chainlink rounds read from Robinhood Chain. It is not fabricated market data, an execution quote, or a promise of return.</p>
+        </section>
+      )}
+
       {view === "marketplace" && (
         <section className="page inner-page">
-          <div className="market-hero"><p className="eyebrow">MARKETPLACE PREVIEW</p><h1>Copy the rules.<br />Keep control.</h1><p>Explore editable strategy concepts now. Verified execution proofs and creator payouts unlock only after the testnet indexer is live.</p></div>
-          <div className="market-toolbar"><div>{(["featured", "copied", "risk"] as MarketplaceSort[]).map((sort) => <button key={sort} className={marketSort === sort ? "selected" : ""} onClick={() => setMarketSort(sort)}>{sort === "featured" ? "Featured" : sort === "copied" ? "Most copied" : "Lowest drawdown"}</button>)}</div><label><span>Q</span><input aria-label="Search strategies" placeholder="Strategy or ticker" value={marketSearch} onChange={(event) => setMarketSearch(event.target.value)} /></label></div>
+          <div className="market-hero"><p className="eyebrow">STRATEGY TEMPLATES</p><h1>Start with a rule.<br />Set your own cap.</h1><p>Plain-language DCA templates with no invented performance, copy counts or return claims. Each template opens an editable order; nothing moves before your wallet confirms.</p></div>
+          <div className="market-toolbar"><div>{(["featured", "cadence", "risk"] as MarketplaceSort[]).map((sort) => <button key={sort} className={marketSort === sort ? "selected" : ""} onClick={() => setMarketSort(sort)}>{sort === "featured" ? "Featured" : sort === "cadence" ? "By cadence" : "By style"}</button>)}</div><label><span>Q</span><input aria-label="Search strategies" placeholder="Template or ticker" value={marketSearch} onChange={(event) => setMarketSearch(event.target.value)} /></label></div>
           <div className="market-grid">
             {visibleMarketplace.map((item, index) => (
               <article className="market-card" key={item.name}>
-                <div className="market-number">0{index + 1}</div><div className="market-top"><span className={`risk risk-${index}`}>{item.risk}</span><span>{item.fee} creator fee</span></div>
+                <div className="market-number">0{index + 1}</div><div className="market-top"><span className={`risk risk-${index}`}>{item.risk}</span><span>{item.cadence} cadence</span></div>
                 <h2>{item.name}</h2><p>{item.desc}</p><div className="asset-pile">{item.assets.map((asset) => <Mark key={asset} ticker={asset} small />)}</div>
-                <div className="market-metrics triple"><div><span>30D VOLUME</span><strong>{item.volume}</strong></div><div><span>MAX DRAWDOWN</span><strong>{item.drawdown}</strong></div><div><span>LIVE AGE</span><strong>{item.age}</strong></div></div>
-                <div className="creator"><span>by {item.author} · {item.users} copies</span><button onClick={() => copyStrategy(item.name)}>{copied === item.name ? "Added" : "Copy as draft"}</button></div>
+                <div className="market-metrics triple"><div><span>FIRST ASSET</span><strong>{item.assets[0]}</strong></div><div><span>SCHEDULE</span><strong>{item.cadence}</strong></div><div><span>ENGINE</span><strong>{contractReady ? "Live" : "Pending"}</strong></div></div>
+                <div className="creator"><span>You choose the amount, cap and slippage</span><button onClick={() => applyTemplate(item.assets[0], item.cadence, item.name)}>Use template</button></div>
               </article>
             ))}
             {visibleMarketplace.length === 0 && <div className="empty-state market-empty"><strong>No strategy found</strong><span>Try another name or asset ticker.</span></div>}
           </div>
-          <p className="market-note">Copying creates an editable local draft. Preview metrics are illustrative, not live performance or a promise of future returns.</p>
+          <p className="market-note">Recurring templates remain disabled until the HoodFlow engine is deployed, verified and unpaused on mainnet.</p>
         </section>
       )}
 
       {view === "activity" && (
         <section className="page inner-page">
-          <div className="inner-heading"><div><p className="eyebrow">AUDIT TRAIL PREVIEW</p><h1>Activity</h1><p>The event model for authorizations, checks, executions and fees. Live events begin after deployment.</p></div><button className="secondary-action" onClick={exportActivity}>Export demo CSV</button></div>
+          <div className="inner-heading"><div><p className="eyebrow">MAINNET RECEIPTS</p><h1>Activity</h1><p>Only wallet-confirmed transactions saved by this browser appear here.</p></div><button className="secondary-action" onClick={exportActivity} disabled={activityRows.length === 0}>Export CSV</button></div>
           <div className="activity-card">
-            {activityEvents.map((event, index) => <div className="activity-row" key={event.event + index}><Mark ticker={event.ticker} /><div><strong>{event.event}</strong><small>{event.strategy}</small></div><p>{event.detail}</p><time>{event.time}</time><span className="activity-status">{event.status}</span></div>)}
+            {activityRows.map((item) => <div className="activity-row" key={item.id}><Mark ticker={item.asset} /><div><strong>{item.kind === "Buy" ? "Mainnet buy" : "Recurring strategy created"}</strong><small>{item.name}</small></div><p>{item.detail}</p><time>{new Date(item.createdAt).toLocaleString()}</time><a className="activity-status" href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${item.txHash}`} target="_blank" rel="noreferrer">Receipt ↗</a></div>)}
+            {activityRows.length === 0 && <div className="empty-state order-empty"><strong>No mainnet activity yet</strong><span>Completed buys and confirmed DCA strategies will appear here with explorer receipts.</span><button onClick={() => openComposer("Buy")}>Place an order</button></div>}
           </div>
         </section>
       )}
 
       {view === "controls" && (
         <section className="page inner-page controls-page">
-          <div className="inner-heading"><div><p className="eyebrow">PERMISSION CENTER</p><h1>You hold the keys.</h1><p>Review direct-buy receipts, local previews and recurring-engine status in one place.</p></div><button className="danger-action" onClick={() => setConfirmStop(true)}>Pause local drafts</button></div>
+          <div className="inner-heading"><div><p className="eyebrow">PERMISSION CENTER</p><h1>You hold the keys.</h1><p>Review direct-buy receipts and recurring-engine status in one place.</p></div></div>
           <div className="control-grid">
-            <article className="control-card control-score"><span>PRODUCT READINESS</span><strong>13<span>/13 buy routes</span></strong><p>Direct USDG buys are fork-verified. The recurring engine remains a separate gated release.</p><div className="score-line"><i /></div></article>
-            <article className="control-card"><span>ROUTE INFRA</span><strong>13 full-fill</strong><p>13 quote-ready now · 34 bytecode checks · local fork swaps</p><b className="control-ok">VERIFIED</b></article>
+            <article className="control-card control-score"><span>PRODUCT READINESS</span><strong>15<span>/15 buy routes</span></strong><p>Direct USDG buys are fork-verified across Uniswap V3 and V4. The recurring engine remains a separate gated release.</p><div className="score-line"><i /></div></article>
+            <article className="control-card"><span>ROUTE INFRA</span><strong>15 full-fill</strong><p>15 routes live · 36 bytecode checks · protected fork swaps</p><b className="control-ok">VERIFIED</b></article>
             <article className="control-card"><span>RECURRING ENGINE</span><strong>{contractStatus}</strong><p>{contractConfigured ? compactAddress(CONTRACT_ADDRESS) : "Direct buys work without a HoodFlow engine."}</p><b className={`control-ok ${contractReady ? "" : "warning"}`}>{contractReady ? "ONCHAIN" : "GATED"}</b></article>
           </div>
           <div className="readiness-board">
@@ -929,62 +1083,62 @@ export default function Home() {
             {[
               ["01", "Protocol core", "25/25 engine, oracle and adapter safety tests passing", "complete"],
               ["02", "Bounded V4 adapter", "Hookless direct pools, fixed actions, temporary approvals", "complete"],
-              ["03", "Canonical asset registry", "20 stocks + 5 ETFs and 34 bytecode targets verified", "complete"],
+              ["03", "Canonical asset registry", "20 stocks + 5 ETFs and 36 bytecode targets verified", "complete"],
               ["04", "Dynamic route engine", "Best quote across 3 reviewed V4 pool configurations", "complete"],
               ["05", "Oracle defense", "Sequencer grace period, staleness and token pause guards", "complete"],
               ["06", "Keeper + product", "Preflight simulation, spending limits and kill switch UX", "complete"],
               ["07", "Full-engine fork canary", "2/2 capped executions, replay blocked, zero custody and allowances", "complete"],
               ["08", "Production RPC + oracle map", "Two independent RPCs and current Chainlink feeds/heartbeats", "pending"],
               ["09", "Multisig + pause drill", "Timelocked owner, separate guardian and monitored response rehearsal", "pending"],
-              ["10", "Funded network canary", "Run a 1 USDG tranche with a 2 USDG lifetime cap on public testnet", "pending"],
+              ["10", "Funded mainnet canary", "Run a 1 USDG tranche with a 2 USDG lifetime cap from the release wallet", "pending"],
               ["11", "Independent audit", "Resolve findings and pin the final report hash to this release", "locked"],
             ].map((gate) => <div className="readiness-row" key={gate[0]}><span>{gate[0]}</span><p><strong>{gate[1]}</strong><small>{gate[2]}</small></p><b className={`gate-${gate[3]}`}>{gate[3]}</b></div>)}
           </div>
           <div className="permissions-card">
-            <div className="permissions-head"><div><p className="eyebrow">LOCAL POLICY DRAFTS</p><h2>Strategy permissions</h2></div><span>{strategies.length} policies</span></div>
-            {strategies.map((item) => <div className="permission-row" key={item.id}><div className="permission-name"><Mark ticker={item.asset === "4 assets" ? "4" : item.asset} /><p><strong>{item.name}</strong><small>{item.asset} only</small></p></div><div><span>SPENDING CAP</span><strong>{item.budget}</strong></div><div><span>EXPIRES</span><strong>{item.expires}</strong></div><div><span>HEALTH</span><strong>{item.health}/100</strong></div><button onClick={() => toggleStrategy(item.id)} disabled={item.status === "Confirmed"}>{item.status === "Confirmed" ? "Settled" : item.status === "Prepared" ? "Pause" : "Prepare"}</button></div>)}
+            <div className="permissions-head"><div><p className="eyebrow">ONCHAIN ORDERS</p><h2>Strategy permissions</h2></div><span>{strategies.length} records</span></div>
+            {strategies.map((item) => <div className="permission-row" key={item.id}><div className="permission-name"><Mark ticker={item.asset} /><p><strong>{item.name}</strong><small>{item.asset} only</small></p></div><div><span>SPENDING CAP</span><strong>{item.budget}</strong></div><div><span>EXPIRES</span><strong>{item.expires}</strong></div><div><span>CHAIN</span><strong>Mainnet</strong></div><button onClick={() => toggleStrategy(item.id)} disabled={item.status === "Confirmed"}>{item.status === "Confirmed" ? "Settled" : item.status === "Prepared" ? "Pause" : "Resume"}</button></div>)}
+            {strategies.length === 0 && <div className="empty-state"><strong>No active permissions</strong><span>No HoodFlow strategy currently has a saved onchain permission.</span></div>}
           </div>
           <div className="safety-notes"><article><span>01</span><div><strong>Asset allowlist</strong><p>A strategy cannot swap into a token that was not approved when it was created.</p></div></article><article><span>02</span><div><strong>Hard budget caps</strong><p>Keepers cannot execute above the per-trade or lifetime spending limit.</p></div></article><article><span>03</span><div><strong>Automatic circuit breaker</strong><p>Stale prices, excess slippage or low liquidity stop execution before a swap.</p></div></article></div>
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Robinhood Chain</span><div><button onClick={() => setView("controls")}>Security</button><button onClick={() => setInfoPanel("docs")}>Quick guide</button><button onClick={() => setInfoPanel("terms")}>Mainnet terms</button></div><span className="testnet-tag mainnet-tag"><i /> DIRECT BUY LIVE</span></footer>
+      <footer><span>HoodFlow Labs · Robinhood Chain</span><div><button onClick={() => navigate("controls")}>Security</button><button onClick={() => setInfoPanel("docs")}>Quick guide</button><button onClick={() => setInfoPanel("terms")}>Mainnet terms</button></div><span className="chain-tag mainnet-tag"><i /> DIRECT BUY LIVE</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setComposerOpen(false); }}>
           <section className="composer wide-composer" role="dialog" aria-modal="true" aria-labelledby="composer-title">
             <div className="composer-head"><div><p className="eyebrow">NEW ORDER</p><h2 id="composer-title">Buy with limits.</h2></div><button aria-label="Close strategy builder" onClick={() => setComposerOpen(false)} disabled={onchainBusy}>x</button></div>
             <div className="kind-grid">
-              {(["Buy", "DCA", "Take profit", "Rebalance"] as StrategyKind[]).map((item, index) => <button type="button" key={item} className={kind === item ? "selected" : ""} onClick={() => openComposer(item)} disabled={onchainBusy}><span>{String(index + 1).padStart(2, "0")}</span><strong>{item === "Buy" ? "Buy now" : item}</strong><small>{item === "Buy" ? "USDG → stock token" : item === "DCA" ? contractReady ? "Recurring onchain buys" : "Engine deploy pending" : item === "Take profit" ? "Shadow preview" : "Shadow preview"}</small></button>)}
+              {(["Buy", "DCA"] as StrategyKind[]).map((item, index) => <button type="button" key={item} className={kind === item ? "selected" : ""} onClick={() => openComposer(item, draftAsset)} disabled={onchainBusy}><span>{String(index + 1).padStart(2, "0")}</span><strong>{item === "Buy" ? "Buy now" : "Recurring DCA"}</strong><small>{item === "Buy" ? "Robinhood mainnet · wallet confirmed" : contractReady ? "Recurring mainnet buys" : "Engine deploy pending"}</small></button>)}
             </div>
             <form onSubmit={createStrategy}>
               <label>ORDER NAME<input name="name" value={draftName} onChange={(event) => setDraftName(event.target.value)} required disabled={onchainBusy} /></label>
-              {kind !== "Rebalance" && <div className="asset-choice"><Mark ticker={draftAsset} /><label>ASSET <small>13 full-fill verified assets</small><select name="asset" value={draftAsset} onChange={(event) => setDraftAsset(event.target.value)}>{assetRegistry.filter((asset) => asset.fullFill).map((asset) => <option key={asset.ticker} value={asset.ticker}>{asset.ticker} · {asset.name} · {formatPrice(priceBook[asset.ticker]?.price)}</option>)}</select></label></div>}
+              <div className="asset-choice"><Mark ticker={draftAsset} /><label>ASSET <small>{kind === "Buy" ? "15 safe mainnet routes" : "13 recurring V4 routes"}</small><select name="asset" value={draftAsset} onChange={(event) => setDraftAsset(event.target.value)}>{assetRegistry.filter((asset) => asset.fullFill && (kind === "Buy" || !isV3RoutedAsset(asset.ticker))).map((asset) => <option key={asset.ticker} value={asset.ticker}>{asset.ticker} · {asset.name} · {formatPrice(priceBook[asset.ticker]?.price)}</option>)}</select></label></div>
               <div className="form-pair">
-                <label>{kind === "Buy" ? "TOTAL TO SPEND" : kind === "DCA" ? "EACH BUY" : kind === "Take profit" ? "POSITION TO SELL" : "DRIFT LIMIT"}<span className="input-unit"><input name="amount" type="number" min={kind === "Buy" || kind === "DCA" ? "0.01" : "1"} step={kind === "Buy" || kind === "DCA" ? "0.01" : "1"} value={draftAmount} onChange={(event) => setDraftAmount(event.target.value)} required disabled={onchainBusy} /><b>{kind === "Buy" || kind === "DCA" ? "USDG" : "%"}</b></span></label>
-                {kind === "Buy" || kind === "DCA" ? <label>MAX SLIPPAGE<span className="input-unit"><input name="slippage" type="number" min="0.1" max="5" step="0.1" value={draftSlippage} onChange={(event) => setDraftSlippage(event.target.value)} required disabled={onchainBusy} /><b>%</b></span></label> : <label>{kind === "Take profit" ? "PROFIT TARGET" : "CHECK"}<span className="input-unit"><input name="frequency" type="number" min="1" value={draftFrequency} onChange={(event) => setDraftFrequency(event.target.value)} disabled={onchainBusy} /><b>{kind === "Take profit" ? "%" : "HR"}</b></span></label>}
+                <label>{kind === "Buy" ? "TOTAL TO SPEND" : "EACH BUY"}<span className="input-unit"><input name="amount" type="number" min="0.01" step="0.01" value={draftAmount} onChange={(event) => setDraftAmount(event.target.value)} required disabled={onchainBusy} /><b>USDG</b></span></label>
+                <label>MAX SLIPPAGE<span className="input-unit"><input name="slippage" type="number" min="0.1" max="5" step="0.1" value={draftSlippage} onChange={(event) => setDraftSlippage(event.target.value)} required disabled={onchainBusy} /><b>%</b></span></label>
               </div>
               {kind === "DCA" && <div className="form-pair"><label>SCHEDULE<select name="frequency" value={draftFrequency} onChange={(event) => setDraftFrequency(event.target.value)} disabled={onchainBusy}><option>Daily</option><option>Weekly</option><option>Monthly</option></select></label><label>NUMBER OF BUYS<span className="input-unit"><input name="executions" type="number" min="2" max={draftFrequency === "Daily" ? "52" : draftFrequency === "Weekly" ? "52" : "12"} value={draftExecutions} onChange={(event) => setDraftExecutions(event.target.value)} disabled={onchainBusy} /><b>×</b></span></label></div>}
-              <button type="button" className={`shadow-toggle ${shadowMode ? "on" : ""}`} onClick={() => { if (kind === "Take profit" || kind === "Rebalance") notify("This strategy type is Shadow-only for now."); else setShadowMode((current) => !current); }} disabled={onchainBusy}><i /><span><strong>{shadowMode ? "Shadow Mode is on" : kind === "Buy" ? "Mainnet buy is on" : "Onchain DCA is on"}</strong><small>{shadowMode ? "Simulate without moving funds." : kind === "Buy" ? "USDG swaps through the official Universal Router." : `Recurring engine: ${contractStatus}.`}</small></span><b>{shadowMode ? "SAFE" : "LIVE"}</b></button>
-              <div className="execution-preview"><div className="preview-head"><span>EXECUTION PREVIEW</span><b>{shadowMode ? "NO FUNDS AT RISK" : kind === "Buy" ? "MAINNET · WALLET CONFIRMATION" : contractReady ? "MAINNET DCA" : "ENGINE PENDING"}</b></div><div className="preview-grid"><p><span>Estimated receive</span><strong>{kind === "Buy" || kind === "DCA" ? `${estimatedUnits} ${draftAsset}${kind === "DCA" ? " each" : ""}` : "Condition based"}</strong></p><p><span>Total USDG cap</span><strong>{kind === "Buy" || kind === "DCA" ? `${draftTotalBudget.toFixed(2)} USDG` : "Shadow only"}</strong></p><p><span>Execution protection</span><strong>{kind === "Buy" ? `Best of 3 pools · ${draftSlippage}% max` : kind === "DCA" ? `${draftSlippage}% max · engine cap` : "No broadcast"}</strong></p><p><span>Oracle status</span><strong>{priceBook[draftAsset]?.status === "live" ? formatPriceAge(priceBook[draftAsset].updatedAt) : priceBook[draftAsset]?.status ?? "Syncing"}</strong></p></div></div>
+              <div className="live-order-banner"><i /><span><strong>{kind === "Buy" ? "Robinhood Chain mainnet order" : contractReady ? "Mainnet recurring strategy" : "Recurring engine is not deployed"}</strong><small>{kind === "Buy" ? "Your wallet will approve and confirm a real USDG swap." : contractReady ? "The onchain engine enforces your schedule and lifetime cap." : "DCA stays disabled. Buy Now remains fully available."}</small></span><b>{kind === "Buy" || contractReady ? "LIVE" : "GATED"}</b></div>
+              <div className="execution-preview"><div className="preview-head"><span>ORDER REVIEW</span><b>{kind === "Buy" ? "MAINNET · WALLET CONFIRMATION" : contractReady ? "MAINNET DCA" : "ENGINE PENDING"}</b></div><div className="preview-grid"><p><span>Estimated receive</span><strong>{`${estimatedUnits} ${draftAsset}${kind === "DCA" ? " each" : ""}`}</strong></p><p><span>Total USDG cap</span><strong>{`${draftTotalBudget.toFixed(2)} USDG`}</strong></p><p><span>Execution protection</span><strong>{kind === "Buy" ? `${isV3RoutedAsset(draftAsset) ? "Verified V3 pool" : "Best reviewed V4 pool"} · ${draftSlippage}% max` : `${draftSlippage}% max · engine cap`}</strong></p><p><span>Oracle status</span><strong>{priceBook[draftAsset]?.status === "live" ? formatPriceAge(priceBook[draftAsset].updatedAt) : priceBook[draftAsset]?.status ?? "Syncing"}</strong></p></div></div>
               <div className="limit-note"><span>✓</span><p><strong>{kind === "Buy" ? "The order permission is exact and short-lived." : "Spending limits stay enforced onchain."}</strong><small>{kind === "Buy" ? "HoodFlow signs only this USDG amount for the router. Any existing wallet-level Permit2 token approval is never increased when it is already sufficient." : "The recurring engine cannot execute outside the selected asset, total budget, schedule and expiry."}</small></p></div>
               {transactionStep && <div className="transaction-step"><i /><span>{transactionStep}</span></div>}
-              <div className="composer-actions"><button type="button" onClick={() => setComposerOpen(false)} disabled={onchainBusy}>Cancel</button><button type="submit" className="primary-action" disabled={onchainBusy || (!shadowMode && kind === "DCA" && !contractReady)}>{onchainBusy ? "Working…" : shadowMode ? "Start simulation" : kind === "Buy" ? connected ? `Buy ${draftAsset} with USDG` : "Connect wallet first" : contractReady ? "Create onchain DCA" : "Engine deploy pending"} <span>&rarr;</span></button></div>
+              <div className="composer-actions"><button type="button" onClick={() => setComposerOpen(false)} disabled={onchainBusy}>Cancel</button><button type="submit" className="primary-action" disabled={onchainBusy || (kind === "DCA" && !contractReady)}>{onchainBusy ? "Working…" : kind === "Buy" ? connected ? `Buy ${draftAsset} with USDG` : "Connect wallet first" : contractReady ? "Create onchain DCA" : "Engine deploy pending"} <span>&rarr;</span></button></div>
             </form>
           </section>
         </div>
       )}
 
-      {selectedStrategy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedStrategy(null); }}><section className="detail-drawer" role="dialog" aria-modal="true" aria-label={`${selectedStrategy.name} details`}><div className="composer-head"><div><p className="eyebrow">ORDER HEALTH</p><h2>{selectedStrategy.name}</h2></div><button onClick={() => setSelectedStrategy(null)}>x</button></div><div className="health-hero"><strong>{selectedStrategy.health}</strong><span>/100</span><p>{selectedStrategy.status}</p></div><div className="health-checks"><div><span>Oracle rule</span><strong>Feed + token pause <b>PASS</b></strong></div><div><span>Budget rule</span><strong>Bounded <b>PASS</b></strong></div><div><span>Route rule</span><strong>Full-fill verified <b>PASS</b></strong></div><div><span>Slippage rule</span><strong>Bounded <b>PASS</b></strong></div></div><div className="permission-summary"><p><span>Asset access</span><strong>{selectedStrategy.asset} only</strong></p><p><span>Spending cap</span><strong>{selectedStrategy.budget}</strong></p><p><span>Permission expires</span><strong>{selectedStrategy.expires}</strong></p></div>{selectedStrategy.txHash ? <a className="drawer-action receipt-link" href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${selectedStrategy.txHash}`} target="_blank" rel="noreferrer">View mainnet receipt ↗</a> : <button className="drawer-action" onClick={() => { toggleStrategy(selectedStrategy.id); setSelectedStrategy(null); }}>{selectedStrategy.status === "Prepared" ? "Pause strategy" : "Prepare strategy"}</button>}</section></div>}
+      {selectedStrategy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedStrategy(null); }}><section className="detail-drawer" role="dialog" aria-modal="true" aria-label={`${selectedStrategy.name} details`}><div className="composer-head"><div><p className="eyebrow">MAINNET ORDER</p><h2>{selectedStrategy.name}</h2></div><button onClick={() => setSelectedStrategy(null)}>x</button></div><div className="order-status-hero"><Mark ticker={selectedStrategy.asset} /><div><strong>{selectedStrategy.status}</strong><span>{selectedStrategy.detail}</span></div></div><div className="health-checks"><div><span>Network</span><strong>Robinhood Chain <b>4663</b></strong></div><div><span>Order type</span><strong>{selectedStrategy.kind} <b>ONCHAIN</b></strong></div><div><span>Asset</span><strong>{selectedStrategy.asset} <b>ONLY</b></strong></div><div><span>Created</span><strong>{new Date(selectedStrategy.createdAt).toLocaleString()}</strong></div></div><div className="permission-summary"><p><span>Rule</span><strong>{selectedStrategy.rule}</strong></p><p><span>Spending cap</span><strong>{selectedStrategy.budget}</strong></p><p><span>Permission expires</span><strong>{selectedStrategy.expires}</strong></p></div>{selectedStrategy.txHash ? <a className="drawer-action receipt-link" href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${selectedStrategy.txHash}`} target="_blank" rel="noreferrer">View mainnet receipt ↗</a> : null}</section></div>}
 
       {infoPanel && <div className="confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setInfoPanel(null); }}><section className="info-card" role="dialog" aria-modal="true" aria-labelledby="info-title"><div className="composer-head"><div><p className="eyebrow">{infoPanel === "docs" ? "QUICK GUIDE" : "MAINNET TERMS"}</p><h2 id="info-title">{infoPanel === "docs" ? "Know every status." : "Clear before you sign."}</h2></div><button aria-label="Close information" onClick={() => setInfoPanel(null)}>x</button></div>{infoPanel === "docs" ? <div className="info-list"><article><span>01</span><p><strong>Buy now</strong><small>Quotes reviewed V4 pools and swaps USDG through the official Universal Router.</small></p></article><article><span>02</span><p><strong>Exact order permission</strong><small>Permit2 signs the selected USDG amount for ten minutes; the router consumes it in this order.</small></p></article><article><span>03</span><p><strong>Full-fill ready</strong><small>The complete input passed the official-router fork test. A fresh quote is still required.</small></p></article><article><span>04</span><p><strong>Watch-only</strong><small>The asset is visible, but HoodFlow blocks its order button.</small></p></article><article><span>05</span><p><strong>Recurring DCA</strong><small>Only activates when the HoodFlow engine address, bytecode and unpaused state are verified.</small></p></article></div> : <div className="info-copy"><p>Direct buys are user-signed Robinhood Chain mainnet transactions. Your wallet remains the sender and receiver.</p><p>Before signing, verify the USDG amount, Universal Router address and minimum output shown by your wallet. Network gas is paid in ETH.</p><p>Prices can move between quote and confirmation. The transaction reverts when output falls below your selected slippage limit.</p><p>Watch-only assets and stale or paused oracle states are blocked. Recurring automation remains unavailable until its engine is deployed and verified.</p></div>}<button className="drawer-action" onClick={() => setInfoPanel(null)}>Got it</button></section></div>}
 
-      {confirmStop && <div className="confirm-backdrop"><section className="confirm-card" role="alertdialog" aria-modal="true"><p className="eyebrow">LOCAL CONTROL</p><h2>Pause every local draft?</h2><p>This changes Shadow and prepared rows saved in this browser. Settled mainnet buys are final and remain visible in history.</p><div><button onClick={() => setConfirmStop(false)}>Cancel</button><button onClick={stopAllStrategies}>Pause local drafts</button></div></section></div>}
       {toast && <div className="toast"><span>✓</span>{toast}</div>}
     </main>
   );
 }
 
 function StrategyRow({ item, detailed = false, onToggle, onInspect }: { item: Strategy; detailed?: boolean; onToggle: () => void; onInspect: () => void }) {
-  return <article className={`strategy-row ${detailed ? "detailed upgraded" : ""}`}><div className="strategy-name"><Mark ticker={item.asset === "4 assets" ? "4" : item.asset} /><p><strong>{item.name}</strong><small>{item.kind} · {item.asset}</small></p></div><div className="rule-cell"><span>{detailed ? "" : "RULE"}</span><strong>{item.rule}</strong></div><div className="next-cell"><span>{detailed ? "" : "NEXT"}</span><strong>{item.next}</strong></div>{detailed && <div className="health-cell"><strong>{item.health}</strong><span>/100</span></div>}<button className={`status-button ${item.status.toLowerCase()}`} onClick={onToggle} disabled={item.status === "Confirmed"}><i />{item.status}</button><button className="row-more" onClick={onInspect} aria-label={`Inspect ${item.name}`}>DETAILS</button></article>;
+  return <article className={`strategy-row ${detailed ? "detailed upgraded" : ""}`}><div className="strategy-name"><Mark ticker={item.asset} /><p><strong>{item.name}</strong><small>{item.kind} · {item.asset}</small></p></div><div className="rule-cell"><span>{detailed ? "" : "RULE"}</span><strong>{item.rule}</strong></div><div className="next-cell"><span>{detailed ? "" : "RESULT"}</span><strong>{item.detail}</strong></div>{detailed && <div className="health-cell"><strong>4663</strong><span>MAINNET</span></div>}<button className={`status-button ${item.status.toLowerCase()}`} onClick={onToggle} disabled={item.status === "Confirmed"}><i />{item.status}</button><button className="row-more" onClick={onInspect} aria-label={`Inspect ${item.name}`}>DETAILS</button></article>;
 }
