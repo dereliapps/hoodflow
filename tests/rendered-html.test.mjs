@@ -26,7 +26,8 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(html, /Build an automation/);
   assert.match(html, /Set it\. Cap it\./);
   assert.match(html, /Permission Center/);
-  assert.match(html, /Active strategies/);
+  assert.match(html, /Strategy workspace/);
+  assert.match(html, /Protocol core verified/);
   assert.match(html, /Robinhood Chain Testnet/);
   assert.match(html, /og\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
@@ -51,6 +52,8 @@ test("ships a bounded, interactive testnet experience", async () => {
   assert.match(page, /Pause everything/);
   assert.match(page, /EXECUTION PREVIEW/);
   assert.match(page, /Spending limits stay enforced onchain/);
+  assert.match(page, /12\/12 safety scenarios passing/);
+  assert.match(page, /Independent audit/);
   assert.match(page, /TESTNET ONLY/);
   assert.match(layout, /HoodFlow — Portfolio automation/);
   assert.match(layout, /Instrument_Sans/);

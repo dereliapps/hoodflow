@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type View = "overview" | "strategies" | "marketplace" | "activity" | "controls";
 type StrategyKind = "DCA" | "Take profit" | "Rebalance";
-type StrategyStatus = "Live" | "Paused" | "Shadow";
+type StrategyStatus = "Prepared" | "Paused" | "Shadow";
 
 type Strategy = {
   id: number;
@@ -38,6 +38,9 @@ const TESTNET = {
   blockExplorerUrls: ["https://explorer.testnet.chain.robinhood.com"],
 };
 
+const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_HOODFLOW_CONTRACT_ADDRESS?.trim() ?? "";
+const contractConfigured = /^0x[a-fA-F0-9]{40}$/.test(CONTRACT_ADDRESS);
+
 const assetMeta: Record<string, { name: string; color: string; price: number; move: string }> = {
   AAPL: { name: "Apple", color: "#e8edf2", price: 211.18, move: "+1.24%" },
   NVDA: { name: "NVIDIA", color: "#76b900", price: 176.42, move: "+2.82%" },
@@ -46,7 +49,7 @@ const assetMeta: Record<string, { name: string; color: string; price: number; mo
 };
 
 const starterStrategies: Strategy[] = [
-  { id: 1, name: "Monday Apple", kind: "DCA", asset: "AAPL", rule: "20 USDG every Monday", next: "Mon, 09:30 UTC", status: "Live", spent: "160 USDG", health: 96, budget: "240 USDG", expires: "30 Sep 2026" },
+  { id: 1, name: "Monday Apple", kind: "DCA", asset: "AAPL", rule: "20 USDG every Monday", next: "Authorization draft ready", status: "Prepared", spent: "160 USDG", health: 96, budget: "240 USDG", expires: "30 Sep 2026" },
   { id: 2, name: "NVDA trim", kind: "Take profit", asset: "NVDA", rule: "Sell 25% at +15%", next: "Watching price", status: "Shadow", spent: "0 USDG", health: 91, budget: "25% position", expires: "15 Oct 2026" },
   { id: 3, name: "Core balance", kind: "Rebalance", asset: "4 assets", rule: "Rebalance at 8% drift", next: "Drift: 3.2%", status: "Paused", spent: "420 USDG", health: 82, budget: "600 USDG", expires: "Paused" },
 ];
@@ -75,6 +78,7 @@ export default function Home() {
   const [walletAddress, setWalletAddress] = useState("");
   const [walletBalance, setWalletBalance] = useState("");
   const [networkBlock, setNetworkBlock] = useState("Checking");
+  const [contractStatus, setContractStatus] = useState(contractConfigured ? "Checking bytecode" : "Deploy pending");
   const [composerOpen, setComposerOpen] = useState(false);
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null);
   const [kind, setKind] = useState<StrategyKind>("DCA");
@@ -89,7 +93,7 @@ export default function Home() {
   const [confirmStop, setConfirmStop] = useState(false);
 
   const connected = Boolean(walletAddress);
-  const liveCount = useMemo(() => strategies.filter((item) => item.status === "Live").length, [strategies]);
+  const preparedCount = useMemo(() => strategies.filter((item) => item.status === "Prepared").length, [strategies]);
   const shadowCount = useMemo(() => strategies.filter((item) => item.status === "Shadow").length, [strategies]);
   const estimatedUnits = useMemo(() => {
     const price = assetMeta[draftAsset]?.price ?? 1;
@@ -106,8 +110,18 @@ export default function Home() {
         });
         const data = await response.json() as { result?: string };
         setNetworkBlock(data.result ? Number.parseInt(data.result, 16).toLocaleString("en-US") : "Online");
+        if (contractConfigured) {
+          const codeResponse = await fetch(TESTNET.rpcUrls[0], {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "eth_getCode", params: [CONTRACT_ADDRESS, "latest"] }),
+          });
+          const codeData = await codeResponse.json() as { result?: string };
+          setContractStatus(codeData.result && codeData.result !== "0x" ? "Bytecode verified" : "Address empty");
+        }
       } catch {
         setNetworkBlock("Online");
+        if (contractConfigured) setContractStatus("RPC check failed");
       }
     }
     void readNetwork();
@@ -162,21 +176,21 @@ export default function Home() {
   }
 
   function toggleStrategy(id: number) {
-    setStrategies((current) => current.map((item) => item.id === id ? { ...item, status: item.status === "Live" ? "Paused" : "Live" } : item));
+    setStrategies((current) => current.map((item) => item.id === id ? { ...item, status: item.status === "Prepared" ? "Paused" : "Prepared" } : item));
   }
 
   function createStrategy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const rule = kind === "DCA" ? `${draftAmount} USDG every ${draftFrequency}` : kind === "Take profit" ? `Sell ${draftAmount}% at +${draftFrequency}%` : `Rebalance at ${draftAmount}% drift`;
-    const status: StrategyStatus = shadowMode || !connected ? "Shadow" : "Live";
+    const status: StrategyStatus = shadowMode || !connected ? "Shadow" : "Prepared";
     setStrategies((current) => [{
       id: Date.now(), name: draftName, kind, asset: kind === "Rebalance" ? "4 assets" : draftAsset,
-      rule, next: status === "Shadow" ? "Simulating next execution" : "Ready to execute", status,
+      rule, next: status === "Shadow" ? "Simulating next execution" : "Authorization draft ready", status,
       spent: "0 USDG", health: 100, budget: kind === "DCA" ? `${Number(draftAmount) * 12} USDG` : `${draftAmount}% position`, expires: "30 Sep 2026",
     }, ...current]);
     setComposerOpen(false);
     setView("strategies");
-    notify(status === "Shadow" ? "Shadow strategy started without moving funds" : "Testnet strategy authorization prepared");
+    notify(status === "Shadow" ? "Shadow strategy started without moving funds" : "Authorization prepared; no transaction was broadcast");
   }
 
   function copyStrategy(name: string) {
@@ -196,7 +210,7 @@ export default function Home() {
     <main className="app-shell">
       <header className="topbar">
         <button className="brand" onClick={() => setView("overview")} aria-label="HoodFlow home">
-          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V2</b>
+          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V4</b>
         </button>
         <nav className="main-nav" aria-label="Main navigation">
           {navigation.map((item) => <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>{item}</button>)}
@@ -213,10 +227,10 @@ export default function Home() {
 
       {view === "overview" && (
         <section className="page overview-page">
-          <div className="market-state"><span><i /> US MARKET OPEN</span><span>Oracle updated 34s ago</span><span>Execution conditions normal</span></div>
+          <div className="market-state"><span><i /> TESTNET RPC ONLINE</span><span>Block #{networkBlock}</span><span>Contract core 12/12 tests</span></div>
           <div className="page-heading">
             <div><p className="eyebrow">AUTOMATION WITHOUT CUSTODY</p><h1>Set it. Cap it.<br /><span>Let it run.</span></h1><p className="lede">Build self-running stock-token strategies with hard spending limits, live health checks and a kill switch you control.</p></div>
-            <div className="hero-command"><button className="primary-action" onClick={() => openComposer()}><span>+</span> Build an automation</button><div className="hero-proof"><span>LIVE TESTNET</span><strong>3 safety layers</strong><small>Oracle · Slippage · Budget</small></div></div>
+            <div className="hero-command"><button className="primary-action" onClick={() => openComposer()}><span>+</span> Build an automation</button><div className="hero-proof"><span>TESTNET BUILD</span><strong>Protocol core verified</strong><small>12/12 local safety tests · deploy gated</small></div></div>
           </div>
 
           <div className="feature-dock">
@@ -233,12 +247,12 @@ export default function Home() {
               <div className="balance-foot"><span>30D return <b>+7.42%</b></span><span>Automated volume <b>$2,480</b></span><span>Avg. slippage <b>0.08%</b></span></div>
             </article>
             <article className="stats-stack">
-              <div className="stat-card"><span>ACTIVE STRATEGIES</span><strong>{liveCount}</strong><small>{shadowCount} in shadow mode</small><div className="mini-bars"><i /><i /><i /><i /><i /><i /></div></div>
+              <div className="stat-card"><span>PREPARED STRATEGIES</span><strong>{preparedCount}</strong><small>{shadowCount} in shadow mode</small><div className="mini-bars"><i /><i /><i /><i /><i /><i /></div></div>
               <div className="stat-card fee-card"><span>STRATEGY HEALTH</span><strong>94</strong><small>All systems normal</small><b className="delta">HEALTHY</b></div>
             </article>
           </div>
 
-          <div className="section-title"><div><p className="eyebrow">RUNNING NOW</p><h2>Active strategies</h2></div><button onClick={() => setView("strategies")}>View all <span>&rarr;</span></button></div>
+          <div className="section-title"><div><p className="eyebrow">SAFE WORKSPACE</p><h2>Strategy workspace</h2></div><button onClick={() => setView("strategies")}>View all <span>&rarr;</span></button></div>
           <div className="strategy-list">
             {strategies.slice(0, 3).map((item) => <StrategyRow key={item.id} item={item} onToggle={() => toggleStrategy(item.id)} onInspect={() => setSelectedStrategy(item)} />)}
           </div>
@@ -254,7 +268,7 @@ export default function Home() {
       {view === "strategies" && (
         <section className="page inner-page">
           <div className="inner-heading"><div><p className="eyebrow">AUTOMATION DESK</p><h1>Strategies</h1><p>Every rule, limit and execution state in one place.</p></div><button className="primary-action" onClick={() => openComposer()}><span>+</span> New strategy</button></div>
-          <div className="summary-row"><div><span>Active</span><strong>{liveCount}</strong></div><div><span>Shadow mode</span><strong>{shadowCount}</strong></div><div><span>Automated volume</span><strong>$2,480</strong></div><div><span>Protocol fees</span><strong>$2.48</strong></div></div>
+          <div className="summary-row"><div><span>Prepared</span><strong>{preparedCount}</strong></div><div><span>Shadow mode</span><strong>{shadowCount}</strong></div><div><span>Simulated volume</span><strong>$2,480</strong></div><div><span>Estimated fees</span><strong>$2.48</strong></div></div>
           <div className="table-card">
             <div className="table-head upgraded"><span>STRATEGY</span><span>RULE</span><span>NEXT ACTION</span><span>HEALTH</span><span>STATUS</span><span /></div>
             {strategies.map((item) => <StrategyRow key={item.id} item={item} detailed onToggle={() => toggleStrategy(item.id)} onInspect={() => setSelectedStrategy(item)} />)}
@@ -264,7 +278,7 @@ export default function Home() {
 
       {view === "marketplace" && (
         <section className="page inner-page">
-          <div className="market-hero"><p className="eyebrow">PROOF, NOT PROMISES</p><h1>Copy the rules.<br />Keep control.</h1><p>Every result comes from verifiable executions. Copy a strategy into your wallet, then lower its risk before enabling it.</p></div>
+          <div className="market-hero"><p className="eyebrow">MARKETPLACE PREVIEW</p><h1>Copy the rules.<br />Keep control.</h1><p>Explore editable strategy concepts now. Verified execution proofs and creator payouts unlock only after the testnet indexer is live.</p></div>
           <div className="market-toolbar"><div><button className="selected">Featured</button><button>Most copied</button><button>Lowest risk</button></div><label><span>Q</span><input aria-label="Search strategies" placeholder="Search strategies" /></label></div>
           <div className="market-grid">
             {marketplace.map((item, index) => (
@@ -276,16 +290,16 @@ export default function Home() {
               </article>
             ))}
           </div>
-          <p className="market-note">Historical results include HoodFlow fees. They are not a promise of future returns.</p>
+          <p className="market-note">Preview metrics are illustrative, not live performance or a promise of future returns.</p>
         </section>
       )}
 
       {view === "activity" && (
         <section className="page inner-page">
-          <div className="inner-heading"><div><p className="eyebrow">ONCHAIN RECORD</p><h1>Activity</h1><p>Authorizations, checks, executions and fees in one audit trail.</p></div><button className="secondary-action" onClick={() => notify("CSV export prepared")}>Export CSV</button></div>
+          <div className="inner-heading"><div><p className="eyebrow">AUDIT TRAIL PREVIEW</p><h1>Activity</h1><p>The event model for authorizations, checks, executions and fees. Live events begin after deployment.</p></div><button className="secondary-action" onClick={() => notify("Demo CSV export prepared")}>Export demo CSV</button></div>
           <div className="activity-card">
             {[
-              ["DCA executed", "Monday Apple", "20 USDG -> 0.0947 AAPL", "2 minutes ago", "Complete"],
+              ["DCA simulation", "Monday Apple", "20 USDG -> 0.0947 AAPL", "2 minutes ago", "Preview"],
               ["Oracle freshness checked", "Monday Apple", "Age 34s · within 120s limit", "2 minutes ago", "Passed"],
               ["Shadow execution", "NVDA trim", "Target +15% · Current +9.4%", "Yesterday", "No action"],
               ["Strategy paused", "Core balance", "Permission paused by owner", "12 Jul, 18:42", "Confirmed"],
@@ -299,13 +313,23 @@ export default function Home() {
         <section className="page inner-page controls-page">
           <div className="inner-heading"><div><p className="eyebrow">PERMISSION CENTER</p><h1>You hold the keys.</h1><p>Review every allowance, expiry and safety condition before it can execute.</p></div><button className="danger-action" onClick={() => setConfirmStop(true)}>Pause everything</button></div>
           <div className="control-grid">
-            <article className="control-card control-score"><span>GLOBAL SAFETY SCORE</span><strong>94<span>/100</span></strong><p>All critical execution checks are healthy.</p><div className="score-line"><i /></div></article>
+            <article className="control-card control-score"><span>PROTOCOL READINESS</span><strong>3<span>/5 gates</span></strong><p>Core, keeper and UI are ready. Deployment and independent review remain locked.</p><div className="score-line"><i /></div></article>
             <article className="control-card"><span>NETWORK</span><strong>Robinhood Testnet</strong><p>RPC online · block #{networkBlock}</p><b className="control-ok">OPERATIONAL</b></article>
-            <article className="control-card"><span>ORACLE</span><strong>34 seconds old</strong><p>Execution pauses automatically above 120s.</p><b className="control-ok">FRESH</b></article>
+            <article className="control-card"><span>CONTRACT</span><strong>{contractStatus}</strong><p>{contractConfigured ? compactAddress(CONTRACT_ADDRESS) : "No live contract is being claimed."}</p><b className={`control-ok ${contractConfigured && contractStatus !== "Bytecode verified" ? "warning" : ""}`}>{contractStatus === "Bytecode verified" ? "ONCHAIN" : "GATED"}</b></article>
+          </div>
+          <div className="readiness-board">
+            <div className="readiness-head"><div><p className="eyebrow">MAINNET GATES</p><h2>Ship only when every gate is green.</h2></div><span>3 of 5 complete</span></div>
+            {[
+              ["01", "Protocol core", "12/12 safety scenarios passing", "complete"],
+              ["02", "Keeper service", "Preflight simulation + bounded gas", "complete"],
+              ["03", "Product surface", "Wallet, limits and kill switch UX", "complete"],
+              ["04", "Testnet canary", "Deploy adapter, feeds and monitored keeper", "pending"],
+              ["05", "Independent audit", "Resolve findings before mainnet", "locked"],
+            ].map((gate) => <div className="readiness-row" key={gate[0]}><span>{gate[0]}</span><p><strong>{gate[1]}</strong><small>{gate[2]}</small></p><b className={`gate-${gate[3]}`}>{gate[3]}</b></div>)}
           </div>
           <div className="permissions-card">
-            <div className="permissions-head"><div><p className="eyebrow">ACTIVE AUTHORIZATIONS</p><h2>Strategy permissions</h2></div><span>{strategies.length} policies</span></div>
-            {strategies.map((item) => <div className="permission-row" key={item.id}><div className="permission-name"><Mark ticker={item.asset === "4 assets" ? "4" : item.asset} /><p><strong>{item.name}</strong><small>{item.asset} only</small></p></div><div><span>SPENDING CAP</span><strong>{item.budget}</strong></div><div><span>EXPIRES</span><strong>{item.expires}</strong></div><div><span>HEALTH</span><strong>{item.health}/100</strong></div><button onClick={() => toggleStrategy(item.id)}>{item.status === "Live" ? "Pause" : "Enable"}</button></div>)}
+            <div className="permissions-head"><div><p className="eyebrow">LOCAL POLICY DRAFTS</p><h2>Strategy permissions</h2></div><span>{strategies.length} policies</span></div>
+            {strategies.map((item) => <div className="permission-row" key={item.id}><div className="permission-name"><Mark ticker={item.asset === "4 assets" ? "4" : item.asset} /><p><strong>{item.name}</strong><small>{item.asset} only</small></p></div><div><span>SPENDING CAP</span><strong>{item.budget}</strong></div><div><span>EXPIRES</span><strong>{item.expires}</strong></div><div><span>HEALTH</span><strong>{item.health}/100</strong></div><button onClick={() => toggleStrategy(item.id)}>{item.status === "Prepared" ? "Pause" : "Prepare"}</button></div>)}
           </div>
           <div className="safety-notes"><article><span>01</span><div><strong>Asset allowlist</strong><p>A strategy cannot swap into a token that was not approved when it was created.</p></div></article><article><span>02</span><div><strong>Hard budget caps</strong><p>Keepers cannot execute above the per-trade or lifetime spending limit.</p></div></article><article><span>03</span><div><strong>Automatic circuit breaker</strong><p>Stale prices, excess slippage or low liquidity stop execution before a swap.</p></div></article></div>
         </section>
@@ -336,7 +360,7 @@ export default function Home() {
         </div>
       )}
 
-      {selectedStrategy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedStrategy(null); }}><section className="detail-drawer" role="dialog" aria-modal="true" aria-label={`${selectedStrategy.name} details`}><div className="composer-head"><div><p className="eyebrow">STRATEGY HEALTH</p><h2>{selectedStrategy.name}</h2></div><button onClick={() => setSelectedStrategy(null)}>x</button></div><div className="health-hero"><strong>{selectedStrategy.health}</strong><span>/100</span><p>Healthy</p></div><div className="health-checks"><div><span>Oracle freshness</span><strong>34s <b>PASS</b></strong></div><div><span>Liquidity depth</span><strong>$184k <b>PASS</b></strong></div><div><span>Last execution</span><strong>2m ago <b>PASS</b></strong></div><div><span>Average slippage</span><strong>0.08% <b>PASS</b></strong></div></div><div className="permission-summary"><p><span>Asset access</span><strong>{selectedStrategy.asset} only</strong></p><p><span>Spending cap</span><strong>{selectedStrategy.budget}</strong></p><p><span>Permission expires</span><strong>{selectedStrategy.expires}</strong></p></div><button className="drawer-action" onClick={() => { toggleStrategy(selectedStrategy.id); setSelectedStrategy(null); }}>{selectedStrategy.status === "Live" ? "Pause strategy" : "Enable strategy"}</button></section></div>}
+      {selectedStrategy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedStrategy(null); }}><section className="detail-drawer" role="dialog" aria-modal="true" aria-label={`${selectedStrategy.name} details`}><div className="composer-head"><div><p className="eyebrow">STRATEGY HEALTH</p><h2>{selectedStrategy.name}</h2></div><button onClick={() => setSelectedStrategy(null)}>x</button></div><div className="health-hero"><strong>{selectedStrategy.health}</strong><span>/100</span><p>Healthy</p></div><div className="health-checks"><div><span>Oracle rule</span><strong>120s max <b>PASS</b></strong></div><div><span>Budget rule</span><strong>Bounded <b>PASS</b></strong></div><div><span>Keeper rule</span><strong>Allowlisted <b>PASS</b></strong></div><div><span>Slippage rule</span><strong>0.50% <b>PASS</b></strong></div></div><div className="permission-summary"><p><span>Asset access</span><strong>{selectedStrategy.asset} only</strong></p><p><span>Spending cap</span><strong>{selectedStrategy.budget}</strong></p><p><span>Permission expires</span><strong>{selectedStrategy.expires}</strong></p></div><button className="drawer-action" onClick={() => { toggleStrategy(selectedStrategy.id); setSelectedStrategy(null); }}>{selectedStrategy.status === "Prepared" ? "Pause strategy" : "Prepare strategy"}</button></section></div>}
 
       {confirmStop && <div className="confirm-backdrop"><section className="confirm-card" role="alertdialog" aria-modal="true"><p className="eyebrow">EMERGENCY CONTROL</p><h2>Pause every strategy?</h2><p>No new executions will be prepared. Your assets stay in your wallet and existing history remains available.</p><div><button onClick={() => setConfirmStop(false)}>Cancel</button><button onClick={stopAllStrategies}>Pause everything</button></div></section></div>}
       {toast && <div className="toast"><span>✓</span>{toast}</div>}
