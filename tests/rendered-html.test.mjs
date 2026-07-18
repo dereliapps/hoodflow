@@ -110,7 +110,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /Compare live routes/);
   assert.match(page, /PROTECTED QUOTES/);
   assert.match(page, /Price feed temporarily unavailable\. Trading is disabled until verification completes\./);
-  assert.match(page, /Release 0\.5\.2/);
+  assert.match(page, /Release 0\.6\.0/);
   assert.match(page, /Meme \+ Crypto/);
   assert.match(page, /ReferralRewards/);
   assert.match(page, /href="\/docs"/);
@@ -135,6 +135,8 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(communityMarketRoute, /new_pools/);
   assert.match(communityMarketRoute, /GeckoTerminal/);
   assert.match(communityMarketRoute, /DEX Screener/);
+  assert.match(communityMarketRoute, /Virtuals official/);
+  assert.match(communityMarketRoute, /virtuals-bonding/);
   assert.match(communityMarketRoute, /token-pairs\/v1\/robinhood/);
   assert.match(layout, /HoodFlow \| Stock Token Trading/);
   assert.match(layout, /Instrument_Sans/);

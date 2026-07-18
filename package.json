@@ -1,6 +1,6 @@
 {
   "name": "hoodflow",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0",
@@ -13,7 +13,7 @@
     "test": "npm run test:contracts && npm run test:release && npm run test:site",
     "test:site": "npm run build && node --test tests/rendered-html.test.mjs",
     "test:contracts": "hardhat test",
-    "test:release": "node --import tsx --test tests/mainnet-release.test.ts tests/prices.test.ts",
+    "test:release": "node --import tsx --test tests/mainnet-release.test.ts tests/prices.test.ts tests/virtuals-market.test.ts",
     "contracts:compile": "hardhat compile --build-profile production",
     "contracts:clean": "hardhat clean",
     "contracts:deploy:testnet": "hardhat run scripts/deploy-testnet.ts",
@@ -29,7 +29,7 @@
     "mainnet:verify:deployment": "tsx scripts/verify-deployment.ts",
     "keeper:dry-run": "tsx keeper/index.ts --dry-run",
     "keeper:start": "tsx keeper/index.ts",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern artifacts --ignore-pattern cache --ignore-pattern typechain-types",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern artifacts --ignore-pattern cache --ignore-pattern typechain-types --ignore-pattern work --ignore-pattern .vinext --ignore-pattern .wrangler",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
