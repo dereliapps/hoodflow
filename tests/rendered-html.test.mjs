@@ -23,7 +23,9 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(html, /<title>HoodFlow — Portfolio automation on Robinhood Chain<\/title>/i);
   assert.match(html, /Your portfolio,/);
   assert.match(html, /on schedule\./);
-  assert.match(html, /New strategy/);
+  assert.match(html, /Build an automation/);
+  assert.match(html, /Set it\. Cap it\./);
+  assert.match(html, /Permission Center/);
   assert.match(html, /Active strategies/);
   assert.match(html, /Robinhood Chain Testnet/);
   assert.match(html, /og\.png/);
