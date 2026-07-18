@@ -21,6 +21,7 @@
     "infra:verify:fork": "hardhat run scripts/verify-v4-fork.ts",
     "infra:verify:direct-buy": "hardhat run scripts/verify-direct-buy-fork.ts",
     "infra:verify:canary": "hardhat run scripts/verify-canary-fork.ts",
+    "infra:verify:bootstrap": "hardhat run scripts/verify-bootstrap-fork.ts",
     "launch:preflight": "npm run contracts:compile && npm test && npm run infra:verify:mainnet && npm run infra:verify:fork && npm run infra:verify:direct-buy && npm run infra:verify:canary",
     "mainnet:preflight": "tsx scripts/verify-release-config.ts",
     "mainnet:preflight:offline": "tsx scripts/verify-release-config.ts --offline",

@@ -12,7 +12,10 @@
     "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
     "poolManager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
     "quoter": "0x8dc178efb8111bb0973dd9d722ebeff267c98f94",
-    "stateView": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b"
+    "stateView": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
+    "hoodFlowDca": "0x234beb689a3e5d7E930D6aBBEaD6B39e47FEdc98",
+    "hoodFlowV4Adapter": "0xaBbd097b42EAEBF0B06F0Dc0eef631BFb7cf97aC",
+    "hoodFlowFixedUsdFeed": "0xFd65E40bD3A52f3D3A269bEd1eF0F80d29f858c1"
   },
   "tokens": {
     "USDG": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
