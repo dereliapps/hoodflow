@@ -107,7 +107,7 @@ export default function DocsPage() {
         <section id="community" className="docs-section">
           <p className="docs-kicker">07 / MEME + CRYPTO</p><h2>Discover tokens by contract address</h2>
           <p>The Token Terminal combines Robinhood Chain&apos;s top-volume, trending and newest onchain pools with HoodFlow&apos;s canonical RWA registry. Filter by Memes, RWA, DeFi, AI &amp; Agents, Infrastructure, Stablecoins or Community; rank markets by volume, 24-hour change, liquidity or pool age. Selecting a market sends its contract to the inspector.</p>
-          <p>Paste any standard ERC-20 contract address on Robinhood Chain. HoodFlow reads bytecode and metadata, then probes direct USDG liquidity across supported Uniswap V3 fee tiers and hookless V4 configurations. A listed pair can still remain watch-only when it trades against WETH instead of USDG.</p>
+          <p>Paste any standard ERC-20 contract address on Robinhood Chain. HoodFlow reads bytecode and metadata, detects the listed pool&apos;s quote asset, then probes Uniswap V2, V3 and hookless V4 liquidity. USDG and WETH markets can execute inside HoodFlow when an onchain quote succeeds; unsupported third-party pools remain available through their live market link.</p>
           <div className="docs-note"><span>UNREVIEWED MODE</span><p>Contract discovery is not an endorsement or safety review. Trading is enabled only when a fresh direct route quote exists, but route availability does not rule out malicious transfer logic, issuer risk or liquidity withdrawal.</p></div>
         </section>
 
@@ -140,6 +140,6 @@ export default function DocsPage() {
     </div>
 
     <section className="seo-risk"><strong>Stock Tokens are not shares.</strong><p>They may be restricted in your jurisdiction and do not provide shareholder rights. HoodFlow is an independent interface built on Robinhood Chain and is not affiliated with Robinhood Markets, Inc.</p></section>
-    <footer className="seo-footer"><span>Documentation · Release 0.5.1</span><Link href="/security">Review security & known limitations →</Link></footer>
+    <footer className="seo-footer"><span>Documentation · Release 0.5.2</span><Link href="/security">Review security & known limitations →</Link></footer>
   </main>;
 }

@@ -6,6 +6,7 @@ import {
   BrowserProvider,
   Contract,
   JsonRpcProvider,
+  ZeroAddress,
   formatUnits,
   getAddress,
   parseUnits,
@@ -21,12 +22,18 @@ import {
   UNIVERSAL_ROUTER_ADDRESS,
   USDG_ADDRESS,
   USDG_DECIMALS,
+  V2_FACTORY_ABI,
+  V2_FACTORY_ADDRESS,
+  V2_PAIR_ABI,
   V3_QUOTER_ABI,
   V3_QUOTER_ADDRESS,
   V4_POOL_CANDIDATES,
   V4_QUOTER_ABI,
   V4_QUOTER_ADDRESS,
+  WETH_ADDRESS,
+  WETH_DECIMALS,
   buildExactInputQuoteParams,
+  buildV2ExactInputCalldata,
   buildV3ExactInputCalldata,
   buildV4ExactInputCalldata,
   type PermitSingle,
@@ -35,8 +42,12 @@ import {
 import { track } from "@/lib/analytics-client";
 
 type Token = { address: string; name: string; symbol: string; decimals: number };
-type Route = { protocol: "V3"; fee: number; amountOut: bigint } | { protocol: "V4"; route: PoolCandidate; amountOut: bigint };
+type Route =
+  | { protocol: "V2"; pair: string; feeBps: number; amountOut: bigint }
+  | { protocol: "V3"; fee: number; amountOut: bigint }
+  | { protocol: "V4"; route: PoolCandidate; amountOut: bigint };
 type RecentToken = Token & { route: string };
+type Settlement = { address: string; symbol: string; decimals: number };
 type CommunityMarket = {
   address: string;
   name: string;
@@ -51,7 +62,9 @@ type CommunityMarket = {
   transactions24h: number;
   pairAddress: string;
   pairUrl: string;
+  quoteAddress: string;
   quoteSymbol: string;
+  quoteDecimals: number;
   dex: string;
   poolCreatedAt: string | null;
   discovery: string[];
@@ -70,6 +83,8 @@ type Props = {
 const V3_FEES = [100, 500, 3_000, 10_000] as const;
 const RECENT_KEY = "hoodflow-community-imports-v1";
 const MAX_UINT128 = (1n << 128n) - 1n;
+const USDG_SETTLEMENT: Settlement = { address: USDG_ADDRESS, symbol: "USDG", decimals: USDG_DECIMALS };
+const WETH_SETTLEMENT: Settlement = { address: WETH_ADDRESS, symbol: "WETH", decimals: WETH_DECIMALS };
 const MARKET_CATEGORIES = ["All", "Memes", "RWA", "DeFi", "AI & Agents", "Infrastructure", "Stablecoins", "Community"] as const;
 
 function message(error: unknown) {
@@ -113,10 +128,41 @@ function poolAge(value: string | null) {
   return `${Math.floor(hours / 24)}d`;
 }
 
+class RouteUnavailableError extends Error {}
+
+function routeName(route: Route) {
+  if (route.protocol === "V2") return "Uniswap V2 · 0.30%";
+  if (route.protocol === "V3") return `Uniswap V3 · ${route.fee / 10_000}%`;
+  return `Uniswap V4 · ${route.route.fee / 10_000}%`;
+}
+
+async function quoteV2(provider: JsonRpcProvider | BrowserProvider, tokenIn: string, tokenOut: string, amountIn: bigint): Promise<Route | null> {
+  try {
+    const factory = new Contract(V2_FACTORY_ADDRESS, V2_FACTORY_ABI, provider);
+    const pairAddress = getAddress(await factory.getPair(tokenIn, tokenOut) as string);
+    if (pairAddress === ZeroAddress) return null;
+    const pair = new Contract(pairAddress, V2_PAIR_ABI, provider);
+    const [token0, reserves] = await Promise.all([
+      pair.token0() as Promise<string>,
+      pair.getReserves() as Promise<{ reserve0?: bigint; reserve1?: bigint; 0?: bigint; 1?: bigint }>,
+    ]);
+    const reserve0 = BigInt(reserves.reserve0 ?? reserves[0] ?? 0n);
+    const reserve1 = BigInt(reserves.reserve1 ?? reserves[1] ?? 0n);
+    const inputIsToken0 = getAddress(token0) === getAddress(tokenIn);
+    const reserveIn = inputIsToken0 ? reserve0 : reserve1;
+    const reserveOut = inputIsToken0 ? reserve1 : reserve0;
+    if (reserveIn <= 0n || reserveOut <= 0n) return null;
+    const amountInWithFee = amountIn * 997n;
+    const amountOut = amountInWithFee * reserveOut / (reserveIn * 1_000n + amountInWithFee);
+    return amountOut > 0n ? { protocol: "V2", pair: pairAddress, feeBps: 30, amountOut } : null;
+  } catch { return null; }
+}
+
 async function bestRoute(provider: JsonRpcProvider | BrowserProvider, tokenIn: string, tokenOut: string, amountIn: bigint): Promise<Route> {
   const v3 = new Contract(V3_QUOTER_ADDRESS, V3_QUOTER_ABI, provider);
   const v4 = new Contract(V4_QUOTER_ADDRESS, V4_QUOTER_ABI, provider);
   const checks: Array<Promise<Route | null>> = [
+    quoteV2(provider, tokenIn, tokenOut, amountIn),
     ...V3_FEES.map(async (fee) => {
       try {
         const result = await v3.quoteExactInputSingle.staticCall({ tokenIn, tokenOut, amountIn, fee, sqrtPriceLimitX96: 0 }) as readonly [bigint, bigint, bigint, bigint];
@@ -132,7 +178,7 @@ async function bestRoute(provider: JsonRpcProvider | BrowserProvider, tokenIn: s
   ];
   const routes = (await Promise.all(checks)).filter((route): route is Route => Boolean(route));
   routes.sort((left, right) => left.amountOut > right.amountOut ? -1 : left.amountOut < right.amountOut ? 1 : 0);
-  if (!routes[0]) throw new Error("No direct USDG route returned an executable quote.");
+  if (!routes[0]) throw new RouteUnavailableError("No executable pool is available for this settlement pair.");
   return routes[0];
 }
 
@@ -146,6 +192,9 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState("");
   const [routeError, setRouteError] = useState("");
+  const [routeUnavailable, setRouteUnavailable] = useState(false);
+  const [settlement, setSettlement] = useState<Settlement>(USDG_SETTLEMENT);
+  const [activeMarket, setActiveMarket] = useState<CommunityMarket | null>(null);
   const [recent, setRecent] = useState<RecentToken[]>([]);
   const [markets, setMarkets] = useState<CommunityMarket[]>([]);
   const [marketsLoading, setMarketsLoading] = useState(true);
@@ -213,10 +262,18 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
 
   const outputLabel = useMemo(() => {
     if (!token || !quote) return "—";
-    return side === "buy" ? `${prettyAmount(quote.amountOut, token.decimals)} ${token.symbol}` : `${prettyAmount(quote.amountOut, USDG_DECIMALS)} USDG`;
-  }, [quote, side, token]);
+    return side === "buy" ? `${prettyAmount(quote.amountOut, token.decimals)} ${token.symbol}` : `${prettyAmount(quote.amountOut, settlement.decimals)} ${settlement.symbol}`;
+  }, [quote, settlement, side, token]);
 
-  async function discover(event?: FormEvent, requestedAddress?: string) {
+  function settlementFor(market: CommunityMarket | null): Settlement {
+    if (!market?.quoteAddress || !/^0x[a-fA-F0-9]{40}$/.test(market.quoteAddress)) return USDG_SETTLEMENT;
+    const symbol = market.quoteSymbol.toUpperCase();
+    if (symbol === "USDG") return USDG_SETTLEMENT;
+    if (symbol === "WETH") return WETH_SETTLEMENT;
+    return { address: getAddress(market.quoteAddress), symbol: market.quoteSymbol.slice(0, 16), decimals: market.quoteDecimals };
+  }
+
+  async function discover(event?: FormEvent, requestedAddress?: string, requestedMarket?: CommunityMarket) {
     event?.preventDefault();
     const rawAddress = requestedAddress || contractAddress;
     if (requestedAddress) setContractAddress(requestedAddress);
@@ -224,9 +281,20 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
     setStep("Reading contract bytecode and ERC-20 metadata…");
     setQuote(null);
     setRouteError("");
+    setRouteUnavailable(false);
     try {
       const address = getAddress(rawAddress.trim());
-      if (address.toLowerCase() === USDG_ADDRESS.toLowerCase()) throw new Error("USDG is the settlement asset. Enter the token you want to discover.");
+      let market = requestedMarket ?? markets.find((item) => item.address.toLowerCase() === address.toLowerCase()) ?? null;
+      if (!market) {
+        setStep("Locating this token's deepest live pool…");
+        try {
+          const marketResponse = await fetch(`/api/community-markets?token=${address}`, { cache: "no-store" });
+          const marketPayload = await marketResponse.json() as { markets?: CommunityMarket[] };
+          market = marketPayload.markets?.[0] ?? null;
+        } catch { market = null; }
+      }
+      const nextSettlement = settlementFor(market);
+      if (address.toLowerCase() === nextSettlement.address.toLowerCase()) throw new Error(`${nextSettlement.symbol} is this market's settlement asset. Select the other token in the pair.`);
       const provider = new JsonRpcProvider(ROBINHOOD_MAINNET.rpcUrls[0], ROBINHOOD_MAINNET.chainIdNumber, { staticNetwork: true });
       const code = await provider.getCode(address);
       if (code === "0x") throw new Error("No contract bytecode exists at this address on Robinhood Chain.");
@@ -235,18 +303,23 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
       const decimals = Number(decimalsValue);
       if (!name || !symbol || !Number.isInteger(decimals) || decimals < 0 || decimals > 36) throw new Error("This contract does not expose standard ERC-20 metadata.");
       const found = { address, name: String(name).slice(0, 80), symbol: String(symbol).slice(0, 20), decimals };
+      setActiveMarket(market);
+      setSettlement(nextSettlement);
+      setAmount(nextSettlement.symbol === "WETH" ? "0.01" : nextSettlement.symbol === "USDG" ? "20" : "10");
       setToken(found);
       track("community_token_imported", { ticker: found.symbol, address: found.address });
-      setStep("Checking direct USDG liquidity across Uniswap V3 and V4…");
-      let routeLabel = "No direct USDG route";
+      setStep(`Checking ${nextSettlement.symbol} liquidity across Uniswap V2, V3 and V4…`);
+      let routeLabel = `${nextSettlement.symbol} market link`;
       try {
-        const discovered = await bestRoute(provider, USDG_ADDRESS, address, parseUnits("1", USDG_DECIMALS));
+        const probeAmount = nextSettlement.symbol === "WETH" ? "0.001" : "1";
+        const discovered = await bestRoute(provider, nextSettlement.address, address, parseUnits(probeAmount, nextSettlement.decimals));
         setQuote(discovered);
-        routeLabel = discovered.protocol === "V3" ? `V3 / ${discovered.fee}` : `V4 / ${discovered.route.fee}`;
-        setStep("Direct USDG route found. Enter an exact amount for a fresh quote.");
+        routeLabel = routeName(discovered);
+        setStep(`${nextSettlement.symbol} route ready. Enter an amount for a fresh executable quote.`);
       } catch (error) {
-        setRouteError(message(error));
-        setStep("Token imported in watch mode. Trading stays disabled without a live route.");
+        if (!(error instanceof RouteUnavailableError)) setRouteError(message(error));
+        setRouteUnavailable(true);
+        setStep("Market found. Embedded execution is unavailable for this pool; the live pool link remains available.");
       }
       const next = [{ ...found, route: routeLabel }, ...recent.filter((item) => item.address.toLowerCase() !== address.toLowerCase())].slice(0, 8);
       setRecent(next);
@@ -262,19 +335,25 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
     if (!token) return;
     setBusy(true);
     setRouteError("");
-    setStep("Quoting your exact input across every supported direct pool…");
+    setRouteUnavailable(false);
+    setStep(`Quoting your exact input across ${settlement.symbol} pools…`);
     try {
-      const amountIn = parseUnits(amount, side === "buy" ? USDG_DECIMALS : token.decimals);
+      const amountIn = parseUnits(amount, side === "buy" ? settlement.decimals : token.decimals);
       if (amountIn <= 0n || amountIn > MAX_UINT128) throw new Error("Enter a valid amount.");
       const provider = new JsonRpcProvider(ROBINHOOD_MAINNET.rpcUrls[0], ROBINHOOD_MAINNET.chainIdNumber, { staticNetwork: true });
-      const result = await bestRoute(provider, side === "buy" ? USDG_ADDRESS : token.address, side === "buy" ? token.address : USDG_ADDRESS, amountIn);
+      const result = await bestRoute(provider, side === "buy" ? settlement.address : token.address, side === "buy" ? token.address : settlement.address, amountIn);
       setQuote(result);
       setStep("Fresh executable quote ready. It will be checked again before signing.");
       track("quote_received", { ticker: token.symbol, side, protocol: result.protocol });
     } catch (error) {
       setQuote(null);
-      setRouteError(message(error));
-      setStep("");
+      if (error instanceof RouteUnavailableError) {
+        setRouteUnavailable(true);
+        setStep("No embedded route is currently executable. Open the live pool to continue at the source.");
+      } else {
+        setRouteError(message(error));
+        setStep("");
+      }
     } finally { setBusy(false); }
   }
 
@@ -287,19 +366,19 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
       await walletProvider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: ROBINHOOD_MAINNET.chainId }] });
       const provider = new BrowserProvider(walletProvider, "any");
       const signer = await provider.getSigner();
-      const amountIn = parseUnits(amount, side === "buy" ? USDG_DECIMALS : token.decimals);
+      const amountIn = parseUnits(amount, side === "buy" ? settlement.decimals : token.decimals);
       const slippageBps = Math.round(Number(slippage) * 100);
       if (amountIn <= 0n || amountIn > MAX_UINT128) throw new Error("Enter a valid amount.");
       if (!Number.isInteger(slippageBps) || slippageBps < 10 || slippageBps > 500) throw new Error("Slippage must be between 0.10% and 5.00%.");
-      const tokenIn = side === "buy" ? USDG_ADDRESS : token.address;
-      const tokenOut = side === "buy" ? token.address : USDG_ADDRESS;
+      const tokenIn = side === "buy" ? settlement.address : token.address;
+      const tokenOut = side === "buy" ? token.address : settlement.address;
       setStep("Refreshing the executable route…");
       const liveQuote = await bestRoute(provider, tokenIn, tokenOut, amountIn);
       setQuote(liveQuote);
       const minAmountOut = liveQuote.amountOut * BigInt(10_000 - slippageBps) / 10_000n;
       const input = new Contract(tokenIn, ERC20_ABI, signer);
       const [balance, gas] = await Promise.all([input.balanceOf(walletAddress) as Promise<bigint>, provider.getBalance(walletAddress)]);
-      if (balance < amountIn) throw new Error(`Insufficient ${side === "buy" ? "USDG" : token.symbol} balance.`);
+      if (balance < amountIn) throw new Error(`Insufficient ${side === "buy" ? settlement.symbol : token.symbol} balance.`);
       if (gas === 0n) throw new Error("A small ETH balance is required for gas.");
       if (BigInt(await input.allowance(walletAddress, PERMIT2_ADDRESS)) < amountIn) {
         setStep("Confirm the exact Permit2 token approval…");
@@ -313,9 +392,11 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
       const permit: PermitSingle = { details: { token: tokenIn, amount: amountIn, expiration: now + 600, nonce: BigInt(allowance.nonce ?? allowance[2] ?? 0n) }, spender: UNIVERSAL_ROUTER_ADDRESS, sigDeadline: now + 600 };
       setStep("Sign the exact, ten-minute order permission…");
       const signature = await signer.signTypedData({ name: "Permit2", chainId: ROBINHOOD_MAINNET.chainIdNumber, verifyingContract: PERMIT2_ADDRESS }, PERMIT2_TYPES, permit);
-      const calldata = liveQuote.protocol === "V3"
-        ? buildV3ExactInputCalldata({ tokenIn, tokenOut, recipient: walletAddress, amountIn, minAmountOut, fee: liveQuote.fee, permit, signature })
-        : buildV4ExactInputCalldata({ tokenIn, tokenOut, amountIn, minAmountOut, route: liveQuote.route, permit, signature });
+      const calldata = liveQuote.protocol === "V2"
+        ? buildV2ExactInputCalldata({ tokenIn, tokenOut, recipient: walletAddress, amountIn, minAmountOut, permit, signature })
+        : liveQuote.protocol === "V3"
+          ? buildV3ExactInputCalldata({ tokenIn, tokenOut, recipient: walletAddress, amountIn, minAmountOut, fee: liveQuote.fee, permit, signature })
+          : buildV4ExactInputCalldata({ tokenIn, tokenOut, amountIn, minAmountOut, route: liveQuote.route, permit, signature });
       setStep("Confirm the protected mainnet trade in your wallet…");
       track("transaction_started", { ticker: token.symbol, side });
       const router = new Contract(UNIVERSAL_ROUTER_ADDRESS, UNIVERSAL_ROUTER_ABI, signer);
@@ -335,23 +416,19 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
   }
 
   function loadRecent(item: RecentToken) {
-    setContractAddress(item.address);
-    setToken(item);
-    setQuote(null);
-    setRouteError("");
-    setStep("Imported from this device. Refresh the route before trading.");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    document.getElementById("ca-import")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    void discover(undefined, item.address, markets.find((market) => market.address.toLowerCase() === item.address.toLowerCase()));
   }
 
   function inspectMarket(market: CommunityMarket) {
     track("community_market_opened", { ticker: market.symbol, category: market.category });
     document.getElementById("ca-import")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    void discover(undefined, market.address);
+    void discover(undefined, market.address, market);
   }
 
   return <section className="page inner-page community-page">
     <div className="community-hero">
-      <div><p className="eyebrow">ROBINHOOD CHAIN TOKEN TERMINAL</p><h1>Every market.<br /><span>One live tape.</span></h1><p>Follow meme tokens, canonical RWAs, DeFi, AI and new launchpad pools from one screen. Then inspect any contract and let HoodFlow verify whether a direct USDG execution route exists.</p></div>
+      <div><p className="eyebrow">ROBINHOOD CHAIN TOKEN TERMINAL</p><h1>Every market.<br /><span>One live tape.</span></h1><p>Follow meme tokens, canonical RWAs, DeFi, AI and new launchpad pools from one screen. HoodFlow detects each token&apos;s native market and checks executable V2, V3 and V4 liquidity.</p></div>
       <div className="community-hero-badge"><strong>24/7</strong><span>WHEN ONCHAIN<br />LIQUIDITY EXISTS</span></div>
     </div>
     <section className="market-pulse" aria-label="Robinhood Chain token market summary">
@@ -388,16 +465,36 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
       <div className="market-data-note"><p><strong>Live market data</strong> from GeckoTerminal and DEX Screener. “Trending” follows the provider&apos;s onchain activity feed; HoodFlow does not sell ranking positions.</p><span>{marketsError ? `Partial feed: ${marketsError}` : "Refreshes every 60 seconds"}</span></div>
     </section>
 
-    <div id="ca-import" className="ca-import-section"><div className="market-section-title"><div><p className="eyebrow">CONTRACT INSPECTOR</p><h2>Paste any CA. Verify the route.</h2></div><p>Listed tokens may trade primarily against WETH or another asset. HoodFlow&apos;s embedded execution remains disabled unless it finds a fresh direct USDG route.</p></div>
+    <div id="ca-import" className="ca-import-section"><div className="market-section-title"><div><p className="eyebrow">UNIVERSAL TOKEN DESK</p><h2>One token. Its native market.</h2></div><p>HoodFlow automatically uses the token&apos;s discovered quote asset—USDG, WETH or another ERC-20—and checks Uniswap V2, V3 and V4 before enabling execution.</p></div>
     <div className="token-safety-strip"><span>UNREVIEWED TOKEN MODE</span><p>A valid contract, price or rising chart is not proof of safety. Verify the CA, issuer, transfer behavior and liquidity yourself. HoodFlow never labels an imported community token as verified.</p></div>
     <form className="ca-search" onSubmit={discover}><label>CONTRACT ADDRESS (CA)<input value={contractAddress} onChange={(event) => setContractAddress(event.target.value)} placeholder="0x… on Robinhood Chain" spellCheck={false} /></label><button disabled={busy || !contractAddress.trim()}>{busy ? "Checking…" : "Discover token →"}</button></form>
     {token && <div className="community-terminal">
-      <section className="token-identity-panel"><div className="token-orb" style={{ background: `linear-gradient(135deg,#${token.address.slice(2, 8)},#${token.address.slice(-6)})` }}>{token.symbol.slice(0, 2).toUpperCase()}</div><div><span>IMPORTED ERC-20</span><h2>{token.name} <em>{token.symbol}</em></h2><a href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/token/${token.address}`} target="_blank" rel="noreferrer">{compact(token.address)} ↗</a></div><b>UNREVIEWED</b></section>
-      <section className="community-trade-panel"><div className="community-tabs"><button className={side === "buy" ? "active" : ""} onClick={() => { setSide("buy"); setAmount("20"); setQuote(null); }} type="button">Buy</button><button className={side === "sell" ? "active" : ""} onClick={() => { setSide("sell"); setAmount("1"); setQuote(null); }} type="button">Sell</button></div><div className="community-inputs"><label>YOU PAY<span><input type="number" min="0" step="any" value={amount} onChange={(event) => { setAmount(event.target.value); setQuote(null); }} /><b>{side === "buy" ? "USDG" : token.symbol}</b></span></label><label>MAX SLIPPAGE<span><input type="number" min="0.1" max="5" step="0.1" value={slippage} onChange={(event) => setSlippage(event.target.value)} /><b>%</b></span></label></div><div className="community-quote"><div><span>ESTIMATED RECEIVE</span><strong>{outputLabel}</strong></div><div><span>ROUTE</span><strong>{quote ? quote.protocol === "V3" ? `Uniswap V3 · ${quote.fee / 10_000}%` : `Uniswap V4 · ${quote.route.fee / 10_000}%` : "Refresh required"}</strong></div></div>{step && <p className="community-step"><i />{step}</p>}{routeError && <p className="community-error">{routeError}</p>}<div className="community-actions"><button type="button" onClick={() => void refreshQuote()} disabled={busy || !amount}>Refresh quote</button><button type="button" onClick={() => void trade()} disabled={busy || !quote}>{!walletAddress ? "Connect wallet" : quote ? `${side === "buy" ? "Buy" : "Sell"} ${token.symbol}` : "Quote first"}</button></div></section>
+      <header className="terminal-token-head">
+        <div className="terminal-token-mark">{activeMarket?.imageUrl ? <img src={activeMarket.imageUrl} alt="" /> : <span style={{ background: `linear-gradient(135deg,#${token.address.slice(2, 8)},#${token.address.slice(-6)})` }}>{token.symbol.slice(0, 2).toUpperCase()}</span>}</div>
+        <div><p>ROBINHOOD CHAIN · ERC-20</p><h2>{token.name} <em>{token.symbol}</em></h2><a href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/token/${token.address}`} target="_blank" rel="noreferrer">{compact(token.address)} ↗</a></div>
+        <div className="terminal-market-badges"><span>{activeMarket?.category ?? "Community"}</span><strong>{quote ? "ROUTE LIVE" : routeUnavailable ? "MARKET LINK" : "CHECKING"}</strong></div>
+      </header>
+      <div className="terminal-body">
+        <section className="terminal-market-card">
+          <p className="terminal-label">DISCOVERED MARKET</p>
+          <div className="terminal-price"><strong>{compactMoney(activeMarket?.priceUsd ?? null, true)}</strong><span className={(activeMarket?.priceChange24h ?? 0) >= 0 ? "up" : "down"}>{percent(activeMarket?.priceChange24h ?? null)}</span></div>
+          <div className="terminal-market-stats"><div><span>24H VOLUME</span><strong>{compactMoney(activeMarket?.volume24h ?? 0)}</strong></div><div><span>LIQUIDITY</span><strong>{compactMoney(activeMarket?.liquidityUsd ?? 0)}</strong></div><div><span>PAIR</span><strong>{token.symbol}/{settlement.symbol}</strong></div><div><span>DEX</span><strong>{activeMarket?.dex ?? "Auto route"}</strong></div></div>
+          <p className="terminal-risk">Community tokens are unreviewed. Confirm the contract and pool before signing.</p>
+        </section>
+        <section className="community-trade-panel">
+          <div className="community-tabs"><button className={side === "buy" ? "active" : ""} onClick={() => { setSide("buy"); setAmount(settlement.symbol === "WETH" ? "0.01" : settlement.symbol === "USDG" ? "20" : "10"); setQuote(null); }} type="button">Buy</button><button className={side === "sell" ? "active" : ""} onClick={() => { setSide("sell"); setAmount("1"); setQuote(null); }} type="button">Sell</button></div>
+          <label className="terminal-amount"><span>YOU PAY</span><div><input type="number" min="0" step="any" value={amount} onChange={(event) => { setAmount(event.target.value); setQuote(null); }} /><b>{side === "buy" ? settlement.symbol : token.symbol}</b></div></label>
+          <div className="terminal-swap-arrow">↓</div>
+          <div className="terminal-receive"><span>YOU RECEIVE · ESTIMATED</span><strong>{outputLabel}</strong></div>
+          <div className="terminal-route-line"><div><span>EXECUTION</span><strong>{quote ? routeName(quote) : routeUnavailable ? "External pool" : "Finding best pool…"}</strong></div><label>SLIPPAGE <span><input type="number" min="0.1" max="5" step="0.1" value={slippage} onChange={(event) => setSlippage(event.target.value)} />%</span></label></div>
+          {step && <p className={`community-step ${routeUnavailable ? "notice" : ""}`}><i />{step}</p>}{routeError && <p className="community-error">{routeError}</p>}
+          <div className="community-actions"><button type="button" onClick={() => void refreshQuote()} disabled={busy || !amount}>{busy ? "Checking route…" : "Refresh quote"}</button>{routeUnavailable && activeMarket?.pairUrl ? <a href={activeMarket.pairUrl} target="_blank" rel="noreferrer">Open live pool ↗</a> : <button type="button" onClick={() => void trade()} disabled={busy || !quote}>{!walletAddress ? "Connect wallet" : quote ? `${side === "buy" ? "Buy" : "Sell"} ${token.symbol}` : "Quote first"}</button>}</div>
+        </section>
+      </div>
     </div>}
-    {!token && <div className="community-empty"><div>CA</div><h2>Select a market or paste a contract.</h2><p>HoodFlow reads the token contract, probes supported direct USDG pools and keeps non-routable tokens in watch mode.</p></div>}
+    {!token && <div className="community-empty"><div>CA</div><h2>Select a market or paste a contract.</h2><p>HoodFlow detects the market&apos;s native quote asset and probes executable Uniswap V2, V3 and V4 pools.</p></div>}
     </div>
     <section className="recent-tokens"><div><p className="eyebrow">THIS DEVICE</p><h2>Recent discoveries</h2></div>{recent.length ? <div className="recent-token-grid">{recent.map((item) => <button key={item.address} onClick={() => loadRecent(item)}><span>{item.symbol.slice(0, 2)}</span><p><strong>{item.symbol}</strong><small>{compact(item.address)}</small></p><b>{item.route}</b></button>)}</div> : <p className="recent-empty">Imported contracts will appear here. HoodFlow does not publish a paid or fabricated “trending” list.</p>}</section>
-    <div className="community-method"><article><span>01</span><h3>Contract check</h3><p>Confirms bytecode and standard ERC-20 metadata on chain 4663.</p></article><article><span>02</span><h3>Route probe</h3><p>Quotes direct USDG pools across every supported V3 fee tier and hookless V4 configuration.</p></article><article><span>03</span><h3>Protected execution</h3><p>Uses an exact token permission, minimum output and direct self-custody settlement.</p></article></div>
+    <div className="community-method"><article><span>01</span><h3>Contract check</h3><p>Confirms bytecode and standard ERC-20 metadata on chain 4663.</p></article><article><span>02</span><h3>Native pair routing</h3><p>Uses USDG, WETH or the listed pool&apos;s quote asset across Uniswap V2, V3 and V4.</p></article><article><span>03</span><h3>Protected execution</h3><p>Uses an exact token permission, minimum output and direct self-custody settlement.</p></article></div>
   </section>;
 }

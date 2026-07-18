@@ -110,7 +110,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /Compare live routes/);
   assert.match(page, /PROTECTED QUOTES/);
   assert.match(page, /Price feed temporarily unavailable\. Trading is disabled until verification completes\./);
-  assert.match(page, /Release 0\.5\.1/);
+  assert.match(page, /Release 0\.5\.2/);
   assert.match(page, /Meme \+ Crypto/);
   assert.match(page, /ReferralRewards/);
   assert.match(page, /href="\/docs"/);
@@ -123,6 +123,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(community, /Top gainers/);
   assert.match(community, /MARKET_CATEGORIES/);
   assert.match(community, /V3_FEES = \[100, 500, 3_000, 10_000\]/);
+  assert.match(community, /buildV2ExactInputCalldata/);
+  assert.match(community, /Native pair routing/);
+  assert.match(community, /USDG, WETH or the listed pool/);
   assert.match(community, /UNREVIEWED TOKEN MODE/);
   assert.match(rewards, /HOODFLOW REWARDS \/ SEASON 0/);
   assert.match(rewards, /PLANNED \$HFLOW ELIGIBILITY/);
@@ -132,6 +135,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(communityMarketRoute, /new_pools/);
   assert.match(communityMarketRoute, /GeckoTerminal/);
   assert.match(communityMarketRoute, /DEX Screener/);
+  assert.match(communityMarketRoute, /token-pairs\/v1\/robinhood/);
   assert.match(layout, /HoodFlow \| Stock Token Trading/);
   assert.match(layout, /Instrument_Sans/);
   assert.match(layout, /IBM_Plex_Mono/);
