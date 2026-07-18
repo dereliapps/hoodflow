@@ -356,6 +356,31 @@ async function fetchVirtuals(url: string) {
   return Array.isArray(payload.data) ? payload.data : [];
 }
 
+async function fetchDexDiscovery() {
+  const discoveryUrls = [
+    "https://api.dexscreener.com/token-profiles/latest/v1",
+    "https://api.dexscreener.com/token-boosts/top/v1",
+    "https://api.dexscreener.com/token-boosts/latest/v1",
+  ];
+  const discoveries = await Promise.allSettled(discoveryUrls.map(async (url) => {
+    const response = await fetch(url, { headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(`DEX Screener discovery ${response.status}`);
+    return response.json() as Promise<Array<{ chainId?: string; tokenAddress?: string }>>;
+  }));
+  const addresses = Array.from(new Set(discoveries.flatMap((result) => result.status === "fulfilled"
+    ? result.value.filter((item) => item.chainId === "robinhood" && /^0x[a-fA-F0-9]{40}$/.test(item.tokenAddress ?? "")).map((item) => item.tokenAddress!.toLowerCase())
+    : [])));
+  if (!addresses.length) return [];
+  const chunks = Array.from({ length: Math.ceil(addresses.length / 30) }, (_, index) => addresses.slice(index * 30, index * 30 + 30));
+  const pairResults = await Promise.allSettled(chunks.map(async (chunk) => {
+    const response = await fetch(`https://api.dexscreener.com/tokens/v1/robinhood/${chunk.join(",")}`, { headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(`DEX Screener tokens ${response.status}`);
+    return response.json() as Promise<DexPair[]>;
+  }));
+  const pairs = pairResults.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+  return addresses.flatMap((target) => parseTargetPairs(pairs, target));
+}
+
 export async function GET(request?: Request) {
   const searchParams = request ? new URL(request.url).searchParams : null;
   const lookupAddress = searchParams?.get("token")?.toLowerCase() ?? null;
@@ -411,8 +436,9 @@ export async function GET(request?: Request) {
     fetchVirtuals(virtualsQuery({ "sort[0]": "volume24h:desc", "sort[1]": "createdAt:desc", "pagination[page]": "1", "pagination[pageSize]": "60" })),
     fetchVirtuals(virtualsQuery({ "sort[0]": "priceChangePercent24h:desc", "sort[1]": "volume24h:desc", "pagination[page]": "1", "pagination[pageSize]": "40" })),
     fetchVirtuals(virtualsQuery({ "sort[0]": "createdAt:desc", "pagination[page]": "1", "pagination[pageSize]": "60" })),
+    fetchDexDiscovery(),
   ]);
-  const [top, trending, newest, canonical, virtualsVolume, virtualsGainers, virtualsNewest] = requests;
+  const [top, trending, newest, canonical, virtualsVolume, virtualsGainers, virtualsNewest, dexDiscovery] = requests;
   const rows = [
     ...(top.status === "fulfilled" ? parseGecko(top.value, "Top volume") : []),
     ...(trending.status === "fulfilled" ? parseGecko(trending.value, "Trending", true) : []),
@@ -421,6 +447,7 @@ export async function GET(request?: Request) {
     ...(virtualsVolume.status === "fulfilled" ? parseVirtuals(virtualsVolume.value, "Virtuals volume") : []),
     ...(virtualsGainers.status === "fulfilled" ? parseVirtuals(virtualsGainers.value, "Virtuals trending", true) : []),
     ...(virtualsNewest.status === "fulfilled" ? parseVirtuals(virtualsNewest.value, "Virtuals new") : []),
+    ...(dexDiscovery.status === "fulfilled" ? dexDiscovery.value : []),
   ];
   const markets = mergeMarkets(rows);
   if (!markets.length) return NextResponse.json({ markets: [], error: "Market feeds are temporarily unavailable." }, { status: 503, headers: { "cache-control": "no-store" } });
@@ -431,6 +458,7 @@ export async function GET(request?: Request) {
       geckoTerminal: top.status === "fulfilled" || trending.status === "fulfilled" || newest.status === "fulfilled",
       dexScreener: canonical.status === "fulfilled",
       virtuals: virtualsVolume.status === "fulfilled" || virtualsGainers.status === "fulfilled" || virtualsNewest.status === "fulfilled",
+      dexDiscovery: dexDiscovery.status === "fulfilled",
     },
   }, { headers: { "cache-control": "public, max-age=20, s-maxage=60, stale-while-revalidate=300" } });
 }

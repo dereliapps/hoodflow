@@ -320,8 +320,24 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
         const params = new URLSearchParams({ pool: activeMarket.pairAddress, token: activeMarket.address, range: chartRange });
         const response = await fetch(`/api/community-markets/chart?${params}`, { cache: "no-store", signal: controller.signal });
         const payload = await response.json() as { points?: ChartPoint[]; error?: string };
-        if (!response.ok || !Array.isArray(payload.points) || payload.points.length < 2) throw new Error(payload.error || "No chart history is available yet.");
-        setChartPoints(payload.points);
+        let points = response.ok && Array.isArray(payload.points) ? payload.points : [];
+        if (points.length < 2) {
+          const config = chartRange === "1D" ? { timeframe: "minute", aggregate: "15", limit: "96" }
+            : chartRange === "30D" ? { timeframe: "hour", aggregate: "4", limit: "180" }
+              : { timeframe: "hour", aggregate: "1", limit: "168" };
+          const direct = new URL(`https://api.geckoterminal.com/api/v2/networks/robinhood/pools/${activeMarket.pairAddress}/ohlcv/${config.timeframe}`);
+          direct.searchParams.set("aggregate", config.aggregate);
+          direct.searchParams.set("limit", config.limit);
+          direct.searchParams.set("currency", "usd");
+          direct.searchParams.set("token", activeMarket.address);
+          direct.searchParams.set("include_empty_intervals", "true");
+          const directResponse = await fetch(direct, { headers: { accept: "application/json;version=20230203" }, signal: controller.signal });
+          if (!directResponse.ok) throw new Error(payload.error || `Price history ${directResponse.status}`);
+          const directPayload = await directResponse.json() as { data?: { attributes?: { ohlcv_list?: Array<[number, number, number, number, number, number]> } } };
+          points = (directPayload.data?.attributes?.ohlcv_list ?? []).map(([time, open, high, low, close, volume]) => ({ time, open, high, low, close, volume })).sort((left, right) => left.time - right.time);
+        }
+        if (points.length < 2) throw new Error(payload.error || "No chart history is available yet.");
+        setChartPoints(points);
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
           setChartPoints([]);
