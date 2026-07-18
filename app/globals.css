@@ -32,20 +32,25 @@
 .community-page .market-rank-tabs { padding: 0 36px 24px; gap: 8px; border-bottom: 1px solid var(--crypto-line); }
 .community-page .market-rank-tabs button { min-height: 42px; padding: 0 17px; border-radius: 999px; font-size: 12px; }
 .community-page .market-rank-tabs button.active { color: white; background: var(--crypto-ink); }
-.community-page .token-market-header,.community-page .token-market-row { grid-template-columns: minmax(240px,1.45fr) .72fr .52fr .72fr .72fr .8fr .92fr minmax(142px,.7fr); gap: 18px; }
+.community-page .token-market-header,.community-page .token-market-row { grid-template-columns: minmax(240px,1.5fr) .82fr .58fr .82fr .82fr .9fr 1fr 46px; gap: 18px; }
 .community-page .token-market-header { min-height: 50px; padding: 0 26px; font-size: 9px; background: #f2f6f2; }
-.community-page .token-market-row { min-height: 98px; padding: 12px 26px; transition: background .18s ease,transform .18s ease; }
+.community-page .token-market-row { min-height: 98px; padding: 12px 26px; transition: background .18s ease,transform .18s ease; cursor: pointer; outline: 0; }
 .community-page .token-market-row:hover { position: relative; z-index: 1; background: #f7fcf8; box-shadow: inset 4px 0 0 var(--crypto-green); }
 .community-page .token-market-identity img,.community-page .token-market-identity > b { width: 48px; height: 48px; border-radius: 15px; }
-.community-page .token-market-identity p strong,.community-page .market-number strong,.community-page .market-pair strong { font-size: 14px; }
-.community-page .token-market-identity p small,.community-page .market-number small,.community-page .market-pair small { margin-top: 4px; font-size: 11px; }
+.community-page .token-market-identity p strong,.community-page .token-metric strong,.community-page .market-pair strong { font-size: 14px; }
+.community-page .token-market-identity p small,.community-page .token-metric small,.community-page .market-pair small { margin-top: 4px; font-size: 11px; }
+.community-page .token-metric { position: static; min-width: 0; color: var(--crypto-ink); letter-spacing: normal; }
+.community-page .token-metric strong,.community-page .token-metric small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.community-page .token-metric small { color: #849087; }
 .community-page .market-change { min-height: 32px; padding: 0 9px; border-radius: 9px; font-size: 11px; }
-.community-page .market-row-actions button,.community-page .market-row-actions a { min-height: 40px; border-radius: 10px; font-size: 10px; }
+.community-page .market-row-actions { display: block; }
+.community-page .market-row-actions a { width: 40px; min-height: 40px; padding: 0; border-radius: 12px; font-size: 17px; }
 .community-page .market-data-note { padding: 22px 28px; font-size: 12px; background: #f6f9f6; }
 .community-page .ca-import-section { margin-top: 82px; }
 .community-page .ca-search { margin-top: 24px; padding: 22px; border: 1px solid var(--crypto-line); border-radius: 20px; background: #f7faf7; }
 .community-page .ca-search label { font-size: 10px; }
-.community-page .ca-search input { min-height: 58px; padding: 0 18px; border-radius: 12px; font-size: 15px; }
+.community-page .ca-search input { min-height: 58px; padding: 0 18px; border: 1px solid #d5ddd6; border-radius: 12px; background: #fff; color: var(--crypto-ink); caret-color: var(--crypto-green); font-size: 15px; }
+.community-page .ca-search input::placeholder { color: #97a19b; }
 .community-page .ca-search button { border-radius: 12px; }
 .community-page .community-terminal { margin-top: 20px; border-color: #cbd7ce; border-radius: 26px; box-shadow: 0 34px 90px rgba(21,42,29,.13); }
 .community-page .terminal-token-head { min-height: 124px; padding: 26px 30px; background: #fff; }
@@ -86,6 +91,7 @@
   .community-page .token-market-header { display: none; }
   .community-page .token-market-row { min-width: 0; grid-template-columns: 1fr 1fr; padding: 20px 18px; gap: 18px 12px; }
   .community-page .token-market-row > :nth-child(4),.community-page .token-market-row > :nth-child(5),.community-page .token-market-row > :nth-child(7) { display: none; }
+  .community-page .market-row-actions { grid-column: auto; justify-self: end; align-self: center; }
   .community-page .terminal-market-card { min-height: 600px; padding: 22px 18px; }
   .crypto-chart-canvas { min-height: 230px; }
 }
