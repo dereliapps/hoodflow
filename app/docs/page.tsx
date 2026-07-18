@@ -23,6 +23,8 @@ const sections = [
   ["quotes", "Prices and quotes"],
   ["permissions", "Wallet permissions"],
   ["routes", "Route states"],
+  ["community", "Meme + Crypto"],
+  ["rewards", "Referral rewards"],
   ["dca", "DCA engine"],
   ["troubleshooting", "Troubleshooting"],
 ] as const;
@@ -96,20 +98,32 @@ export default function DocsPage() {
           <p className="docs-kicker">06 / STATUS GLOSSARY</p><h2>Why a trade may be disabled</h2>
           <div className="docs-status-grid">
             <article><b className="ready">FULL-FILL READY</b><p>A reviewed route is configured and a fresh executable quote can be requested.</p></article>
-            <article><b className="watch">WATCH-ONLY</b><p>The canonical token is indexed, but no route has passed HoodFlow's complete-input checks.</p></article>
+            <article><b className="watch">WATCH-ONLY</b><p>The canonical token is indexed, but no route has passed HoodFlow&apos;s complete-input checks.</p></article>
             <article><b className="paused">ORACLE PAUSED</b><p>The reference feed is paused, stale or invalid. Trading remains blocked until verification recovers.</p></article>
             <article><b className="unavailable">NO LIVE ROUTE</b><p>The requested amount cannot currently receive a valid complete fill within the configured route policy.</p></article>
           </div>
         </section>
 
+        <section id="community" className="docs-section">
+          <p className="docs-kicker">07 / MEME + CRYPTO</p><h2>Discover tokens by contract address</h2>
+          <p>Paste any standard ERC-20 contract address on Robinhood Chain. HoodFlow reads bytecode and metadata, then probes direct USDG liquidity across supported Uniswap V3 fee tiers and hookless V4 configurations. A contract can be imported even when it is not tradable.</p>
+          <div className="docs-note"><span>UNREVIEWED MODE</span><p>Contract discovery is not an endorsement or safety review. Trading is enabled only when a fresh direct route quote exists, but route availability does not rule out malicious transfer logic, issuer risk or liquidity withdrawal.</p></div>
+        </section>
+
+        <section id="rewards" className="docs-section">
+          <p className="docs-kicker">08 / REWARDS</p><h2>How HF Points qualify</h2>
+          <p>A wallet activates one referral relationship with a message signature. The invited wallet receives 100 HF Points and its referrer receives 500 only after the invited wallet&apos;s first eligible Universal Router trade is confirmed on Robinhood Chain. Clicks, repeat trades and raw volume earn no points.</p>
+          <div className="docs-callout"><strong>No guaranteed token allocation.</strong><p>HF Points are planned to inform future $HFLOW eligibility, but have no present monetary value. Conversion rate, launch, eligibility, jurisdiction and anti-sybil terms remain subject to a future announcement.</p></div>
+        </section>
+
         <section id="dca" className="docs-section">
-          <p className="docs-kicker">07 / AUTOMATION BETA</p><h2>DCA is separate from Direct Buy</h2>
+          <p className="docs-kicker">09 / AUTOMATION BETA</p><h2>DCA is separate from Direct Buy</h2>
           <p>The recurring engine is an advanced beta feature. Only prepare a schedule when the application reports that the deployed engine and keeper are live. A DCA defines its asset, amount, cadence, total budget, expiry and slippage boundary; keepers cannot execute outside those limits.</p>
           <a className="docs-address" href={`${explorer}${HOODFLOW_DCA_ADDRESS}`} target="_blank" rel="noreferrer">View recurring engine contract →</a>
         </section>
 
         <section id="troubleshooting" className="docs-section">
-          <p className="docs-kicker">08 / TROUBLESHOOTING</p><h2>Common messages</h2>
+          <p className="docs-kicker">10 / TROUBLESHOOTING</p><h2>Common messages</h2>
           <details><summary>Wallet is on the wrong network</summary><p>Approve the network switch to Robinhood Chain. If your wallet does not add it automatically, use chain ID {ROBINHOOD_MAINNET.chainIdNumber} and the official network configuration.</p></details>
           <details><summary>Waiting for oracle</summary><p>The reference feed is unavailable, stale or still being verified. Trading stays disabled rather than using an unverified value.</p></details>
           <details><summary>No live full-fill route</summary><p>Liquidity for the selected asset or amount cannot pass the current route policy. Reduce the amount or try again later; never bypass the warning with a blind transaction.</p></details>
@@ -125,6 +139,6 @@ export default function DocsPage() {
     </div>
 
     <section className="seo-risk"><strong>Stock Tokens are not shares.</strong><p>They may be restricted in your jurisdiction and do not provide shareholder rights. HoodFlow is an independent interface built on Robinhood Chain and is not affiliated with Robinhood Markets, Inc.</p></section>
-    <footer className="seo-footer"><span>Documentation · Release 0.4.1</span><Link href="/security">Review security & known limitations →</Link></footer>
+    <footer className="seo-footer"><span>Documentation · Release 0.5.0</span><Link href="/security">Review security & known limitations →</Link></footer>
   </main>;
 }

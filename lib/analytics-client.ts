@@ -7,7 +7,11 @@ export type HoodFlowEvent =
   | "quote_received"
   | "transaction_started"
   | "transaction_confirmed"
-  | "transaction_failed";
+  | "transaction_failed"
+  | "community_token_imported"
+  | "referral_registered"
+  | "referral_shared"
+  | "referral_qualified";
 
 const SESSION_KEY = "hoodflow_session_v1";
 
