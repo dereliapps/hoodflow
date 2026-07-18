@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element -- local brand marks are intentionally served as original logo assets. */
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 type View = "overview" | "strategies" | "assets" | "marketplace" | "activity" | "controls";
 type StrategyKind = "DCA" | "Take profit" | "Rebalance";
@@ -9,6 +9,21 @@ type StrategyStatus = "Prepared" | "Paused" | "Shadow";
 type MarketplaceSort = "featured" | "copied" | "risk";
 type InfoPanel = "docs" | "terms";
 type BootPhase = "loading" | "leaving" | "done";
+type PriceState = "loading" | "live" | "degraded" | "error";
+type PricePoint = {
+  price: number | null;
+  updatedAt: number | null;
+  ageSeconds: number | null;
+  heartbeat: number;
+  oraclePaused: boolean | null;
+  status: "live" | "stale" | "paused" | "unavailable";
+};
+type PriceResponse = {
+  fetchedAt: string;
+  availableCount: number;
+  liveCount: number;
+  prices: Record<string, PricePoint>;
+};
 
 type Strategy = {
   id: number;
@@ -46,22 +61,6 @@ const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_HOODFLOW_CONTRACT_ADDRESS?.trim
 const contractConfigured = /^0x[a-fA-F0-9]{40}$/.test(CONTRACT_ADDRESS);
 const DRAFT_STORAGE_KEY = "hoodflow-device-drafts-v1";
 
-const assetMeta: Record<string, { name: string; color: string; price: number; move: string }> = {
-  AAPL: { name: "Apple", color: "#e8edf2", price: 211.18, move: "+1.24%" },
-  AMD: { name: "AMD", color: "#ed1c24", price: 163.14, move: "+0.72%" },
-  AMZN: { name: "Amazon", color: "#ff9900", price: 223.18, move: "+0.44%" },
-  INTC: { name: "Intel", color: "#00c7fd", price: 24.16, move: "+0.31%" },
-  META: { name: "Meta", color: "#0866ff", price: 704.28, move: "+0.94%" },
-  MU: { name: "Micron", color: "#5b75a6", price: 128.42, move: "+1.08%" },
-  NVDA: { name: "NVIDIA", color: "#76b900", price: 176.42, move: "+2.82%" },
-  GOOGL: { name: "Alphabet", color: "#4285f4", price: 193.67, move: "+0.61%" },
-  SNDK: { name: "Sandisk", color: "#a33bc2", price: 52.61, move: "+0.39%" },
-  SPCX: { name: "SpaceX", color: "#c5cbd0", price: 212.0, move: "+0.00%" },
-  TSLA: { name: "Tesla", color: "#e82127", price: 326.91, move: "-0.84%" },
-  QQQ: { name: "Invesco QQQ", color: "#1c4a85", price: 563.72, move: "+0.48%" },
-  SPY: { name: "SPDR S&P 500", color: "#bd252c", price: 626.44, move: "+0.34%" },
-};
-
 const assetRegistry = [
   { ticker: "AAPL", name: "Apple", type: "Stock", fullFill: true, logo: "/logos/AAPL.png" },
   { ticker: "AMD", name: "AMD", type: "Stock", fullFill: true, logo: "/logos/AMD.png" },
@@ -91,6 +90,7 @@ const assetRegistry = [
 ] as const;
 
 const assetByTicker = Object.fromEntries(assetRegistry.map((asset) => [asset.ticker, asset])) as Record<string, (typeof assetRegistry)[number]>;
+const priceSpotlight = ["AAPL", "NVDA", "TSLA", "GOOGL", "SPY"] as const;
 
 const starterStrategies: Strategy[] = [
   { id: 1, name: "Monday Apple", kind: "DCA", asset: "AAPL", rule: "20 USDG every Monday", next: "Authorization draft ready", status: "Prepared", spent: "160 USDG", health: 96, budget: "240 USDG", expires: "30 Sep 2026" },
@@ -106,7 +106,7 @@ const marketplace = [
 
 const activityEvents = [
   { ticker: "AAPL", event: "DCA simulation", strategy: "Monday Apple", detail: "20 USDG -> 0.0947 AAPL", time: "2 minutes ago", status: "Preview" },
-  { ticker: "AAPL", event: "Oracle freshness checked", strategy: "Monday Apple", detail: "Age 34s · within 120s limit", time: "2 minutes ago", status: "Passed" },
+  { ticker: "AAPL", event: "Oracle freshness checked", strategy: "Monday Apple", detail: "Age 34s · within registry heartbeat", time: "2 minutes ago", status: "Passed" },
   { ticker: "NVDA", event: "Shadow execution", strategy: "NVDA trim", detail: "Target +15% · Current +9.4%", time: "Yesterday", status: "No action" },
   { ticker: "4", event: "Strategy paused", strategy: "Core balance", detail: "Permission paused by owner", time: "12 Jul, 18:42", status: "Confirmed" },
   { ticker: "AAPL", event: "Slippage protected", strategy: "Monday Apple", detail: "Quote 0.0951 · received 0.0950", time: "08 Jul, 09:30", status: "Passed" },
@@ -127,6 +127,41 @@ function compactAddress(address: string) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "The wallet request was declined.";
+}
+
+const usdFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+function formatPrice(price: number | null | undefined) {
+  return typeof price === "number" && Number.isFinite(price) ? usdFormatter.format(price) : "—";
+}
+
+function formatPriceAge(updatedAt: number | null) {
+  if (!updatedAt) return "No valid round";
+  const seconds = Math.max(0, Math.floor(Date.now() / 1_000) - updatedAt);
+  if (seconds < 60) return "Updated now";
+  if (seconds < 3_600) return `Updated ${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86_400) return `Updated ${Math.floor(seconds / 3_600)}h ago`;
+  return `Updated ${Math.floor(seconds / 86_400)}d ago`;
+}
+
+function PriceCell({ point, loading }: { point?: PricePoint; loading: boolean }) {
+  if (loading && !point) {
+    return <div className="price-cell loading"><strong>Syncing</strong><small>Chainlink feed</small></div>;
+  }
+  if (!point || point.price === null) {
+    return <div className="price-cell unavailable"><strong>Unavailable</strong><small>No current feed</small></div>;
+  }
+  const detail = point.status === "paused"
+    ? "Oracle paused"
+    : point.status === "stale"
+      ? "Stale — blocked"
+      : formatPriceAge(point.updatedAt);
+  return <div className={`price-cell ${point.status}`}><strong>{formatPrice(point.price)}</strong><small><i />{detail}</small></div>;
 }
 
 function isStoredStrategy(value: unknown): value is Strategy {
@@ -171,15 +206,52 @@ export default function Home() {
   const [marketSort, setMarketSort] = useState<MarketplaceSort>("featured");
   const [infoPanel, setInfoPanel] = useState<InfoPanel | null>(null);
   const [draftsHydrated, setDraftsHydrated] = useState(false);
+  const [priceBook, setPriceBook] = useState<Record<string, PricePoint>>({});
+  const [priceState, setPriceState] = useState<PriceState>("loading");
+  const [priceUpdatedAt, setPriceUpdatedAt] = useState<number | null>(null);
+  const [priceRefreshing, setPriceRefreshing] = useState(false);
+  const [priceError, setPriceError] = useState("");
 
   const connected = Boolean(walletAddress);
   const preparedCount = useMemo(() => strategies.filter((item) => item.status === "Prepared").length, [strategies]);
   const shadowCount = useMemo(() => strategies.filter((item) => item.status === "Shadow").length, [strategies]);
+  const refreshPrices = useCallback(async (signal?: AbortSignal) => {
+    setPriceRefreshing(true);
+    try {
+      const response = await fetch("/api/prices", {
+        headers: { accept: "application/json" },
+        cache: "no-store",
+        signal,
+      });
+      if (!response.ok) throw new Error(`Price service returned ${response.status}`);
+      const data = await response.json() as PriceResponse;
+      if (!data.prices || typeof data.prices !== "object") throw new Error("Invalid price response");
+      setPriceBook(data.prices);
+      setPriceUpdatedAt(Date.parse(data.fetchedAt));
+      setPriceState(data.liveCount >= 24 ? "live" : "degraded");
+      setPriceError("");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setPriceState((current) => current === "loading" ? "error" : "degraded");
+      setPriceError("Live prices are temporarily unavailable. Existing values are not used for execution.");
+    } finally {
+      if (!signal?.aborted) setPriceRefreshing(false);
+    }
+  }, []);
   const estimatedUnits = useMemo(() => {
-    const price = assetMeta[draftAsset]?.price ?? 1;
-    return (Number(draftAmount || 0) / price).toFixed(4);
-  }, [draftAmount, draftAsset]);
-  const bootMessage = bootProgress < 40 ? "Loading official assets" : bootProgress < 75 ? "Checking safety controls" : bootProgress < 100 ? "Preparing your workspace" : "Workspace ready";
+    const point = priceBook[draftAsset];
+    if (!point?.price || point.status !== "live") return "—";
+    return (Number(draftAmount || 0) / point.price).toFixed(4);
+  }, [draftAmount, draftAsset, priceBook]);
+  const priceCounts = useMemo(() => {
+    const points = Object.values(priceBook);
+    return {
+      live: points.filter((point) => point.status === "live").length,
+      guarded: points.filter((point) => point.status === "stale" || point.status === "paused").length,
+      available: points.filter((point) => point.price !== null).length,
+    };
+  }, [priceBook]);
+  const bootMessage = bootProgress < 32 ? "Loading official assets" : bootProgress < 60 ? "Syncing onchain prices" : bootProgress < 82 ? "Checking safety controls" : bootProgress < 100 ? "Preparing your workspace" : "Workspace ready";
 
   useEffect(() => {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -241,6 +313,24 @@ export default function Home() {
       // Device storage is optional; the in-memory workspace remains usable.
     }
   }, [draftsHydrated, strategies]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const initial = window.setTimeout(() => void refreshPrices(controller.signal), 0);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshPrices(controller.signal);
+    }, 30_000);
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void refreshPrices(controller.signal);
+    };
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => {
+      controller.abort();
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshVisible);
+    };
+  }, [refreshPrices]);
 
   useEffect(() => {
     async function readNetwork() {
@@ -392,7 +482,7 @@ export default function Home() {
       </div>}
       <header className="topbar">
         <button className="brand" onClick={() => setView("overview")} aria-label="HoodFlow home">
-          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V9</b>
+          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V10</b>
         </button>
         <nav className="main-nav" aria-label="Main navigation">
           {navigation.map((item) => <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>{item}</button>)}
@@ -409,19 +499,24 @@ export default function Home() {
 
       {view === "overview" && (
         <section className="page overview-page">
-          <div className="market-state"><span><i /> TESTNET RPC ONLINE</span><span>Block #{networkBlock}</span><span>25/25 safety tests · 13 full-fill routes</span></div>
+          <div className="market-state"><span><i /> TESTNET RPC ONLINE</span><span>Block #{networkBlock}</span><span className={`price-state ${priceState}`}>{priceState === "loading" ? "SYNCING PRICES" : `${priceCounts.live} ONCHAIN PRICES LIVE`}</span><span>25/25 safety tests · 13 full-fill routes</span></div>
           <div className="page-heading">
             <div><p className="eyebrow">AUTOMATION WITHOUT CUSTODY</p><h1>Set it. Cap it.<br /><span>Let it run.</span></h1><p className="lede">Build self-running stock-token strategies with hard spending limits, live health checks and a kill switch you control.</p></div>
-            <div className="hero-command"><button className="primary-action" onClick={() => openComposer()}><span>+</span> Build an automation</button><div className="hero-proof"><span>V9 RELEASE GATE</span><strong>25 official assets indexed</strong><small>13 full-fill ready · 2/2 fork canary · 0 broadcast</small></div></div>
+            <div className="hero-command"><button className="primary-action" onClick={() => openComposer()}><span>+</span> Build an automation</button><div className="hero-proof"><span>V10 LIVE PRICING</span><strong>25 official assets indexed</strong><small>24 Chainlink feeds · freshness guarded · 0 broadcast</small></div></div>
           </div>
 
           <div className="feature-dock">
             <button onClick={() => openComposer()}><span>01</span><div><strong>Shadow Lab</strong><small>Simulate before funds move</small></div><b>&rarr;</b></button>
             <button onClick={() => setView("controls")}><span>02</span><div><strong>Permission Center</strong><small>Inspect every spending cap</small></div><b>&rarr;</b></button>
-            <button onClick={() => setView("assets")}><span>03</span><div><strong>Asset Matrix</strong><small>25 canonical Robinhood assets</small></div><b>&rarr;</b></button>
+            <button onClick={() => setView("assets")}><span>03</span><div><strong>Asset Matrix</strong><small>{priceState === "loading" ? "Syncing onchain prices" : `${priceCounts.available}/25 token prices available`}</small></div><b>&rarr;</b></button>
           </div>
 
           <div className="preview-callout"><div><strong>Explore safely today</strong><span>Browse every official asset, build a strategy and test it in Shadow Mode.</span></div><b>NO MAINNET ORDERS</b></div>
+
+          <div className="price-tape-head"><span>LIVE TOKEN PRICES</span><button onClick={() => setView("assets")}>Open all 25 <b>&rarr;</b></button></div>
+          <div className="price-tape">
+            {priceSpotlight.map((ticker) => <button key={ticker} onClick={() => setView("assets")}><Mark ticker={ticker} small /><p><span>{ticker}</span><strong>{formatPrice(priceBook[ticker]?.price)}</strong></p><small className={priceBook[ticker]?.status ?? "loading"}><i />{priceBook[ticker]?.status === "live" ? formatPriceAge(priceBook[ticker].updatedAt) : priceBook[ticker]?.status ?? "Syncing"}</small></button>)}
+          </div>
 
           <div className="overview-grid">
             <article className="balance-card dark-card">
@@ -471,10 +566,15 @@ export default function Home() {
       {view === "assets" && (
         <section className="page inner-page assets-page">
           <div className="asset-hero">
-            <div><p className="eyebrow">ROBINHOOD ASSET MATRIX</p><h1>Twenty-five assets.<br /><span>Clearly explained.</span></h1><p>Every canonical Robinhood stock token and ETF is indexed with its real brand mark. HoodFlow only enables assets that completed a full-input fork swap; everything else stays safely watch-only.</p></div>
+            <div><p className="eyebrow">ROBINHOOD ASSET MATRIX</p><h1>Twenty-five assets.<br /><span>Priced onchain.</span></h1><p>Every canonical Robinhood stock token and ETF is indexed with its real brand mark and multiplier-adjusted Chainlink token price. HoodFlow only enables assets that completed a full-input fork swap; everything else stays safely watch-only.</p></div>
             <div className="asset-totals"><div><strong>25</strong><span>OFFICIAL ASSETS</span></div><div><strong>13</strong><span>FULL-FILL READY</span></div><div><strong>12</strong><span>WATCH-ONLY</span></div></div>
           </div>
           <div className="asset-logo-cloud" aria-label="All supported brands">{assetRegistry.map((asset) => <Mark key={asset.ticker} ticker={asset.ticker} small />)}<span>20 stocks + 5 ETFs</span></div>
+          <div className={`price-source-bar ${priceState}`}>
+            <div><span><i /> CHAINLINK / ROBINHOOD MAINNET</span><strong>{priceState === "loading" ? "Syncing price feeds" : `${priceCounts.live} live · ${priceCounts.guarded} guarded · ${25 - priceCounts.available} unavailable`}</strong></div>
+            <p><strong>Onchain token price</strong><span>Includes Robinhood&apos;s corporate-action multiplier, so it can differ from the headline share price.</span>{priceError && <small>{priceError}</small>}</p>
+            <div className="price-refresh"><span>{priceUpdatedAt ? `Synced ${new Date(priceUpdatedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}` : "Waiting for first sync"}</span><button onClick={() => void refreshPrices()} disabled={priceRefreshing}>{priceRefreshing ? "Syncing" : "Refresh"}</button></div>
+          </div>
           <div className="route-explainer"><div><b className="route-ready"><i />READY</b><p><strong>Can be simulated</strong><span>A full-input fork swap passed. The route is quoted again before every execution.</span></p></div><div><b className="route-watch"><i />WATCH</b><p><strong>Visible, never forced</strong><span>No order is prepared until a full-fill route passes. MSFT stays blocked after a deterministic-fork partial fill, even when a live quote appears.</span></p></div></div>
           <div className="asset-toolbar">
             <div>{(["all", "routed", "registry"] as const).map((scope) => <button key={scope} className={assetScope === scope ? "selected" : ""} onClick={() => setAssetScope(scope)}>{scope === "all" ? "All 25" : scope === "routed" ? "Full-fill ready" : "Watch-only"}</button>)}</div>
@@ -482,11 +582,11 @@ export default function Home() {
           </div>
           <p className="result-count">Showing {visibleAssets.length} of 25 assets</p>
           <div className="asset-table">
-            <div className="asset-table-head"><span>ASSET</span><span>TYPE</span><span>STATUS</span><span>WHAT HOODFLOW WILL DO</span></div>
-            {visibleAssets.map(({ ticker, name, type, fullFill }) => <article className="asset-catalog-row" key={ticker}><div><Mark ticker={ticker} /><p><strong>{ticker}</strong><small>{name}</small></p></div><span className="asset-type">{type}</span><b className={fullFill ? "route-ready" : "route-watch"}><i />{fullFill ? "Ready" : "Watch-only"}</b><p className="asset-policy">{fullFill ? "Requote, preflight, then prepare" : ticker === "MSFT" ? "Partial fill detected — block the order" : "No full-fill route — skip the order"}</p></article>)}
+            <div className="asset-table-head"><span>ASSET</span><span>ONCHAIN PRICE</span><span>TYPE</span><span>STATUS</span><span>WHAT HOODFLOW WILL DO</span></div>
+            {visibleAssets.map(({ ticker, name, type, fullFill }) => <article className="asset-catalog-row" key={ticker}><div><Mark ticker={ticker} /><p><strong>{ticker}</strong><small>{name}</small></p></div><PriceCell point={priceBook[ticker]} loading={priceState === "loading"} /><span className="asset-type">{type}</span><b className={fullFill ? "route-ready" : "route-watch"}><i />{fullFill ? "Ready" : "Watch-only"}</b><p className="asset-policy">{fullFill ? "Requote, preflight, then prepare" : ticker === "MSFT" ? "Partial fill detected — block the order" : "No full-fill route — skip the order"}</p></article>)}
             {visibleAssets.length === 0 && <div className="empty-state"><strong>No matching asset</strong><span>Try another ticker or clear the current filter.</span></div>}
           </div>
-          <p className="asset-footnote">Status is a verified infrastructure snapshot, not a liquidity guarantee or investment recommendation. Every execution must pass a fresh quote and preflight check.</p>
+          <p className="asset-footnote">Prices are informational Chainlink token prices, not execution quotes or investment recommendations. A stale or paused feed is visibly guarded and cannot be used by the execution engine.</p>
         </section>
       )}
 
@@ -561,13 +661,13 @@ export default function Home() {
             </div>
             <form onSubmit={createStrategy}>
               <label>STRATEGY NAME<input name="name" value={draftName} onChange={(event) => setDraftName(event.target.value)} required /></label>
-              {kind !== "Rebalance" && <div className="asset-choice"><Mark ticker={draftAsset} /><label>ASSET <small>13 full-fill verified assets</small><select name="asset" value={draftAsset} onChange={(event) => setDraftAsset(event.target.value)}>{Object.entries(assetMeta).map(([ticker, meta]) => <option key={ticker} value={ticker}>{ticker} · {meta.name}</option>)}</select></label></div>}
+              {kind !== "Rebalance" && <div className="asset-choice"><Mark ticker={draftAsset} /><label>ASSET <small>13 full-fill verified assets</small><select name="asset" value={draftAsset} onChange={(event) => setDraftAsset(event.target.value)}>{assetRegistry.filter((asset) => asset.fullFill).map((asset) => <option key={asset.ticker} value={asset.ticker}>{asset.ticker} · {asset.name} · {formatPrice(priceBook[asset.ticker]?.price)}</option>)}</select></label></div>}
               <div className="form-pair">
                 <label>{kind === "DCA" ? "AMOUNT" : kind === "Take profit" ? "POSITION TO SELL" : "DRIFT LIMIT"}<span className="input-unit"><input name="amount" type="number" min="1" value={draftAmount} onChange={(event) => setDraftAmount(event.target.value)} required /><b>{kind === "DCA" ? "USDG" : "%"}</b></span></label>
                 <label>{kind === "DCA" ? "SCHEDULE" : kind === "Take profit" ? "PROFIT TARGET" : "CHECK"}{kind === "DCA" ? <select name="frequency" value={draftFrequency} onChange={(event) => setDraftFrequency(event.target.value)}><option>Monday</option><option>Friday</option><option>day</option><option>month</option></select> : <span className="input-unit"><input name="frequency" type="number" min="1" value={draftFrequency} onChange={(event) => setDraftFrequency(event.target.value)} /><b>{kind === "Take profit" ? "%" : "HR"}</b></span>}</label>
               </div>
               <button type="button" className={`shadow-toggle ${shadowMode ? "on" : ""}`} onClick={() => setShadowMode((current) => !current)}><i /><span><strong>Start in Shadow Mode</strong><small>Run against live prices without moving funds.</small></span><b>{shadowMode ? "ON" : "OFF"}</b></button>
-              <div className="execution-preview"><div className="preview-head"><span>EXECUTION PREVIEW</span><b>{shadowMode ? "NO FUNDS AT RISK" : "PREPARE ONLY · NO BROADCAST"}</b></div><div className="preview-grid"><p><span>Estimated receive</span><strong>{kind === "DCA" ? `${estimatedUnits} ${draftAsset}` : "Condition based"}</strong></p><p><span>Protocol fee</span><strong>{kind === "DCA" ? `${(Number(draftAmount || 0) * .001).toFixed(3)} USDG` : "0.10%"}</strong></p><p><span>Max slippage</span><strong>0.50%</strong></p><p><span>Price freshness</span><strong>120s max</strong></p></div></div>
+              <div className="execution-preview"><div className="preview-head"><span>EXECUTION PREVIEW</span><b>{shadowMode ? "NO FUNDS AT RISK" : "PREPARE ONLY · NO BROADCAST"}</b></div><div className="preview-grid"><p><span>Estimated receive</span><strong>{kind === "DCA" ? `${estimatedUnits} ${draftAsset}` : "Condition based"}</strong></p><p><span>Onchain token price</span><strong>{formatPrice(priceBook[draftAsset]?.price)}</strong></p><p><span>Protocol fee</span><strong>{kind === "DCA" ? `${(Number(draftAmount || 0) * .001).toFixed(3)} USDG` : "0.10%"}</strong></p><p><span>Oracle status</span><strong>{priceBook[draftAsset]?.status === "live" ? formatPriceAge(priceBook[draftAsset].updatedAt) : priceBook[draftAsset]?.status ?? "Syncing"}</strong></p></div></div>
               <div className="limit-note"><span>✓</span><p><strong>Spending limits stay enforced onchain.</strong><small>HoodFlow cannot move funds outside this strategy&apos;s asset, budget and expiry rules.</small></p></div>
               <div className="composer-actions"><button type="button" onClick={() => setComposerOpen(false)}>Cancel</button><button type="submit" className="primary-action">{shadowMode ? "Start simulation" : "Prepare authorization"} <span>&rarr;</span></button></div>
             </form>
@@ -575,9 +675,9 @@ export default function Home() {
         </div>
       )}
 
-      {selectedStrategy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedStrategy(null); }}><section className="detail-drawer" role="dialog" aria-modal="true" aria-label={`${selectedStrategy.name} details`}><div className="composer-head"><div><p className="eyebrow">STRATEGY HEALTH</p><h2>{selectedStrategy.name}</h2></div><button onClick={() => setSelectedStrategy(null)}>x</button></div><div className="health-hero"><strong>{selectedStrategy.health}</strong><span>/100</span><p>Healthy</p></div><div className="health-checks"><div><span>Oracle rule</span><strong>120s max <b>PASS</b></strong></div><div><span>Budget rule</span><strong>Bounded <b>PASS</b></strong></div><div><span>Keeper rule</span><strong>Allowlisted <b>PASS</b></strong></div><div><span>Slippage rule</span><strong>0.50% <b>PASS</b></strong></div></div><div className="permission-summary"><p><span>Asset access</span><strong>{selectedStrategy.asset} only</strong></p><p><span>Spending cap</span><strong>{selectedStrategy.budget}</strong></p><p><span>Permission expires</span><strong>{selectedStrategy.expires}</strong></p></div><button className="drawer-action" onClick={() => { toggleStrategy(selectedStrategy.id); setSelectedStrategy(null); }}>{selectedStrategy.status === "Prepared" ? "Pause strategy" : "Prepare strategy"}</button></section></div>}
+      {selectedStrategy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedStrategy(null); }}><section className="detail-drawer" role="dialog" aria-modal="true" aria-label={`${selectedStrategy.name} details`}><div className="composer-head"><div><p className="eyebrow">STRATEGY HEALTH</p><h2>{selectedStrategy.name}</h2></div><button onClick={() => setSelectedStrategy(null)}>x</button></div><div className="health-hero"><strong>{selectedStrategy.health}</strong><span>/100</span><p>Healthy</p></div><div className="health-checks"><div><span>Oracle rule</span><strong>Feed + token pause <b>PASS</b></strong></div><div><span>Budget rule</span><strong>Bounded <b>PASS</b></strong></div><div><span>Keeper rule</span><strong>Allowlisted <b>PASS</b></strong></div><div><span>Slippage rule</span><strong>0.50% <b>PASS</b></strong></div></div><div className="permission-summary"><p><span>Asset access</span><strong>{selectedStrategy.asset} only</strong></p><p><span>Spending cap</span><strong>{selectedStrategy.budget}</strong></p><p><span>Permission expires</span><strong>{selectedStrategy.expires}</strong></p></div><button className="drawer-action" onClick={() => { toggleStrategy(selectedStrategy.id); setSelectedStrategy(null); }}>{selectedStrategy.status === "Prepared" ? "Pause strategy" : "Prepare strategy"}</button></section></div>}
 
-      {infoPanel && <div className="confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setInfoPanel(null); }}><section className="info-card" role="dialog" aria-modal="true" aria-labelledby="info-title"><div className="composer-head"><div><p className="eyebrow">{infoPanel === "docs" ? "QUICK GUIDE" : "TESTNET TERMS"}</p><h2 id="info-title">{infoPanel === "docs" ? "Know every status." : "Clear before you start."}</h2></div><button aria-label="Close information" onClick={() => setInfoPanel(null)}>x</button></div>{infoPanel === "docs" ? <div className="info-list"><article><span>01</span><p><strong>Shadow</strong><small>Uses live-style inputs but never moves funds.</small></p></article><article><span>02</span><p><strong>Prepared</strong><small>A reviewed local authorization draft. This release does not broadcast it.</small></p></article><article><span>03</span><p><strong>Full-fill ready</strong><small>The complete input passed the official-router fork test. A fresh quote is still required.</small></p></article><article><span>04</span><p><strong>Watch-only</strong><small>The asset is visible, but HoodFlow blocks order preparation.</small></p></article></div> : <div className="info-copy"><p>HoodFlow is a testnet product preview, not a live brokerage or investment adviser.</p><p>Portfolio values, marketplace activity and performance figures are illustrative. No return is promised.</p><p>Mainnet stays locked until the funded network canary and independent contract audit are complete.</p></div>}<button className="drawer-action" onClick={() => setInfoPanel(null)}>Got it</button></section></div>}
+      {infoPanel && <div className="confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setInfoPanel(null); }}><section className="info-card" role="dialog" aria-modal="true" aria-labelledby="info-title"><div className="composer-head"><div><p className="eyebrow">{infoPanel === "docs" ? "QUICK GUIDE" : "TESTNET TERMS"}</p><h2 id="info-title">{infoPanel === "docs" ? "Know every status." : "Clear before you start."}</h2></div><button aria-label="Close information" onClick={() => setInfoPanel(null)}>x</button></div>{infoPanel === "docs" ? <div className="info-list"><article><span>01</span><p><strong>Shadow</strong><small>Uses live-style inputs but never moves funds.</small></p></article><article><span>02</span><p><strong>Prepared</strong><small>A reviewed local authorization draft. This release does not broadcast it.</small></p></article><article><span>03</span><p><strong>Full-fill ready</strong><small>The complete input passed the official-router fork test. A fresh quote is still required.</small></p></article><article><span>04</span><p><strong>Watch-only</strong><small>The asset is visible, but HoodFlow blocks order preparation.</small></p></article><article><span>05</span><p><strong>Onchain token price</strong><small>The Chainlink value includes Robinhood&apos;s corporate-action multiplier and can differ from a headline share quote.</small></p></article></div> : <div className="info-copy"><p>HoodFlow is a testnet product preview, not a live brokerage or investment adviser.</p><p>Onchain token prices are informational and can differ from headline share prices. Stale, paused or unavailable feeds are never treated as execution quotes.</p><p>Portfolio values, marketplace activity and performance figures are illustrative. No return is promised.</p><p>Mainnet stays locked until the funded network canary and independent contract audit are complete.</p></div>}<button className="drawer-action" onClick={() => setInfoPanel(null)}>Got it</button></section></div>}
 
       {confirmStop && <div className="confirm-backdrop"><section className="confirm-card" role="alertdialog" aria-modal="true"><p className="eyebrow">EMERGENCY CONTROL</p><h2>Pause every strategy?</h2><p>No new executions will be prepared. Your assets stay in your wallet and existing history remains available.</p><div><button onClick={() => setConfirmStop(false)}>Cancel</button><button onClick={stopAllStrategies}>Pause everything</button></div></section></div>}
       {toast && <div className="toast"><span>✓</span>{toast}</div>}

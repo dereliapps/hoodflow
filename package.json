@@ -12,7 +12,7 @@
     "test": "npm run test:contracts && npm run test:release && npm run test:site",
     "test:site": "npm run build && node --test tests/rendered-html.test.mjs",
     "test:contracts": "hardhat test",
-    "test:release": "node --import tsx --test tests/mainnet-release.test.ts",
+    "test:release": "node --import tsx --test tests/mainnet-release.test.ts tests/prices.test.ts",
     "contracts:compile": "hardhat compile --build-profile production",
     "contracts:clean": "hardhat clean",
     "contracts:deploy:testnet": "hardhat run scripts/deploy-testnet.ts",

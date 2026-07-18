@@ -33,7 +33,8 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(html, /Strategy workspace/);
   assert.match(html, /25 official assets indexed/);
   assert.match(html, /13 full-fill routes/);
-  assert.match(html, /2\/2 fork canary/);
+  assert.match(html, /24 Chainlink feeds/);
+  assert.match(html, /V10 LIVE PRICING/);
   assert.match(html, /Three steps\. You stay in control\./);
   assert.match(html, /NO MAINNET ORDERS/);
   assert.match(html, /Robinhood Chain Testnet/);
@@ -42,11 +43,12 @@ test("server-renders the HoodFlow product shell", async () => {
 });
 
 test("ships a bounded, interactive testnet experience", async () => {
-  const [page, layout, css, packageJson] = await Promise.all([
+  const [page, layout, css, packageJson, priceRoute] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/prices/route.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /"use client"/);
@@ -76,8 +78,14 @@ test("ships a bounded, interactive testnet experience", async () => {
   assert.match(page, /Independent audit/);
   assert.match(page, /Production RPC \+ oracle map/);
   assert.match(page, /7 of 11 complete/);
+  assert.match(page, /\/api\/prices/);
+  assert.match(page, /Onchain token price/);
+  assert.match(page, /LIVE TOKEN PRICES/);
+  assert.match(page, /Stale — blocked/);
+  assert.match(page, /CHAINLINK \/ ROBINHOOD MAINNET/);
+  assert.doesNotMatch(page, /price:\s*211\.18/);
   assert.match(page, /MAINNET LOCKED/);
-  assert.match(page, /version-badge">V9/);
+  assert.match(page, /version-badge">V10/);
   assert.match(layout, /HoodFlow — Safe stock automation/);
   assert.match(layout, /Instrument_Sans/);
   assert.match(layout, /IBM_Plex_Mono/);
@@ -85,7 +93,12 @@ test("ships a bounded, interactive testnet experience", async () => {
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
   assert.match(css, /\.launch-screen/);
   assert.match(css, /launch-fallback/);
+  assert.match(css, /\.price-source-bar/);
+  assert.match(css, /\.price-cell\.stale/);
   assert.match(css, /@media \(max-width: 620px\)/);
+  assert.match(priceRoute, /0xfeaf968c/);
+  assert.match(priceRoute, /0x7706ba52/);
+  assert.match(priceRoute, /stale-while-revalidate/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 
   await access(new URL("../public/og.png", import.meta.url));

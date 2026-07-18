@@ -41,7 +41,7 @@ function validEnvironment(): NodeJS.ProcessEnv {
       },
       {
         token: "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
-        feed: ADDRESS.feed2,
+        feed: "0x6B22A786bAa607d76728168703a39Ea9C99f2cD0",
         heartbeat: 86400,
         checkOraclePause: true,
       },
@@ -94,6 +94,16 @@ test("blocks noncanonical assets and stock configs without pause checks", () => 
       checkOraclePause: false,
     },
   ]);
+  const report = evaluateReleaseEnvironment(env);
+  assert.equal(report.ready, false);
+  assert.equal(report.gates.find((gate) => gate.id === "oracles")?.passed, false);
+});
+
+test("blocks a canonical stock when its feed does not match the current Chainlink registry", () => {
+  const env = validEnvironment();
+  const configs = JSON.parse(env.HOODFLOW_TOKEN_CONFIGS ?? "[]") as Array<Record<string, unknown>>;
+  configs[1].feed = ADDRESS.feed2;
+  env.HOODFLOW_TOKEN_CONFIGS = JSON.stringify(configs);
   const report = evaluateReleaseEnvironment(env);
   assert.equal(report.ready, false);
   assert.equal(report.gates.find((gate) => gate.id === "oracles")?.passed, false);
