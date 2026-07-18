@@ -6,6 +6,15 @@ Live product: [hoodflow.app](https://hoodflow.app)
 
 > Independent interface built on Robinhood Chain. Not affiliated with or endorsed by Robinhood Markets, Inc. Stock Tokens are not shares and may be restricted in your jurisdiction.
 
+## Virtuals on Robinhood Chain
+
+HoodFlow indexes the official Virtuals Robinhood Chain launch feed and keeps bonding markets separate from graduated DEX liquidity. Graduated tokens can be quoted through USDG, VIRTUAL, or WETH; bonding tokens remain linked to their official Virtuals market until a reviewed Robinhood Chain write adapter is available.
+
+- [Open the live Virtuals Agents market](https://hoodflow.app/?view=community)
+- [Review the integration boundary and maintainer questions](docs/VIRTUALS_REVIEW.md)
+- [Inspect a block-pinned USDG → VIRTUAL → KARMA route proof](docs/proofs/virtuals-karma-route-4663.json)
+- [Read the adapter implementation notes](docs/VIRTUALS_ADAPTER.md)
+
 ## What works today
 
 - WalletConnect and injected-wallet connections to Robinhood Chain mainnet.

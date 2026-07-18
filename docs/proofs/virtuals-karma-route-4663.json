@@ -1,0 +1,40 @@
+{
+  "chainId": 4663,
+  "block": 13032358,
+  "input": {
+    "token": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+    "symbol": "USDG",
+    "amount": "10",
+    "raw": "10000000"
+  },
+  "path": [
+    "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+    "0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31",
+    "0xB47f4702DEB124cb4eB6286bE83c9d84277C6239"
+  ],
+  "pairs": [
+    {
+      "pair": "0xee8D21C0E5AAA31269867Db4E3C66a90C3D5951D",
+      "tokenIn": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+      "tokenOut": "0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31",
+      "reserveIn": "1520656174341",
+      "reserveOut": "2504127209164729774130636",
+      "quotedOut": "16417902356990891976"
+    },
+    {
+      "pair": "0xC5178e5fF03Be87B7b21416a354c7A4f9FB1d04E",
+      "tokenIn": "0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31",
+      "tokenOut": "0xB47f4702DEB124cb4eB6286bE83c9d84277C6239",
+      "reserveIn": "137171567818795141683091",
+      "reserveOut": "48780581922559368226637005",
+      "quotedOut": "5820280025995494741096"
+    }
+  ],
+  "estimatedOutput": {
+    "token": "0xB47f4702DEB124cb4eB6286bE83c9d84277C6239",
+    "symbol": "KARMA",
+    "amount": "5820.280025995494741096",
+    "raw": "5820280025995494741096"
+  },
+  "method": "Uniswap V2 constant-product quote with 0.30% fee; execution re-quotes before signing"
+}
