@@ -50,8 +50,10 @@ import {
 } from "@/lib/robinhood-prices";
 import { ROBINHOOD_PRICE_FEEDS } from "@/config/robinhood-price-feeds";
 import { track } from "@/lib/analytics-client";
+import CommunityTokens from "./community-tokens";
+import ReferralRewards from "./referral-rewards";
 
-type View = "overview" | "strategies" | "assets" | "asset" | "marketplace" | "activity" | "controls";
+type View = "overview" | "strategies" | "assets" | "asset" | "community" | "rewards" | "marketplace" | "activity" | "controls";
 type StrategyKind = "Buy" | "Sell" | "DCA";
 type StrategyStatus = "Prepared" | "Paused" | "Confirmed";
 type MarketplaceSort = "featured" | "cadence" | "risk";
@@ -361,17 +363,6 @@ export default function Home() {
     return () => controller.abort();
   }, []);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const requestedAsset = params.get("asset")?.toUpperCase();
-    const requestedView = params.get("view") as View | null;
-    if (requestedAsset && assetByTicker[requestedAsset]) {
-      setSelectedAssetTicker(requestedAsset);
-      setView("asset");
-      return;
-    }
-    if (requestedView && ["overview", "assets", "activity", "controls"].includes(requestedView)) setView(requestedView);
-  }, []);
   const estimatedUnits = useMemo(() => {
     const point = priceBook[draftAsset];
     if (!point?.price || point.status !== "live") return "—";
@@ -467,10 +458,16 @@ export default function Home() {
 
   useEffect(() => {
     const syncAssetFromUrl = () => {
-      const ticker = new URL(window.location.href).searchParams.get("asset")?.toUpperCase();
+      const params = new URL(window.location.href).searchParams;
+      const ticker = params.get("asset")?.toUpperCase();
+      const requestedView = params.get("view") as View | null;
       if (ticker && assetByTicker[ticker]) {
         setSelectedAssetTicker(ticker);
         setView("asset");
+      } else if (params.get("ref")) {
+        setView("rewards");
+      } else if (requestedView && ["overview", "strategies", "assets", "community", "rewards", "marketplace", "activity", "controls"].includes(requestedView)) {
+        setView(requestedView);
       } else if (view === "asset") {
         setView("assets");
       }
@@ -609,6 +606,25 @@ export default function Home() {
   function notify(message: string) {
     setToast(message);
     window.setTimeout(() => setToast(""), 3200);
+  }
+
+  function qualifyReferral(txHash: string, wallet = walletAddress) {
+    if (!wallet || !txHash) return;
+    const submit = async (attempt: number) => {
+      try {
+        const response = await fetch("/api/referrals", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "qualify", wallet, txHash }),
+        });
+        if (!response.ok) throw new Error("Qualification check unavailable");
+        const payload = await response.json() as { qualified?: boolean };
+        if (payload.qualified) track("referral_qualified");
+      } catch {
+        if (attempt < 2) window.setTimeout(() => void submit(attempt + 1), (attempt + 1) * 7_500);
+      }
+    };
+    void submit(0);
   }
 
   async function activateDcaEngine() {
@@ -762,6 +778,8 @@ export default function Home() {
     if (nextView !== "asset") {
       const url = new URL(window.location.href);
       url.searchParams.delete("asset");
+      if (nextView === "overview") url.searchParams.delete("view");
+      else url.searchParams.set("view", nextView);
       window.history.pushState({}, "", `${url.pathname}${url.search}`);
     }
   }
@@ -908,6 +926,7 @@ export default function Home() {
     const received = outputAfter - outputBefore;
     if (received <= 0n) throw new Error("Transaction confirmed but no output token was received.");
     track("transaction_confirmed", { ticker: draftAsset, side: "buy" });
+    qualifyReferral(receipt.hash, address);
 
     setStrategies((current) => [{
       id: Date.now(), name: draftName, kind: "Buy", asset: draftAsset,
@@ -998,6 +1017,7 @@ export default function Home() {
     const received = BigInt(await usdG.balanceOf(address)) - usdGBefore;
     if (received <= 0n) throw new Error("Transaction confirmed but no USDG was received.");
     track("transaction_confirmed", { ticker: draftAsset, side: "sell" });
+    qualifyReferral(receipt.hash, address);
 
     setStrategies((current) => [{
       id: Date.now(), name: draftName, kind: "Sell", asset: draftAsset,
@@ -1159,6 +1179,8 @@ export default function Home() {
   const navigation: Array<{ view: View; label: string }> = [
     { view: "overview", label: "Home" },
     { view: "assets", label: "Markets" },
+    { view: "community", label: "Meme + Crypto" },
+    { view: "rewards", label: "Rewards" },
     { view: "activity", label: "Activity" },
     { view: "controls", label: "Security" },
   ];
@@ -1326,6 +1348,10 @@ export default function Home() {
         </section>
       )}
 
+      {view === "community" && <CommunityTokens walletAddress={walletAddress} walletProvider={walletProvider} onWallet={handleWalletButton} notify={notify} onTradeConfirmed={qualifyReferral} />}
+
+      {view === "rewards" && <ReferralRewards walletAddress={walletAddress} walletProvider={walletProvider} onWallet={handleWalletButton} notify={notify} />}
+
       {view === "marketplace" && (
         <section className="page inner-page">
           <div className="market-hero"><p className="eyebrow">STRATEGY TEMPLATES</p><h1>Start with a rule.<br />Set your own cap.</h1><p>Plain-language DCA templates with no invented performance, copy counts or return claims. Each template opens an editable order; nothing moves before your wallet confirms.</p></div>
@@ -1372,7 +1398,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Independent interface · Release 0.4.1</span><div><a href="/stock-tokens">Market directory</a><a href="/docs">Documentation</a><a href="/how-it-works">How it works</a><a href="/security">Security</a><button onClick={() => setInfoPanel("terms")}>Product risks</button></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Independent interface · Release 0.5.0</span><div><button onClick={() => navigate("assets")}>Market directory</button><button onClick={() => navigate("community")}>Meme + Crypto</button><button onClick={() => navigate("rewards")}>Rewards</button><a href="/docs">Documentation</a><a href="/security">Security</a><button onClick={() => setInfoPanel("terms")}>Product risks</button></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setComposerOpen(false); }}>

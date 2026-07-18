@@ -13,6 +13,10 @@ const allowedEvents = new Set([
   "transaction_started",
   "transaction_confirmed",
   "transaction_failed",
+  "community_token_imported",
+  "referral_registered",
+  "referral_shared",
+  "referral_qualified",
 ]);
 
 function clean(value: unknown, max: number) {

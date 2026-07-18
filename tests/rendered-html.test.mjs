@@ -45,7 +45,7 @@ test("server-renders the HoodFlow product shell", async () => {
 });
 
 test("ships a bounded, interactive Robinhood mainnet experience", async () => {
-  const [page, layout, css, packageJson, priceRoute, priceLib, historyRoute, docs] = await Promise.all([
+  const [page, layout, css, packageJson, priceRoute, priceLib, historyRoute, docs, community, rewards, referralRoute] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
@@ -54,6 +54,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
     readFile(new URL("../lib/robinhood-prices.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/history/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/docs/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/community-tokens.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/referral-rewards.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/referrals/route.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /"use client"/);
@@ -106,12 +109,22 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /Compare live routes/);
   assert.match(page, /PROTECTED QUOTES/);
   assert.match(page, /Price feed temporarily unavailable\. Trading is disabled until verification completes\./);
-  assert.match(page, /Release 0\.4\.1/);
+  assert.match(page, /Release 0\.5\.0/);
+  assert.match(page, /Meme \+ Crypto/);
+  assert.match(page, /ReferralRewards/);
   assert.match(page, /href="\/docs"/);
   assert.match(docs, /Buy a Stock Token with USDG/);
   assert.match(docs, /Sell a Stock Token back to USDG/);
   assert.match(docs, /Reference price versus execution quote/);
   assert.match(docs, /Common messages/);
+  assert.match(docs, /Discover tokens by contract address/);
+  assert.match(community, /No fixed token list/);
+  assert.match(community, /V3_FEES = \[100, 500, 3_000, 10_000\]/);
+  assert.match(community, /UNREVIEWED TOKEN MODE/);
+  assert.match(rewards, /HOODFLOW REWARDS \/ SEASON 0/);
+  assert.match(rewards, /PLANNED \$HFLOW ELIGIBILITY/);
+  assert.match(referralRoute, /verifyMessage/);
+  assert.match(referralRoute, /SEASON_REFERRAL_CAP/);
   assert.match(layout, /HoodFlow \| Stock Token Trading/);
   assert.match(layout, /Instrument_Sans/);
   assert.match(layout, /IBM_Plex_Mono/);

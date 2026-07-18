@@ -15,6 +15,13 @@
       "when": 1784366401010,
       "tag": "0001_plain_triathlon",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784370730218,
+      "tag": "0002_even_star_brand",
+      "breakpoints": true
     }
   ]
 }
