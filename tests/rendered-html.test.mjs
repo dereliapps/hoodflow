@@ -42,9 +42,17 @@ test("ships a bounded, interactive testnet experience", async () => {
   assert.match(page, /createStrategy/);
   assert.match(page, /toggleStrategy/);
   assert.match(page, /copyStrategy/);
+  assert.match(page, /wallet_switchEthereumChain/);
+  assert.match(page, /Robinhood Chain Testnet/);
+  assert.match(page, /Start in Shadow Mode/);
+  assert.match(page, /PERMISSION CENTER/);
+  assert.match(page, /Pause everything/);
+  assert.match(page, /EXECUTION PREVIEW/);
   assert.match(page, /Spending limits stay enforced onchain/);
   assert.match(page, /TESTNET ONLY/);
   assert.match(layout, /HoodFlow — Portfolio automation/);
+  assert.match(layout, /Instrument_Sans/);
+  assert.match(layout, /IBM_Plex_Mono/);
   assert.match(layout, /summary_large_image/);
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
   assert.match(css, /@media \(max-width: 620px\)/);
