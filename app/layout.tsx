@@ -14,17 +14,17 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: new URL(origin),
-    title: "HoodFlow — Portfolio automation on Robinhood Chain",
-    description: "Create bounded, non-custodial DCA, take-profit and rebalancing strategies on Robinhood Chain.",
+    title: "HoodFlow — Safe stock automation on Robinhood Chain",
+    description: "Explore 25 official stock-token and ETF assets, simulate strategies, and understand every spending limit before authorizing anything.",
     openGraph: {
-      title: "HoodFlow — Your portfolio, on schedule.",
-      description: "Bounded, non-custodial portfolio automation on Robinhood Chain.",
+      title: "HoodFlow — Stock automation, clearly explained.",
+      description: "Real asset brands, full-fill route checks, Shadow Mode, and hard spending limits on Robinhood Chain.",
       images: [{ url: `${origin}/og.png`, width: 1920, height: 1080, alt: "HoodFlow portfolio automation dashboard" }],
     },
     twitter: {
       card: "summary_large_image",
-      title: "HoodFlow — Your portfolio, on schedule.",
-      description: "Bounded, non-custodial portfolio automation on Robinhood Chain.",
+      title: "HoodFlow — Stock automation, clearly explained.",
+      description: "Real asset brands, full-fill route checks, Shadow Mode, and hard spending limits on Robinhood Chain.",
       images: [`${origin}/og.png`],
     },
   };
