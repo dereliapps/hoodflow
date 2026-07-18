@@ -14,6 +14,7 @@ const allowedEvents = new Set([
   "transaction_confirmed",
   "transaction_failed",
   "community_token_imported",
+  "community_market_opened",
   "referral_registered",
   "referral_shared",
   "referral_qualified",

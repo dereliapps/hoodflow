@@ -17,7 +17,7 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase: new URL(origin),
     icons: { icon: "/favicon.svg", shortcut: "/favicon.svg", apple: "/favicon.svg" },
     title: { default: "HoodFlow | Stock Token Trading on Robinhood Chain", template: "%s | HoodFlow" },
-    description: "Discover Stock Tokens, crypto and meme-token routes, receive a protected USDG quote and trade from a self-custody wallet on Robinhood Chain.",
+    description: "Track Robinhood Chain meme tokens, RWAs, DeFi and new pools by volume, momentum and liquidity, then inspect protected USDG routes from a self-custody wallet.",
     keywords: ["Robinhood Chain", "Stock Tokens", "tokenized stocks", "meme tokens", "crypto trading", "USDG", "Uniswap V4", "self-custody"],
     alternates: { canonical: "/" },
     category: "finance",
