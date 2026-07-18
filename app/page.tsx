@@ -472,28 +472,41 @@ export default function Home() {
   useEffect(() => {
     if (view !== "asset") return;
     const controller = new AbortController();
-    const start = window.setTimeout(() => {
+    let retryTimer: number | undefined;
+    const start = window.setTimeout(async () => {
       setHistoryLoading(true);
       setHistoryError("");
-      fetch(`/api/history?ticker=${encodeURIComponent(selectedAssetTicker)}`, {
-        headers: { accept: "application/json" },
-        cache: "no-store",
-        signal: controller.signal,
-      }).then(async (response) => {
-        const payload = await response.json() as { points?: HistoryPoint[]; error?: string };
-        if (!response.ok && !payload.points) throw new Error(payload.error || "History request failed");
-        setPriceHistory(Array.isArray(payload.points) ? payload.points : []);
-        setHistoryError(payload.error ?? "");
-      }).catch((error) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const response = await fetch(`/api/history?ticker=${encodeURIComponent(selectedAssetTicker)}`, {
+            headers: { accept: "application/json" },
+            cache: "no-store",
+            signal: controller.signal,
+          });
+          const payload = await response.json() as { points?: HistoryPoint[]; error?: string };
+          if (!response.ok && !payload.points) throw new Error(payload.error || "History request failed");
+          setPriceHistory(Array.isArray(payload.points) ? payload.points : []);
+          setHistoryError(payload.error ?? "");
+          if (!controller.signal.aborted) setHistoryLoading(false);
+          return;
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          if (attempt < 2) {
+            await new Promise<void>((resolve) => {
+              retryTimer = window.setTimeout(resolve, 1_200 * (attempt + 1));
+            });
+          }
+        }
+      }
+      if (!controller.signal.aborted) {
         setPriceHistory([]);
         setHistoryError("Historical Chainlink rounds are temporarily unavailable.");
-      }).finally(() => {
-        if (!controller.signal.aborted) setHistoryLoading(false);
-      });
+        setHistoryLoading(false);
+      }
     }, 0);
     return () => {
       window.clearTimeout(start);
+      if (retryTimer) window.clearTimeout(retryTimer);
       controller.abort();
     };
   }, [selectedAssetTicker, view]);

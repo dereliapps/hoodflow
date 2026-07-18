@@ -12,6 +12,7 @@ const GET_ROUND_DATA = "0x9a6fc8f5";
 const FEED_DECIMALS = 8;
 const REQUEST_TIMEOUT_MS = 8_000;
 const ROUND_COUNT = 32;
+const HISTORY_BATCH_SIZE = 8;
 
 type RpcResult = {
   id: string;
@@ -25,6 +26,11 @@ function rpcCall(id: string, to: string, data: string) {
     method: "eth_call" as const,
     params: [{ to, data }, "latest"] as const,
   };
+}
+
+function chunkRequests<T>(items: T[], size: number) {
+  return Array.from({ length: Math.ceil(items.length / size) }, (_, index) =>
+    items.slice(index * size, (index + 1) * size));
 }
 
 export async function GET(request: Request) {
@@ -68,19 +74,27 @@ export async function GET(request: Request) {
     });
     const historyController = new AbortController();
     const historyTimeout = setTimeout(() => historyController.abort(), REQUEST_TIMEOUT_MS);
-    let historyPayload: RpcResult[];
+    const historyPayload: RpcResult[] = [];
     try {
-      const historyResponse = await fetch(rpcUrl, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(requests),
-        signal: historyController.signal,
-      });
-      if (!historyResponse.ok) throw new Error(`Price RPC returned ${historyResponse.status}`);
-      historyPayload = await historyResponse.json() as RpcResult[];
+      for (const batch of chunkRequests(requests, HISTORY_BATCH_SIZE)) {
+        try {
+          const historyResponse = await fetch(rpcUrl, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(batch),
+            signal: historyController.signal,
+          });
+          if (!historyResponse.ok) continue;
+          const batchPayload = await historyResponse.json();
+          if (Array.isArray(batchPayload)) historyPayload.push(...batchPayload as RpcResult[]);
+        } catch (error) {
+          if (historyController.signal.aborted) throw error;
+        }
+      }
     } finally {
       clearTimeout(historyTimeout);
     }
+    if (historyPayload.length === 0) throw new Error("History RPC returned no usable batches");
 
     const points = historyPayload.flatMap((item) => {
       const round = decodeLatestRoundData(item.result);
