@@ -14,7 +14,8 @@ Live product: [hoodflow.app](https://hoodflow.app)
 - Community market discovery from GeckoTerminal and DEX Screener.
 - Official Virtuals Robinhood Chain discovery with explicit `bonding` and `graduated` lifecycle states.
 - Contract-address lookup, native quote-asset detection, minimum output, bounded slippage, and self-custody settlement.
-- Local referral receipts and a clearly labeled pre-token rewards season.
+- Durable referral profiles, verified first-trade points, shareable links, and a public leaderboard.
+- Selectable USDG, VIRTUAL, and WETH settlement with atomic V2 routing through a market's native quote token when needed.
 
 ## Why the launchpad adapter exists
 

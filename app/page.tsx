@@ -1398,7 +1398,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Independent interface · Release 0.6.0</span><div><button onClick={() => navigate("assets")}>Market directory</button><button onClick={() => navigate("community")}>Meme + Crypto</button><button onClick={() => navigate("rewards")}>Rewards</button><a href="/docs">Documentation</a><a href="/security">Security</a><button onClick={() => setInfoPanel("terms")}>Product risks</button></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Independent interface · Release 0.7.0</span><div><button onClick={() => navigate("assets")}>Market directory</button><button onClick={() => navigate("community")}>Meme + Crypto</button><button onClick={() => navigate("rewards")}>Rewards</button><a href="/docs">Documentation</a><a href="/security">Security</a><button onClick={() => setInfoPanel("terms")}>Product risks</button></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setComposerOpen(false); }}>
