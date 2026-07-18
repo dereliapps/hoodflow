@@ -37,6 +37,7 @@ export async function generateMetadata(): Promise<Metadata> {
       description: "Reviewed V3/V4 routes, protected minimum output and self-custody settlement on Robinhood Chain.",
       images: [`${origin}/og.png`],
     },
+    verification: { google: "7aPY4eAxVFKSGKAdD7KezZRG6g_tpnOadEqFXdWHeP4" },
     robots: { index: true, follow: true, googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1, "max-video-preview": -1 } },
   };
 }
