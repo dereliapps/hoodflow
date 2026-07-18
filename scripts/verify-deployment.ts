@@ -15,6 +15,9 @@ const ENGINE_ABI = [
   "function guardian() view returns (address)",
   "function feeRecipient() view returns (address)",
   "function protocolFeeBps() view returns (uint16)",
+  "function settlementToken() view returns (address)",
+  "function maxTrancheAmount() view returns (uint128)",
+  "function maxStrategyBudget() view returns (uint128)",
   "function swapAdapter() view returns (address)",
   "function sequencerUptimeFeed() view returns (address)",
   "function sequencerGracePeriod() view returns (uint48)",
@@ -70,6 +73,9 @@ const [
   guardian,
   feeRecipient,
   protocolFeeBps,
+  settlementToken,
+  maxTrancheAmount,
+  maxStrategyBudget,
   swapAdapter,
   sequencerFeed,
   sequencerGracePeriod,
@@ -85,6 +91,9 @@ const [
   engine.guardian(),
   engine.feeRecipient(),
   engine.protocolFeeBps(),
+  engine.settlementToken(),
+  engine.maxTrancheAmount(),
+  engine.maxStrategyBudget(),
   engine.swapAdapter(),
   engine.sequencerUptimeFeed(),
   engine.sequencerGracePeriod(),
@@ -101,6 +110,9 @@ check("engine remains paused", paused === true, paused);
 check("guardian", sameAddress(guardian, report.config.guardian), guardian);
 check("fee recipient", sameAddress(feeRecipient, report.config.feeRecipient), feeRecipient);
 check("protocol fee", Number(protocolFeeBps) === report.config.feeBps, protocolFeeBps);
+check("settlement token", sameAddress(settlementToken, report.config.settlementToken), settlementToken);
+check("max tranche amount", String(maxTrancheAmount) === report.config.maxTrancheAmount, maxTrancheAmount);
+check("max strategy budget", String(maxStrategyBudget) === report.config.maxStrategyBudget, maxStrategyBudget);
 check("engine adapter", sameAddress(swapAdapter, adapterAddress), swapAdapter);
 check("sequencer feed", sameAddress(sequencerFeed, report.config.sequencerFeed), sequencerFeed);
 check("sequencer grace period", Number(sequencerGracePeriod) === report.config.sequencerGracePeriod, sequencerGracePeriod);

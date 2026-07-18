@@ -84,7 +84,9 @@ if (!offline && report.gates.find((gate) => gate.id === "rpc")?.passed) {
     ["owner multisig", report.config.finalOwner],
     ["Universal Router", report.config.universalRouter],
     ["Permit2", report.config.permit2],
-    ["sequencer feed", report.config.sequencerFeed],
+    ...(report.config.sequencerMode === "chainlink"
+      ? [["sequencer feed", report.config.sequencerFeed] as [string, string]]
+      : []),
     ...report.config.tokenConfigs.flatMap((item, index) => [
       [`token ${index + 1}`, item.token],
       [`price feed ${index + 1}`, item.feed],

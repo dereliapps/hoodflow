@@ -75,6 +75,13 @@ export default defineConfig({
       url: configVariable("ROBINHOOD_TESTNET_RPC_URL"),
       accounts: [configVariable("ROBINHOOD_TESTNET_PRIVATE_KEY")],
     },
+    robinhoodMainnet: {
+      type: "http",
+      chainType: "l1",
+      chainId: 4663,
+      url: configVariable("ROBINHOOD_MAINNET_RPC_URL"),
+      accounts: [configVariable("HOODFLOW_DEPLOYER_PRIVATE_KEY")],
+    },
   },
   test: {
     mocha: {

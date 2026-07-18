@@ -525,9 +525,25 @@ export default function Home() {
             setContractReady(false);
           } else {
             const engine = new Contract(CONTRACT_ADDRESS, HOODFLOW_ENGINE_ABI, provider);
-            const paused = Boolean(await engine.paused());
-            setContractStatus(paused ? "Engine deployed · paused" : "Engine live");
-            setContractReady(!paused);
+            const [paused, settlementToken, swapAdapter, keeperCount, allowedTokenCount, maxTranche, maxBudget, inputConfig] = await Promise.all([
+              engine.paused() as Promise<boolean>,
+              engine.settlementToken() as Promise<string>,
+              engine.swapAdapter() as Promise<string>,
+              engine.keeperCount() as Promise<bigint>,
+              engine.allowedTokenCount() as Promise<bigint>,
+              engine.maxTrancheAmount() as Promise<bigint>,
+              engine.maxStrategyBudget() as Promise<bigint>,
+              engine.tokenConfigs(USDG_ADDRESS),
+            ]);
+            const configured = settlementToken.toLowerCase() === USDG_ADDRESS.toLowerCase()
+              && swapAdapter !== "0x0000000000000000000000000000000000000000"
+              && keeperCount > 0n
+              && allowedTokenCount >= 2n
+              && maxTranche > 0n
+              && maxBudget >= maxTranche
+              && Boolean(inputConfig.allowed);
+            setContractStatus(paused ? "Engine deployed · paused" : configured ? "Engine live" : "Engine config invalid");
+            setContractReady(!paused && configured);
           }
         }
       } catch {
@@ -837,14 +853,20 @@ export default function Home() {
     const signer = await provider.getSigner();
     const engine = new Contract(CONTRACT_ADDRESS, HOODFLOW_ENGINE_ABI, signer);
     const usdG = new Contract(USDG_ADDRESS, ERC20_ABI, signer);
-    const [paused, inputConfig, outputConfig, balance] = await Promise.all([
+    const [paused, settlementToken, maxTranche, maxBudget, inputConfig, outputConfig, balance] = await Promise.all([
       engine.paused() as Promise<boolean>,
+      engine.settlementToken() as Promise<string>,
+      engine.maxTrancheAmount() as Promise<bigint>,
+      engine.maxStrategyBudget() as Promise<bigint>,
       engine.tokenConfigs(USDG_ADDRESS),
       engine.tokenConfigs(ROBINHOOD_TOKENS[draftAsset]),
       usdG.balanceOf(address) as Promise<bigint>,
     ]);
     if (paused) throw new Error("The recurring engine is paused.");
+    if (settlementToken.toLowerCase() !== USDG_ADDRESS.toLowerCase()) throw new Error("The recurring engine settlement token is invalid.");
     if (!inputConfig.allowed || !outputConfig.allowed) throw new Error(`${draftAsset}/USDG is not allowlisted by the engine.`);
+    if (amountPerExecution > maxTranche) throw new Error(`Each execution is capped at ${formatUnits(maxTranche, USDG_DECIMALS)} USDG.`);
+    if (totalBudget > maxBudget) throw new Error(`This engine caps a strategy at ${formatUnits(maxBudget, USDG_DECIMALS)} USDG.`);
     if (balance < totalBudget) throw new Error(`This strategy needs ${formatUnits(totalBudget, USDG_DECIMALS)} USDG.`);
 
     const currentAllowance = BigInt(await usdG.allowance(address, CONTRACT_ADDRESS));
@@ -1153,11 +1175,11 @@ export default function Home() {
           <div className="readiness-board">
             <div className="readiness-head"><div><p className="eyebrow">RECURRING ENGINE GATE</p><h2>DCA unlocks only when every gate is green.</h2></div><span>7 of 11 complete</span></div>
             {[
-              ["01", "Protocol core", "25/25 engine, oracle and adapter safety tests passing", "complete"],
+              ["01", "Protocol core", "27/27 engine, oracle and adapter safety tests passing", "complete"],
               ["02", "Bounded V4 adapter", "Hookless direct pools, fixed actions, temporary approvals", "complete"],
               ["03", "Canonical asset registry", "20 stocks + 5 ETFs and 36 bytecode targets verified", "complete"],
               ["04", "Dynamic route engine", "Best quote across 3 reviewed V4 pool configurations", "complete"],
-              ["05", "Oracle defense", "Sequencer grace period, staleness and token pause guards", "complete"],
+              ["05", "Oracle defense", "Staleness, invalid-round and stock-token pause guards", "complete"],
               ["06", "Keeper + product", "Preflight simulation, spending limits and kill switch UX", "complete"],
               ["07", "Full-engine fork canary", "2/2 capped executions, replay blocked, zero custody and allowances", "complete"],
               ["08", "Production RPC + oracle map", "Two independent RPCs and current Chainlink feeds/heartbeats", "pending"],

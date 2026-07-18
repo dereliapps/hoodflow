@@ -33,6 +33,10 @@ export type ReleaseConfig = {
   releaseApprovers: string[];
   universalRouter: string;
   permit2: string;
+  settlementToken: string;
+  maxTrancheAmount: string;
+  maxStrategyBudget: string;
+  sequencerMode: string;
   sequencerFeed: string;
   sequencerGracePeriod: number;
   tokenConfigs: TokenReleaseConfig[];
@@ -143,16 +147,34 @@ export function evaluateReleaseEnvironment(env: NodeJS.ProcessEnv): ReleaseRepor
       : `Expected router ${officialRouter} and Permit2 ${officialPermit2}`,
   );
 
-  const oracleConfigValid = isConfiguredAddress(config.sequencerFeed)
-    && config.sequencerGracePeriod >= 300
-    && config.sequencerGracePeriod <= 86_400;
+  const capsValid = sameAddress(config.settlementToken, robinhoodMainnet.tokens.USDG)
+    && positiveUint128(config.maxTrancheAmount)
+    && positiveUint128(config.maxStrategyBudget)
+    && BigInt(config.maxStrategyBudget) >= BigInt(config.maxTrancheAmount);
+  gate(
+    "limits",
+    "Canonical USDG and execution caps",
+    capsValid,
+    capsValid
+      ? `tranche ${config.maxTrancheAmount}; lifetime ${config.maxStrategyBudget} atomic USDG`
+      : "Use canonical USDG and positive uint128 caps with lifetime cap at least the tranche cap",
+  );
+
+  const oracleConfigValid = config.sequencerMode === "none"
+    ? sameAddress(config.sequencerFeed, ZERO_ADDRESS) && config.sequencerGracePeriod === 0
+    : config.sequencerMode === "chainlink"
+      && isConfiguredAddress(config.sequencerFeed)
+      && config.sequencerGracePeriod >= 300
+      && config.sequencerGracePeriod <= 86_400;
   gate(
     "sequencer",
     "Sequencer safety configured",
     oracleConfigValid,
     oracleConfigValid
-      ? `${config.sequencerGracePeriod}s recovery grace period`
-      : "Provide the current Chainlink sequencer feed and a 300-86400 second grace period",
+      ? config.sequencerMode === "none"
+        ? "Explicitly disabled; no published onchain feed configured"
+        : `${config.sequencerGracePeriod}s recovery grace period`
+      : "Set explicit mode none with zero feed/grace, or a Chainlink feed with a 300-86400 second grace period",
   );
 
   const canonicalTokens = Object.values(robinhoodMainnet.tokens).map((address) => address.toLowerCase());
@@ -275,7 +297,13 @@ function parseReleaseConfig(env: NodeJS.ProcessEnv): ReleaseConfig {
     releaseApprovers: parseAddresses(env.HOODFLOW_RELEASE_APPROVERS),
     universalRouter: normalizedAddress(env.HOODFLOW_UNIVERSAL_ROUTER),
     permit2: normalizedAddress(env.HOODFLOW_PERMIT2),
-    sequencerFeed: normalizedAddress(env.HOODFLOW_SEQUENCER_UPTIME_FEED),
+    settlementToken: normalizedAddress(env.HOODFLOW_SETTLEMENT_TOKEN),
+    maxTrancheAmount: env.HOODFLOW_MAX_TRANCHE_AMOUNT?.trim() ?? "",
+    maxStrategyBudget: env.HOODFLOW_MAX_STRATEGY_BUDGET?.trim() ?? "",
+    sequencerMode: env.HOODFLOW_SEQUENCER_MODE?.trim().toLowerCase() ?? "",
+    sequencerFeed: env.HOODFLOW_SEQUENCER_MODE?.trim().toLowerCase() === "none"
+      ? ZERO_ADDRESS
+      : normalizedAddress(env.HOODFLOW_SEQUENCER_UPTIME_FEED),
     sequencerGracePeriod: integer(env.HOODFLOW_SEQUENCER_GRACE_PERIOD_SECONDS),
     tokenConfigs: parseTokenConfigs(env.HOODFLOW_TOKEN_CONFIGS),
     auditProvider: env.HOODFLOW_AUDIT_PROVIDER?.trim() ?? "",
@@ -331,6 +359,12 @@ function normalizedAddress(value: string | undefined) {
 function integer(value: string | undefined) {
   if (!value?.trim()) return Number.NaN;
   return Number(value);
+}
+
+function positiveUint128(value: string) {
+  if (!/^\d+$/.test(value)) return false;
+  const parsed = BigInt(value);
+  return parsed > 0n && parsed <= (1n << 128n) - 1n;
 }
 
 function isConfiguredAddress(value: string) {

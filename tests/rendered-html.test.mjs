@@ -67,7 +67,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /RECEIPTS SAVED ON THIS DEVICE/);
   assert.match(page, /ORDER REVIEW/);
   assert.match(page, /Spending limits stay enforced onchain/);
-  assert.match(page, /25\/25 engine, oracle and adapter safety tests passing/);
+  assert.match(page, /27\/27 engine, oracle and adapter safety tests passing/);
   assert.match(page, /Best quote across 3 reviewed V4 pool configurations/);
   assert.match(page, /2\/2 capped executions, replay blocked/);
   assert.match(page, /Twenty-five assets/);

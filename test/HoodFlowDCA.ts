@@ -44,6 +44,9 @@ async function deployFixture() {
     await adapter.getAddress(),
     feeRecipient.address,
     50,
+    await usdc.getAddress(),
+    ethers.parseUnits("1000", 6),
+    ethers.parseUnits("10000", 6),
   ]);
 
   await usdc.mint(user.address, ethers.parseUnits("10000", 6));
@@ -197,6 +200,32 @@ describe("HoodFlowDCA", function () {
         base[7],
       ),
     ).to.be.revertedWithCustomError(hoodFlow, "InvalidConfiguration");
+
+    await expect(
+      hoodFlow.connect(user).createStrategy(
+        base[1],
+        base[0],
+        base[2],
+        base[3],
+        base[4],
+        base[5],
+        base[6],
+        base[7],
+      ),
+    ).to.be.revertedWithCustomError(hoodFlow, "TokenNotAllowed");
+
+    await expect(
+      hoodFlow.connect(user).createStrategy(
+        base[0],
+        base[1],
+        ethers.parseUnits("1001", 6),
+        ethers.parseUnits("1001", 6),
+        base[4],
+        base[5],
+        base[6],
+        base[7],
+      ),
+    ).to.be.revertedWithCustomError(hoodFlow, "InvalidConfiguration");
   });
 
   it("quotes output using token and feed decimals", async function () {
@@ -304,6 +333,17 @@ describe("HoodFlowDCA", function () {
     await expect(hoodFlow.connect(keeper).executeDCA(1, EMPTY_ROUTE))
       .to.be.revertedWithCustomError(hoodFlow, "SequencerGracePeriod");
     expect(await usdc.balanceOf(user.address)).to.equal(balanceBefore);
+  });
+
+  it("can run with an explicitly disabled sequencer feed", async function () {
+    const fixture = await loadFixture(deployFixture);
+    const { hoodFlow, owner, keeper } = fixture;
+    await hoodFlow.connect(owner).pauseEverything();
+    await hoodFlow.connect(owner).setSequencerConfig(ethers.ZeroAddress, 0);
+    await hoodFlow.connect(owner).unpauseEverything();
+    await createDefaultStrategy(fixture);
+    await expect(hoodFlow.connect(keeper).executeDCA(1, EMPTY_ROUTE))
+      .to.emit(hoodFlow, "StrategyExecuted");
   });
 
   it("blocks stock-token execution when its onchain oracle is paused", async function () {

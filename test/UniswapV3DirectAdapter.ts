@@ -30,6 +30,9 @@ async function deployAdapterFixture() {
     ethers.ZeroAddress,
     feeRecipient.address,
     0,
+    await usdc.getAddress(),
+    ethers.parseUnits("1000", 6),
+    ethers.parseUnits("10000", 6),
   ]);
   const adapter: any = await ethers.deployContract("UniswapV3DirectAdapter", [
     await hoodFlow.getAddress(),

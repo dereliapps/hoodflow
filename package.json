@@ -16,6 +16,7 @@
     "contracts:compile": "hardhat compile --build-profile production",
     "contracts:clean": "hardhat clean",
     "contracts:deploy:testnet": "hardhat run scripts/deploy-testnet.ts",
+    "contracts:deploy:mainnet:paused": "hardhat run scripts/deploy-mainnet-paused.ts --network robinhoodMainnet",
     "infra:verify:mainnet": "tsx scripts/verify-robinhood-mainnet.ts",
     "infra:verify:fork": "hardhat run scripts/verify-v4-fork.ts",
     "infra:verify:direct-buy": "hardhat run scripts/verify-direct-buy-fork.ts",
