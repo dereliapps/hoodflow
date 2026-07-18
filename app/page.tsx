@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-type View = "overview" | "strategies" | "marketplace" | "activity" | "controls";
+type View = "overview" | "strategies" | "assets" | "marketplace" | "activity" | "controls";
 type StrategyKind = "DCA" | "Take profit" | "Rebalance";
 type StrategyStatus = "Prepared" | "Paused" | "Shadow";
 
@@ -43,10 +43,35 @@ const contractConfigured = /^0x[a-fA-F0-9]{40}$/.test(CONTRACT_ADDRESS);
 
 const assetMeta: Record<string, { name: string; color: string; price: number; move: string }> = {
   AAPL: { name: "Apple", color: "#e8edf2", price: 211.18, move: "+1.24%" },
+  AMD: { name: "AMD", color: "#ed1c24", price: 163.14, move: "+0.72%" },
+  AMZN: { name: "Amazon", color: "#ff9900", price: 223.18, move: "+0.44%" },
+  INTC: { name: "Intel", color: "#00c7fd", price: 24.16, move: "+0.31%" },
+  META: { name: "Meta", color: "#0866ff", price: 704.28, move: "+0.94%" },
+  MU: { name: "Micron", color: "#5b75a6", price: 128.42, move: "+1.08%" },
   NVDA: { name: "NVIDIA", color: "#76b900", price: 176.42, move: "+2.82%" },
   GOOGL: { name: "Alphabet", color: "#4285f4", price: 193.67, move: "+0.61%" },
+  SNDK: { name: "Sandisk", color: "#a33bc2", price: 52.61, move: "+0.39%" },
+  SPCX: { name: "SpaceX", color: "#c5cbd0", price: 212.0, move: "+0.00%" },
   TSLA: { name: "Tesla", color: "#e82127", price: 326.91, move: "-0.84%" },
+  QQQ: { name: "Invesco QQQ", color: "#1c4a85", price: 563.72, move: "+0.48%" },
+  SPY: { name: "SPDR S&P 500", color: "#bd252c", price: 626.44, move: "+0.34%" },
 };
+
+const assetRegistry = [
+  ["AAPL", "Apple", "Stock", true], ["AMD", "AMD", "Stock", true],
+  ["AMZN", "Amazon", "Stock", true], ["BABA", "Alibaba", "Stock", false],
+  ["BE", "Bloom Energy", "Stock", false], ["COIN", "Coinbase", "Stock", false],
+  ["CRCL", "Circle", "Stock", false], ["CRWV", "CoreWeave", "Stock", false],
+  ["GOOGL", "Alphabet", "Stock", true], ["INTC", "Intel", "Stock", true],
+  ["META", "Meta", "Stock", true], ["MSFT", "Microsoft", "Stock", false],
+  ["MU", "Micron", "Stock", true], ["NVDA", "NVIDIA", "Stock", true],
+  ["ORCL", "Oracle", "Stock", false], ["PLTR", "Palantir", "Stock", false],
+  ["SNDK", "Sandisk", "Stock", true], ["SPCX", "SpaceX", "Stock", true],
+  ["TSLA", "Tesla", "Stock", true], ["USAR", "USA Rare Earth", "Stock", false],
+  ["QQQ", "Invesco QQQ", "ETF", true], ["SGOV", "iShares Treasury", "ETF", false],
+  ["SLV", "iShares Silver", "ETF", false], ["SPY", "SPDR S&P 500", "ETF", true],
+  ["CUSO", "United States Oil", "ETF", false],
+] as const;
 
 const starterStrategies: Strategy[] = [
   { id: 1, name: "Monday Apple", kind: "DCA", asset: "AAPL", rule: "20 USDG every Monday", next: "Authorization draft ready", status: "Prepared", spent: "160 USDG", health: 96, budget: "240 USDG", expires: "30 Sep 2026" },
@@ -91,6 +116,8 @@ export default function Home() {
   const [draftAmount, setDraftAmount] = useState("20");
   const [draftFrequency, setDraftFrequency] = useState("Monday");
   const [confirmStop, setConfirmStop] = useState(false);
+  const [assetSearch, setAssetSearch] = useState("");
+  const [assetScope, setAssetScope] = useState<"all" | "routed" | "registry">("all");
 
   const connected = Boolean(walletAddress);
   const preparedCount = useMemo(() => strategies.filter((item) => item.status === "Prepared").length, [strategies]);
@@ -204,13 +231,18 @@ export default function Home() {
     notify("All strategy permissions paused locally");
   }
 
-  const navigation: View[] = ["overview", "strategies", "marketplace", "activity", "controls"];
+  const visibleAssets = assetRegistry.filter(([ticker, name, , routed]) => {
+    const matchesScope = assetScope === "all" || (assetScope === "routed" ? routed : !routed);
+    const query = assetSearch.trim().toLowerCase();
+    return matchesScope && (!query || ticker.toLowerCase().includes(query) || name.toLowerCase().includes(query));
+  });
+  const navigation: View[] = ["overview", "strategies", "assets", "marketplace", "activity", "controls"];
 
   return (
     <main className="app-shell">
       <header className="topbar">
         <button className="brand" onClick={() => setView("overview")} aria-label="HoodFlow home">
-          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V5</b>
+          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V6</b>
         </button>
         <nav className="main-nav" aria-label="Main navigation">
           {navigation.map((item) => <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>{item}</button>)}
@@ -227,16 +259,16 @@ export default function Home() {
 
       {view === "overview" && (
         <section className="page overview-page">
-          <div className="market-state"><span><i /> TESTNET RPC ONLINE</span><span>Block #{networkBlock}</span><span>23/23 safety tests · 4/4 fork routes</span></div>
+          <div className="market-state"><span><i /> TESTNET RPC ONLINE</span><span>Block #{networkBlock}</span><span>25/25 safety tests · 13 current routes</span></div>
           <div className="page-heading">
             <div><p className="eyebrow">AUTOMATION WITHOUT CUSTODY</p><h1>Set it. Cap it.<br /><span>Let it run.</span></h1><p className="lede">Build self-running stock-token strategies with hard spending limits, live health checks and a kill switch you control.</p></div>
-            <div className="hero-command"><button className="primary-action" onClick={() => openComposer()}><span>+</span> Build an automation</button><div className="hero-proof"><span>FORK-VERIFIED BUILD</span><strong>V4 execution path verified</strong><small>23/23 tests · 4 real fork swaps · 0 broadcast</small></div></div>
+            <div className="hero-command"><button className="primary-action" onClick={() => openComposer()}><span>+</span> Build an automation</button><div className="hero-proof"><span>V6 ROUTE ENGINE</span><strong>25 canonical assets indexed</strong><small>13 quoted now · 25 tests · 0 broadcast</small></div></div>
           </div>
 
           <div className="feature-dock">
             <button onClick={() => openComposer()}><span>01</span><div><strong>Shadow Lab</strong><small>Simulate before funds move</small></div><b>&rarr;</b></button>
             <button onClick={() => setView("controls")}><span>02</span><div><strong>Permission Center</strong><small>Inspect every spending cap</small></div><b>&rarr;</b></button>
-            <button onClick={() => setView("marketplace")}><span>03</span><div><strong>Proof Marketplace</strong><small>Copy verified performance</small></div><b>&rarr;</b></button>
+            <button onClick={() => setView("assets")}><span>03</span><div><strong>Asset Matrix</strong><small>25 canonical Robinhood assets</small></div><b>&rarr;</b></button>
           </div>
 
           <div className="overview-grid">
@@ -273,6 +305,24 @@ export default function Home() {
             <div className="table-head upgraded"><span>STRATEGY</span><span>RULE</span><span>NEXT ACTION</span><span>HEALTH</span><span>STATUS</span><span /></div>
             {strategies.map((item) => <StrategyRow key={item.id} item={item} detailed onToggle={() => toggleStrategy(item.id)} onInspect={() => setSelectedStrategy(item)} />)}
           </div>
+        </section>
+      )}
+
+      {view === "assets" && (
+        <section className="page inner-page assets-page">
+          <div className="asset-hero">
+            <div><p className="eyebrow">ROBINHOOD ASSET MATRIX</p><h1>Twenty-five assets.<br /><span>One route engine.</span></h1><p>Every canonical Robinhood stock token and ETF is indexed. The keeper quotes all reviewed V4 pool types before each execution and skips assets without a viable route.</p></div>
+            <div className="asset-totals"><div><strong>25</strong><span>CANONICAL</span></div><div><strong>13</strong><span>QUOTED NOW</span></div><div><strong>12</strong><span>WATCH-ONLY</span></div></div>
+          </div>
+          <div className="asset-toolbar">
+            <div>{(["all", "routed", "registry"] as const).map((scope) => <button key={scope} className={assetScope === scope ? "selected" : ""} onClick={() => setAssetScope(scope)}>{scope === "all" ? "All 25" : scope === "routed" ? "Route ready" : "Watch-only"}</button>)}</div>
+            <label><span>Q</span><input aria-label="Search assets" placeholder="Ticker or company" value={assetSearch} onChange={(event) => setAssetSearch(event.target.value)} /></label>
+          </div>
+          <div className="asset-table">
+            <div className="asset-table-head"><span>ASSET</span><span>TYPE</span><span>V4 ROUTE</span><span>EXECUTION POLICY</span></div>
+            {visibleAssets.map(([ticker, name, type, routed]) => <article className="asset-catalog-row" key={ticker}><div><Mark ticker={ticker} /><p><strong>{ticker}</strong><small>{name}</small></p></div><span className="asset-type">{type}</span><b className={routed ? "route-ready" : "route-watch"}><i />{routed ? "Quoted" : "Watch-only"}</b><p className="asset-policy">{routed ? "Best of 3 reviewed pools" : "Keeper skips until a quote exists"}</p></article>)}
+          </div>
+          <p className="asset-footnote">Route status is a verified infrastructure snapshot, not a liquidity guarantee. Every execution is quoted again immediately before broadcast.</p>
         </section>
       )}
 
@@ -313,20 +363,21 @@ export default function Home() {
         <section className="page inner-page controls-page">
           <div className="inner-heading"><div><p className="eyebrow">PERMISSION CENTER</p><h1>You hold the keys.</h1><p>Review every allowance, expiry and safety condition before it can execute.</p></div><button className="danger-action" onClick={() => setConfirmStop(true)}>Pause everything</button></div>
           <div className="control-grid">
-            <article className="control-card control-score"><span>PROTOCOL READINESS</span><strong>5<span>/7 gates</span></strong><p>Core, V4 route, official infrastructure, keeper and product checks are complete.</p><div className="score-line"><i /></div></article>
-            <article className="control-card"><span>MAINNET INFRA</span><strong>4/4 routes</strong><p>13 bytecode checks · live V4 liquidity · local fork swaps</p><b className="control-ok">VERIFIED</b></article>
+            <article className="control-card control-score"><span>PROTOCOL READINESS</span><strong>6<span>/8 gates</span></strong><p>Core, asset registry, oracle defense, route engine, keeper and product checks are complete.</p><div className="score-line"><i /></div></article>
+            <article className="control-card"><span>MAINNET INFRA</span><strong>13 routes</strong><p>34 bytecode checks · 25 canonical assets · local fork swaps</p><b className="control-ok">VERIFIED</b></article>
             <article className="control-card"><span>CONTRACT</span><strong>{contractStatus}</strong><p>{contractConfigured ? compactAddress(CONTRACT_ADDRESS) : "No live contract is being claimed."}</p><b className={`control-ok ${contractConfigured && contractStatus !== "Bytecode verified" ? "warning" : ""}`}>{contractStatus === "Bytecode verified" ? "ONCHAIN" : "GATED"}</b></article>
           </div>
           <div className="readiness-board">
-            <div className="readiness-head"><div><p className="eyebrow">MAINNET GATES</p><h2>Ship only when every gate is green.</h2></div><span>5 of 7 complete</span></div>
+            <div className="readiness-head"><div><p className="eyebrow">MAINNET GATES</p><h2>Ship only when every gate is green.</h2></div><span>6 of 8 complete</span></div>
             {[
-              ["01", "Protocol core", "23/23 engine and adapter safety tests passing", "complete"],
+              ["01", "Protocol core", "25/25 engine, oracle and adapter safety tests passing", "complete"],
               ["02", "Bounded V4 adapter", "Hookless direct pools, fixed actions, temporary approvals", "complete"],
-              ["03", "Official infrastructure", "8 protocol contracts + 5 token bytecodes checked", "complete"],
-              ["04", "Mainnet fork proof", "4/4 stock-token swaps through official router, no broadcast", "complete"],
-              ["05", "Keeper + product", "Preflight simulation, spending limits and kill switch UX", "complete"],
-              ["06", "Testnet canary", "Deploy feeds and run a capped monitored strategy", "pending"],
-              ["07", "Independent audit", "Resolve findings and move ownership to timelocked multisig", "locked"],
+              ["03", "Canonical asset registry", "20 stocks + 5 ETFs and 34 bytecode targets verified", "complete"],
+              ["04", "Dynamic route engine", "Best quote across 3 reviewed V4 pool configurations", "complete"],
+              ["05", "Oracle defense", "Sequencer grace period, staleness and token pause guards", "complete"],
+              ["06", "Keeper + product", "Preflight simulation, spending limits and kill switch UX", "complete"],
+              ["07", "Capped canary", "Deploy feeds and run one monitored low-limit strategy", "pending"],
+              ["08", "Independent audit", "Resolve findings and move ownership to timelocked multisig", "locked"],
             ].map((gate) => <div className="readiness-row" key={gate[0]}><span>{gate[0]}</span><p><strong>{gate[1]}</strong><small>{gate[2]}</small></p><b className={`gate-${gate[3]}`}>{gate[3]}</b></div>)}
           </div>
           <div className="permissions-card">

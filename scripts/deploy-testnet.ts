@@ -11,6 +11,7 @@ type TokenConfig = {
   token: string;
   feed: string;
   heartbeat: number;
+  checkOraclePause: boolean;
 };
 
 const REQUIRED_CHAIN_ID = 46_630n;
@@ -21,6 +22,12 @@ const feeRecipient = addressEnv("HOODFLOW_FEE_RECIPIENT");
 const feeBps = integerEnv("HOODFLOW_INITIAL_FEE_BPS", 0, 100);
 const keepers = csvAddresses("HOODFLOW_KEEPERS");
 const tokenConfigs = parseTokenConfigs();
+const sequencerFeed = addressEnv("HOODFLOW_SEQUENCER_UPTIME_FEED");
+const sequencerGracePeriod = integerEnv(
+  "HOODFLOW_SEQUENCER_GRACE_PERIOD_SECONDS",
+  300,
+  86_400,
+);
 const shouldUnpause = process.env.HOODFLOW_UNPAUSE_AFTER_DEPLOY === "true";
 
 const { ethers } = await network.create({
@@ -35,6 +42,9 @@ if (currentNetwork.chainId !== REQUIRED_CHAIN_ID) {
 }
 if ((await ethers.provider.getCode(swapAdapter)) === "0x") {
   throw new Error("HOODFLOW_SWAP_ADAPTER has no deployed bytecode");
+}
+if ((await ethers.provider.getCode(sequencerFeed)) === "0x") {
+  throw new Error("HOODFLOW_SEQUENCER_UPTIME_FEED has no deployed bytecode");
 }
 if (shouldUnpause && (keepers.length === 0 || tokenConfigs.length < 2)) {
   throw new Error("Refusing to unpause without a keeper and at least two configured tokens");
@@ -57,13 +67,24 @@ if (deployer.address.toLowerCase() !== initialOwner.toLowerCase()) {
   process.exit(0);
 }
 
+await (
+  await hoodFlow.setSequencerConfig(sequencerFeed, sequencerGracePeriod)
+).wait();
+console.log(`Sequencer feed configured: ${sequencerFeed}`);
+
 for (const keeper of keepers) {
   await (await hoodFlow.setKeeper(keeper, true)).wait();
   console.log(`Keeper enabled: ${keeper}`);
 }
 for (const config of tokenConfigs) {
   await (
-    await hoodFlow.setTokenConfig(config.token, config.feed, config.heartbeat, true)
+    await hoodFlow.setTokenConfig(
+      config.token,
+      config.feed,
+      config.heartbeat,
+      true,
+      config.checkOraclePause,
+    )
   ).wait();
   console.log(`Token enabled: ${config.token}`);
 }
@@ -113,6 +134,7 @@ function parseTokenConfigs(): TokenConfig[] {
       typeof candidate.token !== "string" || !isAddress(candidate.token)
       || typeof candidate.feed !== "string" || !isAddress(candidate.feed)
       || !Number.isInteger(candidate.heartbeat) || Number(candidate.heartbeat) <= 0
+      || typeof candidate.checkOraclePause !== "boolean"
     ) {
       throw new Error("Invalid token config");
     }
@@ -120,6 +142,7 @@ function parseTokenConfigs(): TokenConfig[] {
       token: getAddress(candidate.token),
       feed: getAddress(candidate.feed),
       heartbeat: Number(candidate.heartbeat),
+      checkOraclePause: candidate.checkOraclePause,
     };
   });
 }

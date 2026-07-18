@@ -5,6 +5,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 contract MockERC20 is ERC20 {
     uint8 private immutable _mockDecimals;
+    bool public oraclePaused;
 
     constructor(string memory name_, string memory symbol_, uint8 decimals_) ERC20(name_, symbol_) {
         _mockDecimals = decimals_;
@@ -16,5 +17,9 @@ contract MockERC20 is ERC20 {
 
     function mint(address recipient, uint256 amount) external {
         _mint(recipient, amount);
+    }
+
+    function setOraclePaused(bool paused) external {
+        oraclePaused = paused;
     }
 }

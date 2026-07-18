@@ -16,6 +16,7 @@ async function deployAdapterFixture() {
   const weth: any = await ethers.deployContract("MockERC20", ["Wrapped Ether", "WETH", 18]);
   const usdcFeed: any = await ethers.deployContract("MockPriceFeed", [8, 100_000_000n]);
   const wethFeed: any = await ethers.deployContract("MockPriceFeed", [8, 200_000_000_000n]);
+  const sequencerFeed: any = await ethers.deployContract("MockPriceFeed", [0, 0]);
   const permit2: any = await ethers.deployContract("MockPermit2");
   const router: any = await ethers.deployContract("MockUniversalRouter", [
     await permit2.getAddress(),
@@ -37,17 +38,21 @@ async function deployAdapterFixture() {
   ]);
 
   await hoodFlow.setSwapAdapter(await adapter.getAddress());
+  await sequencerFeed.setAnswer(0, (await time.latest()) - 2 * HOUR);
+  await hoodFlow.setSequencerConfig(await sequencerFeed.getAddress(), HOUR);
   await hoodFlow.setKeeper(keeper.address, true);
   await hoodFlow.setTokenConfig(
     await usdc.getAddress(),
     await usdcFeed.getAddress(),
     HOUR,
     true,
+    false,
   );
   await hoodFlow.setTokenConfig(
     await weth.getAddress(),
     await wethFeed.getAddress(),
     HOUR,
+    true,
     true,
   );
   await hoodFlow.unpauseEverything();

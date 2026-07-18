@@ -31,6 +31,7 @@ async function deployFixture() {
     8,
     200_000_000_000n,
   ]);
+  const sequencerFeed: any = await ethers.deployContract("MockPriceFeed", [0, 0]);
 
   // 1 USDC unit (1e6) -> 0.0005 WETH (5e14), matching a $2,000 ETH price.
   const adapter: any = await ethers.deployContract("MockSwapAdapter", [
@@ -48,17 +49,21 @@ async function deployFixture() {
   await usdc.mint(user.address, ethers.parseUnits("10000", 6));
   await weth.mint(await adapter.getAddress(), ethers.parseEther("100"));
 
+  await sequencerFeed.setAnswer(0, (await time.latest()) - 2 * HOUR);
+  await hoodFlow.setSequencerConfig(await sequencerFeed.getAddress(), HOUR);
   await hoodFlow.setKeeper(keeper.address, true);
   await hoodFlow.setTokenConfig(
     await usdc.getAddress(),
     await usdcFeed.getAddress(),
     HOUR,
     true,
+    false,
   );
   await hoodFlow.setTokenConfig(
     await weth.getAddress(),
     await wethFeed.getAddress(),
     HOUR,
+    true,
     true,
   );
   await hoodFlow.unpauseEverything();
@@ -77,6 +82,7 @@ async function deployFixture() {
     weth,
     usdcFeed,
     wethFeed,
+    sequencerFeed,
     adapter,
     hoodFlow,
   };
@@ -281,6 +287,35 @@ describe("HoodFlowDCA", function () {
     await usdcFeed.setIncompleteRound(100_000_000n, now);
     await expect(hoodFlow.connect(keeper).executeDCA(1, EMPTY_ROUTE))
       .to.be.revertedWithCustomError(hoodFlow, "OracleInvalid");
+    expect(await usdc.balanceOf(user.address)).to.equal(balanceBefore);
+  });
+
+  it("blocks execution while the sequencer is down and during its recovery grace period", async function () {
+    const fixture = await loadFixture(deployFixture);
+    const { hoodFlow, keeper, user, usdc, sequencerFeed } = fixture;
+    await createDefaultStrategy(fixture);
+    const balanceBefore = await usdc.balanceOf(user.address);
+
+    await sequencerFeed.setAnswer(1, (await time.latest()) - 2 * HOUR);
+    await expect(hoodFlow.connect(keeper).executeDCA(1, EMPTY_ROUTE))
+      .to.be.revertedWithCustomError(hoodFlow, "SequencerDown");
+
+    await sequencerFeed.setAnswer(0, await time.latest());
+    await expect(hoodFlow.connect(keeper).executeDCA(1, EMPTY_ROUTE))
+      .to.be.revertedWithCustomError(hoodFlow, "SequencerGracePeriod");
+    expect(await usdc.balanceOf(user.address)).to.equal(balanceBefore);
+  });
+
+  it("blocks stock-token execution when its onchain oracle is paused", async function () {
+    const fixture = await loadFixture(deployFixture);
+    const { hoodFlow, keeper, user, usdc, weth } = fixture;
+    await createDefaultStrategy(fixture);
+    const balanceBefore = await usdc.balanceOf(user.address);
+
+    await weth.setOraclePaused(true);
+    await expect(hoodFlow.connect(keeper).executeDCA(1, EMPTY_ROUTE))
+      .to.be.revertedWithCustomError(hoodFlow, "TokenOraclePaused")
+      .withArgs(await weth.getAddress());
     expect(await usdc.balanceOf(user.address)).to.equal(balanceBefore);
   });
 
