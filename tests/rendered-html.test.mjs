@@ -23,7 +23,7 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(html, /<title>HoodFlow — Safe stock automation on Robinhood Chain<\/title>/i);
   assert.match(html, /Stock automation,/);
   assert.match(html, /clearly explained\./);
-  assert.match(html, /Build an automation/);
+  assert.match(html, /Buy INTC with USDG/);
   assert.match(html, /Set it\. Cap it\./);
   assert.match(html, /HoodFlow workspace loading/);
   assert.match(html, /Preparing your/);
@@ -31,18 +31,18 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(html, /Loading official assets/);
   assert.match(html, /Permission Center/);
   assert.match(html, /Strategy workspace/);
-  assert.match(html, /25 official assets indexed/);
-  assert.match(html, /13 full-fill routes/);
-  assert.match(html, /24 Chainlink feeds/);
-  assert.match(html, /V11 LIVE PRICING/);
+  assert.match(html, /13 full-fill assets open/);
+  assert.match(html, /13 direct-buy routes/);
+  assert.match(html, /ROBINHOOD CHAIN [/] MAINNET/);
+  assert.match(html, /V12 MAINNET ROUTING/);
   assert.match(html, /Three steps\. You stay in control\./);
-  assert.match(html, /NO MAINNET ORDERS/);
-  assert.match(html, /Robinhood Chain Testnet/);
+  assert.match(html, /Mainnet direct buy is ready/);
+  assert.match(html, /Robinhood Chain/);
   assert.match(html, /og\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
-test("ships a bounded, interactive testnet experience", async () => {
+test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   const [page, layout, css, packageJson, priceRoute, priceLib] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -57,21 +57,21 @@ test("ships a bounded, interactive testnet experience", async () => {
   assert.match(page, /toggleStrategy/);
   assert.match(page, /copyStrategy/);
   assert.match(page, /exportActivity/);
-  assert.match(page, /hoodflow-device-drafts-v1/);
+  assert.match(page, /hoodflow-device-orders-v2/);
   assert.match(page, /window\.localStorage\.setItem/);
   assert.match(page, /Wallet keys and account data are never stored/);
   assert.match(page, /wallet_switchEthereumChain/);
-  assert.match(page, /Robinhood Chain Testnet/);
-  assert.match(page, /Start in Shadow Mode/);
+  assert.match(page, /Robinhood Chain mainnet/);
+  assert.match(page, /Shadow Mode is on/);
   assert.match(page, /PERMISSION CENTER/);
-  assert.match(page, /Pause everything/);
+  assert.match(page, /Pause local drafts/);
   assert.match(page, /EXECUTION PREVIEW/);
   assert.match(page, /Spending limits stay enforced onchain/);
   assert.match(page, /25\/25 engine, oracle and adapter safety tests passing/);
   assert.match(page, /Best quote across 3 reviewed V4 pool configurations/);
   assert.match(page, /2\/2 capped executions, replay blocked/);
   assert.match(page, /Twenty-five assets/);
-  assert.match(page, /13 full-fill routes/);
+  assert.match(page, /13 direct-buy routes/);
   assert.match(page, /Full-fill ready/);
   assert.match(page, /MSFT stays blocked after a deterministic-fork partial fill/);
   assert.match(page, /Copy as draft/);
@@ -87,8 +87,12 @@ test("ships a bounded, interactive testnet experience", async () => {
   assert.match(page, /Stale — blocked/);
   assert.match(page, /CHAINLINK \/ ROBINHOOD MAINNET/);
   assert.doesNotMatch(page, /price:\s*211\.18/);
-  assert.match(page, /MAINNET LOCKED/);
-  assert.match(page, /version-badge">V11/);
+  assert.match(page, /DIRECT BUY LIVE/);
+  assert.match(page, /version-badge">V12/);
+  assert.match(page, /PERMIT2_TYPES/);
+  assert.match(page, /buildDirectBuyCalldata/);
+  assert.match(page, /Buy INTC with USDG/);
+  assert.match(page, /13 ROUTES OPEN/);
   assert.match(layout, /HoodFlow — Safe stock automation/);
   assert.match(layout, /Instrument_Sans/);
   assert.match(layout, /IBM_Plex_Mono/);
