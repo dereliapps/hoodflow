@@ -1,0 +1,33 @@
+name: Launchpad adapter request
+description: Propose a read-only lifecycle adapter for another Robinhood Chain launchpad
+title: "[Adapter]: "
+labels: [adapter]
+body:
+  - type: input
+    id: launchpad
+    attributes:
+      label: Launchpad
+    validations:
+      required: true
+  - type: textarea
+    id: sources
+    attributes:
+      label: Official sources
+      description: Link the official API, registry, documentation, and verified contracts.
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Requested scope
+      options:
+        - Read-only discovery and lifecycle
+        - Transaction integration proposal
+    validations:
+      required: true
+  - type: textarea
+    id: lifecycle
+    attributes:
+      label: Lifecycle states and failure cases
+    validations:
+      required: true

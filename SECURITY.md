@@ -1,9 +1,16 @@
 # HoodFlow security and launch policy
 
-HoodFlow is a pre-audit release candidate. Do not treat a passing local build, RPC scan, or fork simulation as an audit or as permission to deploy user funds.
+HoodFlow's recurring contracts are pre-audit. Do not treat a passing local build, RPC scan, fork simulation, provider label, or public transaction as an audit.
+
+## Reporting a vulnerability
+
+After the public repository is available, use GitHub's private vulnerability-reporting flow under the repository's **Security** tab. Do not open a public issue for an exploitable finding. Include affected commit, impact, reproduction, and a proposed mitigation if known. Never include private keys, seed phrases, RPC secrets, funded-wallet details, or unrelated personal data.
 
 ## Security boundaries
 
+- Direct swaps are signed by the user and settle to the connected wallet; market-data visibility does not automatically enable execution.
+- Launchpad bonding, graduated DEX liquidity, and unknown lifecycle states are distinct. Unknown and bonding states fail closed for embedded execution.
+- A launchpad write adapter requires an official registry, verified ABI and spender, fee-on-transfer tests, and protected minimum-output quotes.
 - Users retain custody; the engine pulls only the exact configured tranche through ERC-20 allowance.
 - Every strategy fixes its token pair, tranche, lifetime budget, interval, expiry, and maximum slippage.
 - Keepers may choose only one of three reviewed, hookless Uniswap V4 pool configurations.
@@ -27,5 +34,7 @@ HoodFlow is a pre-audit release candidate. Do not treat a passing local build, R
 - Production Chainlink feed addresses and heartbeat policies must be reviewed immediately before deployment.
 - A funded public-network canary has not been executed.
 - The public Robinhood RPC is rate-limited and is not suitable as the sole production provider.
+- No independent audit covers the community-token V2/V3/V4 execution surface.
+- The official Virtuals SDK does not currently publish Robinhood Chain write constants; bonding trades therefore remain external.
 
-Report security issues privately to the project owner. Do not include private keys, seed phrases, access tokens, or funded-wallet details in reports.
+Security acknowledgements are published only with the reporter's permission.

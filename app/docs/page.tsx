@@ -106,8 +106,9 @@ export default function DocsPage() {
 
         <section id="community" className="docs-section">
           <p className="docs-kicker">07 / MEME + CRYPTO</p><h2>Discover tokens by contract address</h2>
-          <p>The Token Terminal combines Robinhood Chain&apos;s top-volume, trending and newest onchain pools with HoodFlow&apos;s canonical RWA registry. Filter by Memes, RWA, DeFi, AI &amp; Agents, Infrastructure, Stablecoins or Community; rank markets by volume, 24-hour change, liquidity or pool age. Selecting a market sends its contract to the inspector.</p>
-          <p>Paste any standard ERC-20 contract address on Robinhood Chain. HoodFlow reads bytecode and metadata, detects the listed pool&apos;s quote asset, then probes Uniswap V2, V3 and hookless V4 liquidity. USDG and WETH markets can execute inside HoodFlow when an onchain quote succeeds; unsupported third-party pools remain available through their live market link.</p>
+          <p>The Token Terminal combines Virtuals&apos; official Robinhood Chain launch feed, top-volume, trending and newest DEX pools, and HoodFlow&apos;s canonical RWA registry. Filter by Virtuals Agents, Memes, RWA, DeFi, AI &amp; Agents, Infrastructure, Stablecoins or Community; rank markets by volume, 24-hour change, liquidity or age.</p>
+          <p>Paste any standard ERC-20 contract address on Robinhood Chain. HoodFlow reads bytecode and metadata, detects the token&apos;s lifecycle and quote asset, then probes Uniswap V2, V3 and hookless V4 liquidity only when a DEX route should exist.</p>
+          <div className="docs-split"><article><span>VIRTUALS BONDING</span><h3>Trade at the source</h3><p>The token has not graduated. HoodFlow shows official Virtuals metadata and links to its source market instead of treating an empty pre-created DEX pair as executable.</p></article><article className="accent"><span>GRADUATED / DEX</span><h3>Verify live liquidity</h3><p>HoodFlow probes the active token and quote asset onchain. Embedded execution appears only after a fresh route returns non-zero output.</p></article></div>
           <div className="docs-note"><span>UNREVIEWED MODE</span><p>Contract discovery is not an endorsement or safety review. Trading is enabled only when a fresh direct route quote exists, but route availability does not rule out malicious transfer logic, issuer risk or liquidity withdrawal.</p></div>
         </section>
 
@@ -128,6 +129,7 @@ export default function DocsPage() {
           <details><summary>Wallet is on the wrong network</summary><p>Approve the network switch to Robinhood Chain. If your wallet does not add it automatically, use chain ID {ROBINHOOD_MAINNET.chainIdNumber} and the official network configuration.</p></details>
           <details><summary>Waiting for oracle</summary><p>The reference feed is unavailable, stale or still being verified. Trading stays disabled rather than using an unverified value.</p></details>
           <details><summary>No live full-fill route</summary><p>Liquidity for the selected asset or amount cannot pass the current route policy. Reduce the amount or try again later; never bypass the warning with a blind transaction.</p></details>
+          <details><summary>Why does a Virtuals token open an external market?</summary><p>The token is still on the Virtuals bonding curve. The official public SDK does not currently publish Robinhood Chain write constants, so HoodFlow fails closed instead of asking your wallet to trust an inferred upgradeable router.</p></details>
           <details><summary>Transaction reverted</summary><p>The executable output may have moved below your protected minimum, the permission may have expired or the wallet balance may be insufficient. Request a new quote before retrying.</p></details>
           <details><summary>Chart history is unavailable</summary><p>The historical oracle endpoint may not have enough valid rounds. This does not create an execution price; a fresh DEX quote is still required.</p></details>
         </section>
@@ -140,6 +142,6 @@ export default function DocsPage() {
     </div>
 
     <section className="seo-risk"><strong>Stock Tokens are not shares.</strong><p>They may be restricted in your jurisdiction and do not provide shareholder rights. HoodFlow is an independent interface built on Robinhood Chain and is not affiliated with Robinhood Markets, Inc.</p></section>
-    <footer className="seo-footer"><span>Documentation · Release 0.5.2</span><Link href="/security">Review security & known limitations →</Link></footer>
+    <footer className="seo-footer"><span>Documentation · Release 0.6.0</span><Link href="/security">Review security & known limitations →</Link></footer>
   </main>;
 }

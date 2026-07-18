@@ -1,0 +1,30 @@
+name: Bug report
+description: Report a reproducible HoodFlow defect
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Do not include private keys, seed phrases, RPC secrets, or personal data.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      placeholder: Network, token contract, expected result, actual result, and public transaction hash if relevant.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed all secrets and funded-wallet information.
+          required: true

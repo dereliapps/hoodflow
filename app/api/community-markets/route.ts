@@ -1,5 +1,13 @@
 import { NextResponse } from "next/server";
 import { ROBINHOOD_TOKENS, USDG_ADDRESS } from "@/lib/hoodflow-mainnet";
+import {
+  ROBINHOOD_VIRTUAL_ADDRESS,
+  ZERO_ADDRESS,
+  normalizeVirtualsToken,
+  virtualsQuery,
+  type VirtualsLifecycle,
+  type VirtualsToken,
+} from "@/lib/launchpads/virtuals";
 
 type TokenInfo = { address?: string; name?: string; symbol?: string; decimals?: number; image_url?: string | null };
 type GeckoPool = {
@@ -64,6 +72,13 @@ type Market = {
   discovery: string[];
   canonical: boolean;
   trendingRank: number | null;
+  launchpad: "virtuals" | null;
+  lifecycle: VirtualsLifecycle | "dex";
+  executionVenue: "dex" | "virtuals-bonding";
+  externalUrl: string | null;
+  holderCount: number | null;
+  bondedVirtual: number | null;
+  fdvInVirtual: number | null;
 };
 
 const GECKO_ROOT = "https://api.geckoterminal.com/api/v2";
@@ -144,6 +159,13 @@ function parseGecko(response: GeckoResponse, discovery: string, trending = false
       discovery: [discovery],
       canonical: canonicalRwa.has(address),
       trendingRank: trending ? index + 1 : null,
+      launchpad: null,
+      lifecycle: "dex",
+      executionVenue: "dex",
+      externalUrl: null,
+      holderCount: null,
+      bondedVirtual: null,
+      fdvInVirtual: null,
     } satisfies Market];
   });
 }
@@ -181,6 +203,13 @@ function parseCanonical(pairs: DexPair[]): Market[] {
       discovery: ["Canonical RWA"],
       canonical: true,
       trendingRank: null,
+      launchpad: null,
+      lifecycle: "dex",
+      executionVenue: "dex",
+      externalUrl: null,
+      holderCount: null,
+      bondedVirtual: null,
+      fdvInVirtual: null,
     } satisfies Market];
   });
 }
@@ -193,7 +222,7 @@ function parseTargetPairs(pairs: DexPair[], targetAddress: string): Market[] {
     if (!tokenIsBase && quoteAddress !== targetAddress) return [];
     const token = tokenIsBase ? pair.baseToken : pair.quoteToken;
     const quote = tokenIsBase ? pair.quoteToken : pair.baseToken;
-    if (!token?.address || !token.symbol || !quote?.address || !quote.symbol) return [];
+    if (!token?.address || !token.symbol || !quote?.address || !quote.symbol || quote.address.toLowerCase() === ZERO_ADDRESS) return [];
     const change = nullableNumber(pair.priceChange?.h24);
     return [{
       address: targetAddress,
@@ -217,6 +246,50 @@ function parseTargetPairs(pairs: DexPair[], targetAddress: string): Market[] {
       discovery: ["Contract lookup"],
       canonical: canonicalRwa.has(targetAddress),
       trendingRank: null,
+      launchpad: null,
+      lifecycle: "dex",
+      executionVenue: "dex",
+      externalUrl: null,
+      holderCount: null,
+      bondedVirtual: null,
+      fdvInVirtual: null,
+    } satisfies Market];
+  });
+}
+
+function parseVirtuals(tokens: VirtualsToken[], discovery: string, trending = false): Market[] {
+  return tokens.flatMap((raw, index) => {
+    const token = normalizeVirtualsToken(raw);
+    if (!token) return [];
+    return [{
+      address: token.address,
+      name: token.name,
+      symbol: token.symbol,
+      category: "Virtuals Agents",
+      imageUrl: token.imageUrl,
+      priceUsd: null,
+      priceChange24h: token.priceChange24h,
+      volume24h: token.volume24h,
+      liquidityUsd: token.liquidityUsd,
+      marketCapUsd: null,
+      transactions24h: 0,
+      pairAddress: token.pairAddress,
+      pairUrl: token.externalUrl,
+      quoteAddress: ROBINHOOD_VIRTUAL_ADDRESS,
+      quoteSymbol: "VIRTUAL",
+      quoteDecimals: 18,
+      dex: token.lifecycle === "bonding" ? "Virtuals BondingV5" : "Virtuals graduated market",
+      poolCreatedAt: token.launchedAt,
+      discovery: [discovery],
+      canonical: false,
+      trendingRank: trending ? index + 1 : null,
+      launchpad: "virtuals",
+      lifecycle: token.lifecycle,
+      executionVenue: token.lifecycle === "bonding" ? "virtuals-bonding" : "dex",
+      externalUrl: token.externalUrl,
+      holderCount: token.holderCount,
+      bondedVirtual: token.bondedVirtual,
+      fdvInVirtual: token.fdvInVirtual,
     } satisfies Market];
   });
 }
@@ -234,10 +307,19 @@ function mergeMarkets(rows: Market[]) {
     const preferred = row.volume24h > current.volume24h ? row : current;
     merged.set(row.address, {
       ...preferred,
+      imageUrl: preferred.imageUrl || current.imageUrl || row.imageUrl,
       discovery: discoveries,
       trendingRank: [current.trendingRank, row.trendingRank].filter((value): value is number => value !== null).sort((a, b) => a - b)[0] ?? null,
       canonical: current.canonical || row.canonical,
-      category: current.canonical || row.canonical ? "RWA" : preferred.category,
+      category: current.canonical || row.canonical ? "RWA" : current.launchpad === "virtuals" || row.launchpad === "virtuals" ? "Virtuals Agents" : preferred.category,
+      launchpad: current.launchpad || row.launchpad,
+      lifecycle: current.lifecycle === "bonding" || row.lifecycle === "bonding" ? "bonding" : preferred.lifecycle,
+      executionVenue: current.executionVenue === "virtuals-bonding" || row.executionVenue === "virtuals-bonding" ? "virtuals-bonding" : "dex",
+      externalUrl: current.externalUrl || row.externalUrl,
+      holderCount: current.holderCount ?? row.holderCount,
+      bondedVirtual: current.bondedVirtual ?? row.bondedVirtual,
+      fdvInVirtual: current.fdvInVirtual ?? row.fdvInVirtual,
+      dex: current.lifecycle === "bonding" || row.lifecycle === "bonding" ? "Virtuals BondingV5" : preferred.dex,
     });
   }
   return [...merged.values()];
@@ -249,20 +331,53 @@ async function fetchGecko(path: string) {
   return response.json() as Promise<GeckoResponse>;
 }
 
+async function fetchVirtuals(url: string) {
+  const response = await fetch(url, { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`Virtuals ${response.status}`);
+  const payload = await response.json() as { data?: VirtualsToken[] };
+  return Array.isArray(payload.data) ? payload.data : [];
+}
+
 export async function GET(request?: Request) {
-  const lookupAddress = request ? new URL(request.url).searchParams.get("token")?.toLowerCase() : null;
+  const searchParams = request ? new URL(request.url).searchParams : null;
+  const lookupAddress = searchParams?.get("token")?.toLowerCase() ?? null;
+  const search = searchParams?.get("search")?.trim().slice(0, 80) ?? "";
+  if (search.length >= 2) {
+    const virtuals = await fetchVirtuals(virtualsQuery({
+      "filters[$or][0][name][$contains]": search,
+      "filters[$or][1][symbol][$contains]": search,
+      "filters[$or][2][preToken][$contains]": search,
+      "filters[$or][3][tokenAddress][$contains]": search,
+      "sort[0]": "volume24h:desc",
+      "sort[1]": "createdAt:desc",
+      "pagination[page]": "1",
+      "pagination[pageSize]": "50",
+    })).catch(() => []);
+    return NextResponse.json({
+      markets: mergeMarkets(parseVirtuals(virtuals, "Virtuals search")),
+      updatedAt: Date.now(),
+      sources: { virtuals: true },
+    }, { headers: { "cache-control": "public, max-age=10, s-maxage=20, stale-while-revalidate=60" } });
+  }
   if (lookupAddress) {
     if (!/^0x[a-f0-9]{40}$/.test(lookupAddress)) return NextResponse.json({ markets: [], error: "Invalid token address." }, { status: 400 });
-    const [gecko, dex] = await Promise.allSettled([
+    const [gecko, dex, virtuals] = await Promise.allSettled([
       fetchGecko(`/networks/robinhood/tokens/${lookupAddress}/pools?page=1&include=base_token%2Cquote_token`),
       fetch(`https://api.dexscreener.com/token-pairs/v1/robinhood/${lookupAddress}`, { headers: { accept: "application/json" } }).then(async (response) => {
         if (!response.ok) throw new Error(`DEX Screener ${response.status}`);
         return response.json() as Promise<DexPair[]>;
       }),
+      fetchVirtuals(virtualsQuery({
+        "filters[$or][0][preToken][$contains]": lookupAddress,
+        "filters[$or][1][tokenAddress][$contains]": lookupAddress,
+        "pagination[page]": "1",
+        "pagination[pageSize]": "10",
+      })),
     ]);
     const markets = mergeMarkets([
       ...(gecko.status === "fulfilled" ? parseGecko(gecko.value, "Contract lookup").filter((market) => market.address === lookupAddress) : []),
       ...(dex.status === "fulfilled" ? parseTargetPairs(dex.value, lookupAddress) : []),
+      ...(virtuals.status === "fulfilled" ? parseVirtuals(virtuals.value, "Virtuals official").filter((market) => market.address === lookupAddress) : []),
     ]).sort((left, right) => right.volume24h - left.volume24h);
     return NextResponse.json({ markets, updatedAt: Date.now() }, { headers: { "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=120" } });
   }
@@ -275,13 +390,19 @@ export async function GET(request?: Request) {
       if (!response.ok) throw new Error(`DEX Screener ${response.status}`);
       return response.json() as Promise<DexPair[]>;
     }),
+    fetchVirtuals(virtualsQuery({ "sort[0]": "volume24h:desc", "sort[1]": "createdAt:desc", "pagination[page]": "1", "pagination[pageSize]": "60" })),
+    fetchVirtuals(virtualsQuery({ "sort[0]": "priceChangePercent24h:desc", "sort[1]": "volume24h:desc", "pagination[page]": "1", "pagination[pageSize]": "40" })),
+    fetchVirtuals(virtualsQuery({ "sort[0]": "createdAt:desc", "pagination[page]": "1", "pagination[pageSize]": "60" })),
   ]);
-  const [top, trending, newest, canonical] = requests;
+  const [top, trending, newest, canonical, virtualsVolume, virtualsGainers, virtualsNewest] = requests;
   const rows = [
     ...(top.status === "fulfilled" ? parseGecko(top.value, "Top volume") : []),
     ...(trending.status === "fulfilled" ? parseGecko(trending.value, "Trending", true) : []),
     ...(newest.status === "fulfilled" ? parseGecko(newest.value, "New pool") : []),
     ...(canonical.status === "fulfilled" ? parseCanonical(canonical.value) : []),
+    ...(virtualsVolume.status === "fulfilled" ? parseVirtuals(virtualsVolume.value, "Virtuals volume") : []),
+    ...(virtualsGainers.status === "fulfilled" ? parseVirtuals(virtualsGainers.value, "Virtuals trending", true) : []),
+    ...(virtualsNewest.status === "fulfilled" ? parseVirtuals(virtualsNewest.value, "Virtuals new") : []),
   ];
   const markets = mergeMarkets(rows);
   if (!markets.length) return NextResponse.json({ markets: [], error: "Market feeds are temporarily unavailable." }, { status: 503, headers: { "cache-control": "no-store" } });
@@ -291,6 +412,7 @@ export async function GET(request?: Request) {
     sources: {
       geckoTerminal: top.status === "fulfilled" || trending.status === "fulfilled" || newest.status === "fulfilled",
       dexScreener: canonical.status === "fulfilled",
+      virtuals: virtualsVolume.status === "fulfilled" || virtualsGainers.status === "fulfilled" || virtualsNewest.status === "fulfilled",
     },
   }, { headers: { "cache-control": "public, max-age=20, s-maxage=60, stale-while-revalidate=300" } });
 }
