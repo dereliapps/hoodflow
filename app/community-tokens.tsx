@@ -44,7 +44,7 @@ import { ROBINHOOD_VIRTUAL_ADDRESS } from "@/lib/launchpads/virtuals";
 
 type Token = { address: string; name: string; symbol: string; decimals: number };
 type Route =
-  | { protocol: "V2"; pair: string; feeBps: number; amountOut: bigint }
+  | { protocol: "V2"; path: string[]; feeBps: number; amountOut: bigint }
   | { protocol: "V3"; fee: number; amountOut: bigint }
   | { protocol: "V4"; route: PoolCandidate; amountOut: bigint };
 type RecentToken = Token & { route: string };
@@ -140,38 +140,44 @@ function poolAge(value: string | null) {
 class RouteUnavailableError extends Error {}
 
 function routeName(route: Route) {
-  if (route.protocol === "V2") return "Uniswap V2 · 0.30%";
+  if (route.protocol === "V2") return route.path.length > 2 ? `Uniswap V2 · ${route.path.length - 1} pools` : "Uniswap V2 · 0.30%";
   if (route.protocol === "V3") return `Uniswap V3 · ${route.fee / 10_000}%`;
   return `Uniswap V4 · ${route.route.fee / 10_000}%`;
 }
 
-async function quoteV2(provider: JsonRpcProvider | BrowserProvider, tokenIn: string, tokenOut: string, amountIn: bigint): Promise<Route | null> {
+async function quoteV2Path(provider: JsonRpcProvider | BrowserProvider, path: string[], amountIn: bigint): Promise<Route | null> {
   try {
     const factory = new Contract(V2_FACTORY_ADDRESS, V2_FACTORY_ABI, provider);
-    const pairAddress = getAddress(await factory.getPair(tokenIn, tokenOut) as string);
-    if (pairAddress === ZeroAddress) return null;
-    const pair = new Contract(pairAddress, V2_PAIR_ABI, provider);
-    const [token0, reserves] = await Promise.all([
-      pair.token0() as Promise<string>,
-      pair.getReserves() as Promise<{ reserve0?: bigint; reserve1?: bigint; 0?: bigint; 1?: bigint }>,
-    ]);
-    const reserve0 = BigInt(reserves.reserve0 ?? reserves[0] ?? 0n);
-    const reserve1 = BigInt(reserves.reserve1 ?? reserves[1] ?? 0n);
-    const inputIsToken0 = getAddress(token0) === getAddress(tokenIn);
-    const reserveIn = inputIsToken0 ? reserve0 : reserve1;
-    const reserveOut = inputIsToken0 ? reserve1 : reserve0;
-    if (reserveIn <= 0n || reserveOut <= 0n) return null;
-    const amountInWithFee = amountIn * 997n;
-    const amountOut = amountInWithFee * reserveOut / (reserveIn * 1_000n + amountInWithFee);
-    return amountOut > 0n ? { protocol: "V2", pair: pairAddress, feeBps: 30, amountOut } : null;
+    let amountOut = amountIn;
+    for (let index = 0; index < path.length - 1; index += 1) {
+      const tokenIn = getAddress(path[index]);
+      const tokenOut = getAddress(path[index + 1]);
+      const pairAddress = getAddress(await factory.getPair(tokenIn, tokenOut) as string);
+      if (pairAddress === ZeroAddress) return null;
+      const pair = new Contract(pairAddress, V2_PAIR_ABI, provider);
+      const [token0, reserves] = await Promise.all([
+        pair.token0() as Promise<string>,
+        pair.getReserves() as Promise<{ reserve0?: bigint; reserve1?: bigint; 0?: bigint; 1?: bigint }>,
+      ]);
+      const reserve0 = BigInt(reserves.reserve0 ?? reserves[0] ?? 0n);
+      const reserve1 = BigInt(reserves.reserve1 ?? reserves[1] ?? 0n);
+      const inputIsToken0 = getAddress(token0) === tokenIn;
+      const reserveIn = inputIsToken0 ? reserve0 : reserve1;
+      const reserveOut = inputIsToken0 ? reserve1 : reserve0;
+      if (reserveIn <= 0n || reserveOut <= 0n) return null;
+      const amountInWithFee = amountOut * 997n;
+      amountOut = amountInWithFee * reserveOut / (reserveIn * 1_000n + amountInWithFee);
+      if (amountOut <= 0n) return null;
+    }
+    return { protocol: "V2", path: path.map(getAddress), feeBps: 30, amountOut };
   } catch { return null; }
 }
 
-async function bestRoute(provider: JsonRpcProvider | BrowserProvider, tokenIn: string, tokenOut: string, amountIn: bigint): Promise<Route> {
+async function bestRoute(provider: JsonRpcProvider | BrowserProvider, tokenIn: string, tokenOut: string, amountIn: bigint, via?: string): Promise<Route> {
   const v3 = new Contract(V3_QUOTER_ADDRESS, V3_QUOTER_ABI, provider);
   const v4 = new Contract(V4_QUOTER_ADDRESS, V4_QUOTER_ABI, provider);
   const checks: Array<Promise<Route | null>> = [
-    quoteV2(provider, tokenIn, tokenOut, amountIn),
+    quoteV2Path(provider, [tokenIn, tokenOut], amountIn),
     ...V3_FEES.map(async (fee) => {
       try {
         const result = await v3.quoteExactInputSingle.staticCall({ tokenIn, tokenOut, amountIn, fee, sqrtPriceLimitX96: 0 }) as readonly [bigint, bigint, bigint, bigint];
@@ -185,6 +191,9 @@ async function bestRoute(provider: JsonRpcProvider | BrowserProvider, tokenIn: s
       } catch { return null; }
     }),
   ];
+  if (via && getAddress(via) !== getAddress(tokenIn) && getAddress(via) !== getAddress(tokenOut)) {
+    checks.push(quoteV2Path(provider, [tokenIn, via, tokenOut], amountIn));
+  }
   const routes = (await Promise.all(checks)).filter((route): route is Route => Boolean(route));
   routes.sort((left, right) => left.amountOut > right.amountOut ? -1 : left.amountOut < right.amountOut ? 1 : 0);
   if (!routes[0]) throw new RouteUnavailableError("No executable pool is available for this settlement pair.");
@@ -203,6 +212,9 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
   const [routeError, setRouteError] = useState("");
   const [routeUnavailable, setRouteUnavailable] = useState(false);
   const [settlement, setSettlement] = useState<Settlement>(USDG_SETTLEMENT);
+  const [marketSettlement, setMarketSettlement] = useState<Settlement>(USDG_SETTLEMENT);
+  const [settlementMenu, setSettlementMenu] = useState(false);
+  const [settlementBalance, setSettlementBalance] = useState<string>("");
   const [activeMarket, setActiveMarket] = useState<CommunityMarket | null>(null);
   const [recent, setRecent] = useState<RecentToken[]>([]);
   const [markets, setMarkets] = useState<CommunityMarket[]>([]);
@@ -227,8 +239,8 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
   useEffect(() => {
     const query = marketSearch.trim();
     if (query.length < 2) {
-      setMarketSearchResults([]);
-      return;
+      const clear = window.setTimeout(() => setMarketSearchResults([]), 0);
+      return () => window.clearTimeout(clear);
     }
     const controller = new AbortController();
     const timeout = window.setTimeout(async () => {
@@ -295,6 +307,29 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
     return side === "buy" ? `${prettyAmount(quote.amountOut, token.decimals)} ${token.symbol}` : `${prettyAmount(quote.amountOut, settlement.decimals)} ${settlement.symbol}`;
   }, [quote, settlement, side, token]);
 
+  const settlementOptions = useMemo(() => {
+    const options = [USDG_SETTLEMENT, VIRTUAL_SETTLEMENT, WETH_SETTLEMENT, marketSettlement];
+    return options.filter((item, index) => options.findIndex((candidate) => candidate.address.toLowerCase() === item.address.toLowerCase()) === index);
+  }, [marketSettlement]);
+
+  useEffect(() => {
+    if (!walletAddress || !walletProvider) {
+      const clear = window.setTimeout(() => setSettlementBalance(""), 0);
+      return () => window.clearTimeout(clear);
+    }
+    let active = true;
+    const load = async () => {
+      try {
+        const provider = new BrowserProvider(walletProvider, "any");
+        const contract = new Contract(settlement.address, ERC20_ABI, provider);
+        const balance = await contract.balanceOf(walletAddress) as bigint;
+        if (active) setSettlementBalance(prettyAmount(balance, settlement.decimals));
+      } catch { if (active) setSettlementBalance(""); }
+    };
+    void load();
+    return () => { active = false; };
+  }, [settlement, walletAddress, walletProvider]);
+
   function settlementFor(market: CommunityMarket | null): Settlement {
     if (!market?.quoteAddress || !/^0x[a-fA-F0-9]{40}$/.test(market.quoteAddress) || market.quoteAddress === ZeroAddress) return USDG_SETTLEMENT;
     const symbol = market.quoteSymbol.toUpperCase();
@@ -336,6 +371,7 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
       const found = { address, name: String(name).slice(0, 80), symbol: String(symbol).slice(0, 20), decimals };
       setActiveMarket(market);
       setSettlement(nextSettlement);
+      setMarketSettlement(nextSettlement);
       setAmount(nextSettlement.symbol === "WETH" ? "0.01" : nextSettlement.symbol === "USDG" ? "20" : "10");
       setToken(found);
       track("community_token_imported", { ticker: found.symbol, address: found.address });
@@ -373,14 +409,16 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
     setBusy(true);
     setRouteError("");
     setRouteUnavailable(false);
-    setStep(`Quoting your exact input across ${settlement.symbol} pools…`);
+    setStep(`Checking ${settlement.symbol} routes…`);
     try {
       const amountIn = parseUnits(amount, side === "buy" ? settlement.decimals : token.decimals);
       if (amountIn <= 0n || amountIn > MAX_UINT128) throw new Error("Enter a valid amount.");
       const provider = new JsonRpcProvider(ROBINHOOD_MAINNET.rpcUrls[0], ROBINHOOD_MAINNET.chainIdNumber, { staticNetwork: true });
-      const result = await bestRoute(provider, side === "buy" ? settlement.address : token.address, side === "buy" ? token.address : settlement.address, amountIn);
+      const result = await bestRoute(provider, side === "buy" ? settlement.address : token.address, side === "buy" ? token.address : settlement.address, amountIn, marketSettlement.address);
       setQuote(result);
-      setStep("Fresh executable quote ready. It will be checked again before signing.");
+      setStep(result.protocol === "V2" && result.path.length > 2
+        ? `${settlement.symbol} routes through ${marketSettlement.symbol} in one transaction. Quote will be checked again before signing.`
+        : "Live quote ready. It will be checked again before signing.");
       track("quote_received", { ticker: token.symbol, side, protocol: result.protocol });
     } catch (error) {
       setQuote(null);
@@ -410,7 +448,7 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
       const tokenIn = side === "buy" ? settlement.address : token.address;
       const tokenOut = side === "buy" ? token.address : settlement.address;
       setStep("Refreshing the executable route…");
-      const liveQuote = await bestRoute(provider, tokenIn, tokenOut, amountIn);
+      const liveQuote = await bestRoute(provider, tokenIn, tokenOut, amountIn, marketSettlement.address);
       setQuote(liveQuote);
       const minAmountOut = liveQuote.amountOut * BigInt(10_000 - slippageBps) / 10_000n;
       const input = new Contract(tokenIn, ERC20_ABI, signer);
@@ -430,7 +468,7 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
       setStep("Sign the exact, ten-minute order permission…");
       const signature = await signer.signTypedData({ name: "Permit2", chainId: ROBINHOOD_MAINNET.chainIdNumber, verifyingContract: PERMIT2_ADDRESS }, PERMIT2_TYPES, permit);
       const calldata = liveQuote.protocol === "V2"
-        ? buildV2ExactInputCalldata({ tokenIn, tokenOut, recipient: walletAddress, amountIn, minAmountOut, permit, signature })
+        ? buildV2ExactInputCalldata({ tokenIn, tokenOut, recipient: walletAddress, amountIn, minAmountOut, path: liveQuote.path, permit, signature })
         : liveQuote.protocol === "V3"
           ? buildV3ExactInputCalldata({ tokenIn, tokenOut, recipient: walletAddress, amountIn, minAmountOut, fee: liveQuote.fee, permit, signature })
           : buildV4ExactInputCalldata({ tokenIn, tokenOut, amountIn, minAmountOut, route: liveQuote.route, permit, signature });
@@ -463,9 +501,20 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
     void discover(undefined, market.address, market);
   }
 
+  function chooseSettlement(option: Settlement) {
+    setSettlement(option);
+    setSettlementMenu(false);
+    setQuote(null);
+    if (side === "buy") setAmount(option.symbol === "WETH" ? "0.01" : option.symbol === "USDG" ? "20" : "10");
+    setRouteUnavailable(false);
+    setRouteError("");
+    setStep(`${option.symbol} selected. Refresh the quote to check the best live route.`);
+    track("settlement_selected", { symbol: option.symbol });
+  }
+
   return <section className="page inner-page community-page">
     <div className="community-hero">
-      <div><p className="eyebrow">ROBINHOOD CHAIN TOKEN TERMINAL</p><h1>Every market.<br /><span>One live tape.</span></h1><p>Follow Virtuals launches, meme tokens, canonical RWAs, DeFi, AI and live DEX pools from one screen. HoodFlow separates bonding curves from graduated markets before it checks executable V2, V3 and V4 liquidity.</p></div>
+      <div><p className="eyebrow">ROBINHOOD CHAIN TOKEN TERMINAL</p><h1>Robinhood Chain markets,<br /><span>in one place.</span></h1><p>Browse Virtuals launches, meme tokens, RWAs, DeFi and live DEX pools. HoodFlow checks whether a token is still bonding or already trading on a DEX before it offers a swap.</p></div>
       <div className="community-hero-badge"><strong>24/7</strong><span>WHEN ONCHAIN<br />LIQUIDITY EXISTS</span></div>
     </div>
     <section className="market-pulse" aria-label="Robinhood Chain token market summary">
@@ -502,7 +551,7 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
       <div className="market-data-note"><p><strong>Live market data</strong> from Virtuals, GeckoTerminal and DEX Screener. Bonding tokens stay labeled as bonding until the official lifecycle changes; HoodFlow does not sell ranking positions.</p><span>{marketsError ? `Partial feed: ${marketsError}` : "Refreshes every 60 seconds"}</span></div>
     </section>
 
-    <div id="ca-import" className="ca-import-section"><div className="market-section-title"><div><p className="eyebrow">UNIVERSAL TOKEN DESK</p><h2>One token. Its actual lifecycle.</h2></div><p>HoodFlow identifies launchpad bonding, graduated liquidity and standard DEX markets. Embedded execution is enabled only when a verifiable V2, V3 or V4 route exists.</p></div>
+    <div id="ca-import" className="ca-import-section"><div className="market-section-title"><div><p className="eyebrow">CONTRACT LOOKUP</p><h2>Check any token by address.</h2></div><p>HoodFlow identifies bonding, graduated liquidity and standard DEX markets. Swaps stay disabled until a verifiable V2, V3 or V4 route exists.</p></div>
     <div className="token-safety-strip"><span>UNREVIEWED TOKEN MODE</span><p>A valid contract, price or rising chart is not proof of safety. Verify the CA, issuer, transfer behavior and liquidity yourself. HoodFlow never labels an imported community token as verified.</p></div>
     <form className="ca-search" onSubmit={discover}><label>CONTRACT ADDRESS (CA)<input value={contractAddress} onChange={(event) => setContractAddress(event.target.value)} placeholder="0x… on Robinhood Chain" spellCheck={false} /></label><button disabled={busy || !contractAddress.trim()}>{busy ? "Checking…" : "Discover token →"}</button></form>
     {token && <div className="community-terminal">
@@ -515,14 +564,14 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
         <section className="terminal-market-card">
           <p className="terminal-label">DISCOVERED MARKET</p>
           <div className="terminal-price"><strong>{compactMoney(activeMarket?.priceUsd ?? null, true)}</strong><span className={(activeMarket?.priceChange24h ?? 0) >= 0 ? "up" : "down"}>{percent(activeMarket?.priceChange24h ?? null)}</span></div>
-          <div className="terminal-market-stats"><div><span>24H VOLUME</span><strong>{compactMoney(activeMarket?.volume24h ?? 0)}</strong></div><div><span>{activeMarket?.lifecycle === "bonding" ? "BONDED" : "LIQUIDITY"}</span><strong>{activeMarket?.lifecycle === "bonding" && activeMarket.bondedVirtual !== null ? `${activeMarket.bondedVirtual.toLocaleString("en-US")} VIRTUAL` : compactMoney(activeMarket?.liquidityUsd ?? 0)}</strong></div><div><span>PAIR</span><strong>{token.symbol}/{settlement.symbol}</strong></div><div><span>VENUE</span><strong>{activeMarket?.dex ?? "Auto route"}</strong></div></div>
+          <div className="terminal-market-stats"><div><span>24H VOLUME</span><strong>{compactMoney(activeMarket?.volume24h ?? 0)}</strong></div><div><span>{activeMarket?.lifecycle === "bonding" ? "BONDED" : "LIQUIDITY"}</span><strong>{activeMarket?.lifecycle === "bonding" && activeMarket.bondedVirtual !== null ? `${activeMarket.bondedVirtual.toLocaleString("en-US")} VIRTUAL` : compactMoney(activeMarket?.liquidityUsd ?? 0)}</strong></div><div><span>PAIR</span><strong>{token.symbol}/{marketSettlement.symbol}</strong></div><div><span>VENUE</span><strong>{activeMarket?.dex ?? "Auto route"}</strong></div></div>
           <p className="terminal-risk">Community tokens are unreviewed. Confirm the contract and pool before signing.</p>
         </section>
         <section className="community-trade-panel">
           <div className="community-tabs"><button className={side === "buy" ? "active" : ""} onClick={() => { setSide("buy"); setAmount(settlement.symbol === "WETH" ? "0.01" : settlement.symbol === "USDG" ? "20" : "10"); setQuote(null); }} type="button">Buy</button><button className={side === "sell" ? "active" : ""} onClick={() => { setSide("sell"); setAmount("1"); setQuote(null); }} type="button">Sell</button></div>
-          <label className="terminal-amount"><span>YOU PAY</span><div><input type="number" min="0" step="any" value={amount} onChange={(event) => { setAmount(event.target.value); setQuote(null); }} /><b>{side === "buy" ? settlement.symbol : token.symbol}</b></div></label>
+          <div className="terminal-amount"><span>YOU PAY {side === "buy" && settlementBalance ? <em>Balance {settlementBalance}</em> : null}</span><div><input aria-label="Trade amount" type="number" min="0" step="any" value={amount} onChange={(event) => { setAmount(event.target.value); setQuote(null); }} />{side === "buy" ? <span className="settlement-picker"><button type="button" className="settlement-trigger" aria-expanded={settlementMenu} onClick={() => setSettlementMenu((open) => !open)}>{settlement.symbol}<i>⌄</i></button>{settlementMenu && <span className="settlement-menu" role="menu">{settlementOptions.map((option) => <button type="button" role="menuitem" className={option.address === settlement.address ? "selected" : ""} key={option.address} onClick={() => chooseSettlement(option)}><b>{option.symbol.slice(0, 2)}</b><span><strong>{option.symbol}</strong><small>{option.address === marketSettlement.address ? "Native market route" : "Pay from wallet"}</small></span>{option.address === settlement.address && <i>✓</i>}</button>)}</span>}</span> : <b>{token.symbol}</b>}</div></div>
           <div className="terminal-swap-arrow">↓</div>
-          <div className="terminal-receive"><span>YOU RECEIVE · ESTIMATED</span><strong>{outputLabel}</strong></div>
+          <div className="terminal-receive"><div><span>YOU RECEIVE · ESTIMATED</span><strong>{outputLabel}</strong></div>{side === "sell" && <span className="settlement-picker"><button type="button" className="settlement-trigger" aria-expanded={settlementMenu} onClick={() => setSettlementMenu((open) => !open)}>{settlement.symbol}<i>⌄</i></button>{settlementMenu && <span className="settlement-menu receive-menu" role="menu">{settlementOptions.map((option) => <button type="button" role="menuitem" className={option.address === settlement.address ? "selected" : ""} key={option.address} onClick={() => chooseSettlement(option)}><b>{option.symbol.slice(0, 2)}</b><span><strong>{option.symbol}</strong><small>{option.address === marketSettlement.address ? "Native market route" : "Receive in wallet"}</small></span>{option.address === settlement.address && <i>✓</i>}</button>)}</span>}</span>}</div>
           <div className="terminal-route-line"><div><span>EXECUTION</span><strong>{quote ? routeName(quote) : activeMarket?.lifecycle === "bonding" ? "Virtuals bonding market" : routeUnavailable ? "External pool" : "Finding best pool…"}</strong></div><label>SLIPPAGE <span><input type="number" min="0.1" max="5" step="0.1" value={slippage} onChange={(event) => setSlippage(event.target.value)} />%</span></label></div>
           {step && <p className={`community-step ${routeUnavailable ? "notice" : ""}`}><i />{step}</p>}{routeError && <p className="community-error">{routeError}</p>}
           <div className="community-actions"><button type="button" onClick={() => void refreshQuote()} disabled={busy || !amount || activeMarket?.executionVenue === "virtuals-bonding"}>{busy ? "Checking route…" : activeMarket?.executionVenue === "virtuals-bonding" ? "Bonding route detected" : "Refresh quote"}</button>{routeUnavailable && (activeMarket?.externalUrl || activeMarket?.pairUrl) ? <a href={activeMarket.externalUrl || activeMarket.pairUrl} target="_blank" rel="noreferrer">{activeMarket?.lifecycle === "bonding" ? "Trade on Virtuals ↗" : "Open live pool ↗"}</a> : <button type="button" onClick={() => void trade()} disabled={busy || !quote}>{!walletAddress ? "Connect wallet" : quote ? `${side === "buy" ? "Buy" : "Sell"} ${token.symbol}` : "Quote first"}</button>}</div>

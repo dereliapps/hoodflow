@@ -107,14 +107,14 @@ export default function DocsPage() {
         <section id="community" className="docs-section">
           <p className="docs-kicker">07 / MEME + CRYPTO</p><h2>Discover tokens by contract address</h2>
           <p>The Token Terminal combines Virtuals&apos; official Robinhood Chain launch feed, top-volume, trending and newest DEX pools, and HoodFlow&apos;s canonical RWA registry. Filter by Virtuals Agents, Memes, RWA, DeFi, AI &amp; Agents, Infrastructure, Stablecoins or Community; rank markets by volume, 24-hour change, liquidity or age.</p>
-          <p>Paste any standard ERC-20 contract address on Robinhood Chain. HoodFlow reads bytecode and metadata, detects the token&apos;s lifecycle and quote asset, then probes Uniswap V2, V3 and hookless V4 liquidity only when a DEX route should exist.</p>
+          <p>Paste any standard ERC-20 contract address on Robinhood Chain. HoodFlow reads bytecode and metadata, detects the token&apos;s lifecycle and quote asset, then probes Uniswap V2, V3 and hookless V4 liquidity only when a DEX route should exist. You can pay or receive USDG, VIRTUAL or WETH; when a direct pair is unavailable, an eligible V2 order can route through the market&apos;s native quote token in the same transaction.</p>
           <div className="docs-split"><article><span>VIRTUALS BONDING</span><h3>Trade at the source</h3><p>The token has not graduated. HoodFlow shows official Virtuals metadata and links to its source market instead of treating an empty pre-created DEX pair as executable.</p></article><article className="accent"><span>GRADUATED / DEX</span><h3>Verify live liquidity</h3><p>HoodFlow probes the active token and quote asset onchain. Embedded execution appears only after a fresh route returns non-zero output.</p></article></div>
-          <div className="docs-note"><span>UNREVIEWED MODE</span><p>Contract discovery is not an endorsement or safety review. Trading is enabled only when a fresh direct route quote exists, but route availability does not rule out malicious transfer logic, issuer risk or liquidity withdrawal.</p></div>
+          <div className="docs-note"><span>UNREVIEWED MODE</span><p>Contract discovery is not an endorsement or safety review. Trading is enabled only when a fresh executable route exists, but route availability does not rule out malicious transfer logic, issuer risk or liquidity withdrawal.</p></div>
         </section>
 
         <section id="rewards" className="docs-section">
           <p className="docs-kicker">08 / REWARDS</p><h2>How HF Points qualify</h2>
-          <p>A wallet activates one referral relationship with a message signature. The invited wallet receives 100 HF Points and its referrer receives 500 only after the invited wallet&apos;s first eligible Universal Router trade is confirmed on Robinhood Chain. Clicks, repeat trades and raw volume earn no points.</p>
+          <p>A wallet creates a shareable referral link with one message signature. The invited wallet receives 100 HF Points and its referrer receives 500 only after the invited wallet&apos;s first eligible Universal Router trade is confirmed on Robinhood Chain. Clicks, repeat trades and raw volume earn no points. The public leaderboard contains real activated wallets and updates from the same verified point ledger.</p>
           <div className="docs-callout"><strong>No guaranteed token allocation.</strong><p>HF Points are planned to inform future $HFLOW eligibility, but have no present monetary value. Conversion rate, launch, eligibility, jurisdiction and anti-sybil terms remain subject to a future announcement.</p></div>
         </section>
 
@@ -142,6 +142,6 @@ export default function DocsPage() {
     </div>
 
     <section className="seo-risk"><strong>Stock Tokens are not shares.</strong><p>They may be restricted in your jurisdiction and do not provide shareholder rights. HoodFlow is an independent interface built on Robinhood Chain and is not affiliated with Robinhood Markets, Inc.</p></section>
-    <footer className="seo-footer"><span>Documentation · Release 0.6.0</span><Link href="/security">Review security & known limitations →</Link></footer>
+    <footer className="seo-footer"><span>Documentation · Release 0.7.0</span><Link href="/security">Review security & known limitations →</Link></footer>
   </main>;
 }

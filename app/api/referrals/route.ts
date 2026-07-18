@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, count, eq, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, sql } from "drizzle-orm";
 import { getAddress, JsonRpcProvider, verifyMessage } from "ethers";
 import { getDb } from "@/db";
 import { referralAttributions, referralClaims, referralProfiles } from "@/db/schema";
@@ -37,8 +37,9 @@ async function profilePayload(wallet: string) {
   ]);
   const profile = profiles[0];
   if (!profile) return { profile: null, pending: 0, qualified: 0, attribution: null };
+  const higherScores = await db.select({ total: count() }).from(referralProfiles).where(gt(referralProfiles.points, profile.points));
   return {
-    profile: { wallet: profile.wallet, code: profile.code, points: profile.points, createdAt: profile.createdAt.getTime() },
+    profile: { wallet: profile.wallet, code: profile.code, points: profile.points, rank: (higherScores[0]?.total ?? 0) + 1, createdAt: profile.createdAt.getTime() },
     pending: pendingRows[0]?.total ?? 0,
     qualified: qualifiedRows[0]?.total ?? 0,
     attribution: attributionRows[0] ? {
@@ -48,9 +49,47 @@ async function profilePayload(wallet: string) {
   };
 }
 
+async function leaderboardPayload() {
+  const db = await getDb();
+  const [rows, totals] = await Promise.all([
+    db.select({
+      wallet: referralProfiles.wallet,
+      code: referralProfiles.code,
+      points: referralProfiles.points,
+      qualified: count(referralClaims.txHash),
+    })
+      .from(referralProfiles)
+      .leftJoin(referralClaims, eq(referralClaims.referrerWallet, referralProfiles.wallet))
+      .groupBy(referralProfiles.wallet, referralProfiles.code, referralProfiles.points, referralProfiles.createdAt)
+      .orderBy(desc(referralProfiles.points), asc(referralProfiles.createdAt))
+      .limit(50),
+    db.select({ total: count() }).from(referralProfiles),
+  ]);
+  let rank = 0;
+  let previousPoints: number | null = null;
+  return {
+    entries: rows.map((row, index) => {
+      if (previousPoints === null || row.points !== previousPoints) rank = index + 1;
+      previousPoints = row.points;
+      return {
+      rank,
+      wallet: `${row.wallet.slice(0, 6)}…${row.wallet.slice(-4)}`,
+      code: row.code,
+      points: row.points,
+      qualified: row.qualified,
+    }; }),
+    participants: totals[0]?.total ?? 0,
+    updatedAt: Date.now(),
+  };
+}
+
 export async function GET(request: Request) {
   try {
-    const wallet = normalizeWallet(new URL(request.url).searchParams.get("wallet"));
+    const params = new URL(request.url).searchParams;
+    if (params.get("leaderboard") === "1") {
+      return NextResponse.json(await leaderboardPayload(), { headers: { "cache-control": "no-store" } });
+    }
+    const wallet = normalizeWallet(params.get("wallet"));
     return NextResponse.json(await profilePayload(wallet), { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return errorResponse(error);

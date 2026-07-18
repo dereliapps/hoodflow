@@ -269,17 +269,22 @@ export function buildV2ExactInputCalldata(args: {
   recipient: string;
   amountIn: bigint;
   minAmountOut: bigint;
+  path?: readonly string[];
   permit: PermitSingle;
   signature: string;
 }) {
   const coder = AbiCoder.defaultAbiCoder();
+  const path = (args.path ?? [args.tokenIn, args.tokenOut]).map(getAddress);
+  if (path.length < 2 || path[0] !== getAddress(args.tokenIn) || path[path.length - 1] !== getAddress(args.tokenOut)) {
+    throw new Error("The V2 route path does not match the selected input and output tokens.");
+  }
   const swapInput = coder.encode(
     ["address", "uint256", "uint256", "address[]", "bool"],
     [
       getAddress(args.recipient),
       args.amountIn,
       args.minAmountOut,
-      [getAddress(args.tokenIn), getAddress(args.tokenOut)],
+      path,
       true,
     ],
   );

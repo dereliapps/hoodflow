@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0 — 2026-07-18
+
+- Added selectable USDG, VIRTUAL, and WETH payment assets to the community-token terminal.
+- Added atomic two-pool V2 routing through a market's native quote token, including USDG → VIRTUAL → graduated Virtuals tokens.
+- Added wallet balance visibility and explicit multi-pool execution labels.
+- Added durable referral-link creation, live verified standings, wallet rank, and referral counts.
+- Reworked swap and rewards copy to be shorter and more direct.
+
 ## 0.6.0 — 2026-07-18
 
 - Added the official Virtuals Robinhood Chain discovery feed.
