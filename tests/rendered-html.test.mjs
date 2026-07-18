@@ -45,7 +45,7 @@ test("server-renders the HoodFlow product shell", async () => {
 });
 
 test("ships a bounded, interactive Robinhood mainnet experience", async () => {
-  const [page, layout, css, packageJson, priceRoute, priceLib, historyRoute] = await Promise.all([
+  const [page, layout, css, packageJson, priceRoute, priceLib, historyRoute, docs] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
@@ -53,6 +53,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
     readFile(new URL("../app/api/prices/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/robinhood-prices.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/history/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/docs/page.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /"use client"/);
@@ -105,7 +106,12 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /Compare live routes/);
   assert.match(page, /PROTECTED QUOTES/);
   assert.match(page, /Price feed temporarily unavailable\. Trading is disabled until verification completes\./);
-  assert.match(page, /Build 26/);
+  assert.match(page, /Release 0\.4\.1/);
+  assert.match(page, /href="\/docs"/);
+  assert.match(docs, /Buy a Stock Token with USDG/);
+  assert.match(docs, /Sell a Stock Token back to USDG/);
+  assert.match(docs, /Reference price versus execution quote/);
+  assert.match(docs, /Common messages/);
   assert.match(layout, /HoodFlow \| Stock Token Trading/);
   assert.match(layout, /Instrument_Sans/);
   assert.match(layout, /IBM_Plex_Mono/);
