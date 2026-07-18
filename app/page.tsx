@@ -54,6 +54,9 @@ type MarketplaceSort = "featured" | "cadence" | "risk";
 type InfoPanel = "docs" | "terms";
 type BootPhase = "loading" | "leaving" | "done";
 type PriceState = "loading" | "live" | "degraded" | "error";
+type WalletConnectionKind = "browser" | "walletconnect";
+type HoodFlowWalletProvider = Eip1193Provider & { disconnect?: () => Promise<void> };
+type WalletConnectConfig = { enabled: boolean; projectId: string | null };
 
 type Strategy = {
   id: number;
@@ -254,6 +257,11 @@ export default function Home() {
   const [walletAddress, setWalletAddress] = useState("");
   const [walletBalance, setWalletBalance] = useState("");
   const [walletUsdgBalance, setWalletUsdgBalance] = useState("");
+  const [walletProvider, setWalletProvider] = useState<HoodFlowWalletProvider | null>(null);
+  const [walletKind, setWalletKind] = useState<WalletConnectionKind | null>(null);
+  const [walletModalOpen, setWalletModalOpen] = useState(false);
+  const [walletConnecting, setWalletConnecting] = useState(false);
+  const [walletConnectReady, setWalletConnectReady] = useState<boolean | null>(null);
   const [networkBlock, setNetworkBlock] = useState("Checking");
   const [contractStatus, setContractStatus] = useState(contractConfigured ? "Checking bytecode" : "Engine deploy pending");
   const [contractReady, setContractReady] = useState(false);
@@ -334,6 +342,17 @@ export default function Home() {
     } finally {
       if (!signal?.aborted) setPriceRefreshing(false);
     }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/walletconnect", { cache: "no-store", signal: controller.signal })
+      .then((response) => response.ok ? response.json() as Promise<WalletConnectConfig> : null)
+      .then((config) => setWalletConnectReady(Boolean(config?.enabled)))
+      .catch((error) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) setWalletConnectReady(false);
+      });
+    return () => controller.abort();
   }, []);
   const estimatedUnits = useMemo(() => {
     const point = priceBook[draftAsset];
@@ -535,47 +554,100 @@ export default function Home() {
     setWalletUsdgBalance(Number(formatUnits(usdGBalance, USDG_DECIMALS)).toFixed(2));
   }
 
-  async function connectWallet() {
-    if (connected) {
+  async function switchToRobinhoodChain(provider: HoodFlowWalletProvider) {
+    try {
+      await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: ROBINHOOD_MAINNET.chainId }] });
+    } catch (switchError: unknown) {
+      if ((switchError as { code?: number })?.code !== 4902) throw switchError;
+      await provider.request({ method: "wallet_addEthereumChain", params: [{
+        chainId: ROBINHOOD_MAINNET.chainId,
+        chainName: ROBINHOOD_MAINNET.chainName,
+        rpcUrls: [...ROBINHOOD_MAINNET.rpcUrls],
+        nativeCurrency: ROBINHOOD_MAINNET.nativeCurrency,
+        blockExplorerUrls: [...ROBINHOOD_MAINNET.blockExplorerUrls],
+      }] });
+    }
+  }
+
+  async function activateWallet(provider: HoodFlowWalletProvider, kind: WalletConnectionKind) {
+    await switchToRobinhoodChain(provider);
+    const accounts = await provider.request({ method: "eth_requestAccounts" }) as string[];
+    const browserProvider = new BrowserProvider(provider, "any");
+    const network = await browserProvider.getNetwork();
+    if (network.chainId !== BigInt(ROBINHOOD_MAINNET.chainIdNumber)) {
+      throw new Error("Wallet is not connected to Robinhood Chain mainnet.");
+    }
+    const address = accounts[0];
+    if (!address) throw new Error("The wallet did not return an account.");
+    setWalletProvider(provider);
+    setWalletKind(kind);
+    setWalletAddress(address);
+    await refreshWalletBalances(address, browserProvider);
+    setWalletModalOpen(false);
+    notify(kind === "walletconnect" ? "WalletConnect session ready on Robinhood Chain" : "Browser wallet connected to Robinhood Chain");
+  }
+
+  async function connectBrowserWallet() {
+    if (!window.ethereum) {
+      notify("No browser wallet found. Use WalletConnect or install Robinhood Wallet / MetaMask.");
+      return;
+    }
+    setWalletConnecting(true);
+    try {
+      await activateWallet(window.ethereum, "browser");
+    } catch (error) {
+      notify(errorMessage(error));
+    } finally {
+      setWalletConnecting(false);
+    }
+  }
+
+  async function connectWalletConnect() {
+    setWalletConnecting(true);
+    try {
+      const configResponse = await fetch("/api/walletconnect", { cache: "no-store" });
+      const config = configResponse.ok ? await configResponse.json() as WalletConnectConfig : null;
+      if (!config?.enabled || !config.projectId) throw new Error("WalletConnect activation is pending its Reown project ID.");
+      const { EthereumProvider } = await import("@walletconnect/ethereum-provider");
+      const provider = await EthereumProvider.init({
+        projectId: config.projectId,
+        showQrModal: true,
+        optionalChains: [ROBINHOOD_MAINNET.chainIdNumber],
+        rpcMap: { [ROBINHOOD_MAINNET.chainIdNumber]: ROBINHOOD_MAINNET.rpcUrls[0] },
+        metadata: {
+          name: "HoodFlow",
+          description: "Protected stock-token routes on Robinhood Chain",
+          url: window.location.origin,
+          icons: [`${window.location.origin}/favicon.svg`],
+        },
+      });
+      await provider.connect();
+      await activateWallet(provider as unknown as HoodFlowWalletProvider, "walletconnect");
+    } catch (error) {
+      notify(errorMessage(error));
+    } finally {
+      setWalletConnecting(false);
+    }
+  }
+
+  async function disconnectWallet() {
+    try {
+      if (walletKind === "walletconnect") await walletProvider?.disconnect?.();
+    } catch {
+      // The local session is still cleared if the remote wallet already disconnected.
+    } finally {
+      setWalletProvider(null);
+      setWalletKind(null);
       setWalletAddress("");
       setWalletBalance("");
       setWalletUsdgBalance("");
       notify("Wallet disconnected from HoodFlow");
-      return;
     }
-    if (!window.ethereum) {
-      notify("No browser wallet found. Install Robinhood Wallet or MetaMask.");
-      return;
-    }
-    try {
-      try {
-        await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: ROBINHOOD_MAINNET.chainId }] });
-      } catch (switchError: unknown) {
-        if ((switchError as { code?: number })?.code === 4902) {
-          await window.ethereum.request({ method: "wallet_addEthereumChain", params: [{
-            chainId: ROBINHOOD_MAINNET.chainId,
-            chainName: ROBINHOOD_MAINNET.chainName,
-            rpcUrls: ROBINHOOD_MAINNET.rpcUrls,
-            nativeCurrency: ROBINHOOD_MAINNET.nativeCurrency,
-            blockExplorerUrls: ROBINHOOD_MAINNET.blockExplorerUrls,
-          }] });
-        } else {
-          throw switchError;
-        }
-      }
-      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" }) as string[];
-      const provider = new BrowserProvider(window.ethereum, "any");
-      const network = await provider.getNetwork();
-      if (network.chainId !== BigInt(ROBINHOOD_MAINNET.chainIdNumber)) {
-        throw new Error("Wallet is not connected to Robinhood Chain mainnet.");
-      }
-      const address = accounts[0];
-      setWalletAddress(address);
-      await refreshWalletBalances(address, provider);
-      notify("Wallet connected to Robinhood Chain mainnet");
-    } catch (error) {
-      notify(errorMessage(error));
-    }
+  }
+
+  function handleWalletButton() {
+    if (connected) void disconnectWallet();
+    else setWalletModalOpen(true);
   }
 
   function openAsset(ticker: string) {
@@ -616,12 +688,12 @@ export default function Home() {
     const strategy = strategies.find((item) => item.id === id);
     if (!strategy || strategy.status === "Confirmed") return;
     if (strategy.chainStrategyId) {
-      if (!window.ethereum || !connected || !contractConfigured) {
+      if (!walletProvider || !connected || !contractConfigured) {
         notify("Connect the strategy owner wallet to change this onchain strategy.");
         return;
       }
       try {
-        const provider = new BrowserProvider(window.ethereum, "any");
+        const provider = new BrowserProvider(walletProvider, "any");
         const network = await provider.getNetwork();
         if (network.chainId !== BigInt(ROBINHOOD_MAINNET.chainIdNumber)) throw new Error("Switch your wallet to Robinhood Chain mainnet.");
         const engine = new Contract(CONTRACT_ADDRESS, HOODFLOW_ENGINE_ABI, await provider.getSigner());
@@ -823,13 +895,13 @@ export default function Home() {
   async function createStrategy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!draftName.trim()) return;
-    if (!window.ethereum || !connected) {
+    if (!walletProvider || !connected) {
       notify("Connect a Robinhood Chain mainnet wallet first.");
       return;
     }
     setOnchainBusy(true);
     try {
-      const provider = new BrowserProvider(window.ethereum, "any");
+      const provider = new BrowserProvider(walletProvider, "any");
       const network = await provider.getNetwork();
       if (network.chainId !== BigInt(ROBINHOOD_MAINNET.chainIdNumber)) throw new Error("Switch your wallet to Robinhood Chain mainnet.");
       if (kind === "Buy") await executeDirectBuy(provider, walletAddress);
@@ -898,14 +970,14 @@ export default function Home() {
       </div>}
       <header className="topbar">
         <button className="brand" onClick={() => navigate("overview")} aria-label="HoodFlow home">
-          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V13</b>
+          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">V14</b>
         </button>
         <nav className="main-nav" aria-label="Main navigation">
           {navigation.map((item) => <button key={item} className={view === item || (item === "assets" && view === "asset") ? "active" : ""} onClick={() => navigate(item)}>{item}</button>)}
         </nav>
         <div className="top-actions">
           <span className="network"><i /> Mainnet <b>#{networkBlock}</b></span>
-          <button className={connected ? "wallet connected" : "wallet"} onClick={() => void connectWallet()}>{connected ? compactAddress(walletAddress) : "Connect wallet"}</button>
+          <button className={connected ? "wallet connected" : "wallet"} onClick={handleWalletButton}>{connected ? `${compactAddress(walletAddress)} · ${walletKind === "walletconnect" ? "WC" : "WEB"}` : "Connect wallet"}</button>
         </div>
       </header>
 
@@ -918,7 +990,7 @@ export default function Home() {
           <div className="market-state"><span><i /> ROBINHOOD MAINNET LIVE</span><span>Block #{networkBlock}</span><span className={`price-state ${priceState}`}>{priceState === "loading" ? "SYNCING PRICES" : `${priceCounts.live} ONCHAIN PRICES LIVE`}</span><span>All verified buy routes open · DCA: {contractStatus}</span></div>
           <div className="page-heading">
             <div><p className="eyebrow">STOCK TOKENS WITHOUT CUSTODY</p><h1>Buy onchain.<br /><span>Keep custody.</span></h1><p className="lede">Explore every official Robinhood stock token, inspect verified Chainlink history, and buy through protected USDG routes from your own wallet.</p></div>
-            <div className="hero-command"><button className="primary-action" onClick={() => openComposer("Buy", "INTC")}><span>+</span> Buy INTC with USDG</button><div className="hero-proof"><span>V13 MAINNET ROUTING</span><strong>Every verified route is open</strong><small>Live quote · exact Permit2 order · slippage protected</small></div></div>
+            <div className="hero-command"><button className="primary-action" onClick={() => openComposer("Buy", "INTC")}><span>+</span> Buy INTC with USDG</button><div className="hero-proof"><span>V14 WALLETCONNECT</span><strong>Desktop, QR and mobile wallets</strong><small>Live quote · exact Permit2 order · slippage protected</small></div></div>
           </div>
 
           <div className="feature-dock">
@@ -939,7 +1011,7 @@ export default function Home() {
               <div className="card-label"><span>{connected ? "CONNECTED WALLET" : "YOUR MAINNET WALLET"}</span><span className="live-label"><i /> MAINNET</span></div>
               <div className="balance-line"><strong>{connected ? `${walletUsdgBalance} USDG` : "— USDG"}</strong><span>{connected ? `${walletBalance} ETH gas · ${compactAddress(walletAddress)}` : "Connect to view real balances and sign orders"}</span></div>
               <div className="wallet-facts"><div><span>CHAIN</span><strong>Robinhood / 4663</strong></div><div><span>BUY ROUTER</span><strong>Universal Router</strong></div><div><span>ORDER PERMISSION</span><strong>Exact amount / 10 min</strong></div><div><span>CUSTODY</span><strong>Your wallet</strong></div></div>
-              <button className="wallet-card-action" onClick={() => void connectWallet()}>{connected ? "Disconnect wallet" : "Connect mainnet wallet"}</button>
+              <button className="wallet-card-action" onClick={handleWalletButton}>{connected ? "Disconnect wallet" : "Connect mainnet wallet"}</button>
             </article>
             <article className="stats-stack">
               <div className="stat-card"><span>YOUR MAINNET ORDERS</span><strong>{confirmedCount + preparedCount}</strong><small>{confirmedCount} confirmed buys · {preparedCount} recurring</small><div className="mini-bars"><i /><i /><i /><i /><i /><i /></div></div>
@@ -1028,7 +1100,7 @@ export default function Home() {
               <p>{selectedAsset.fullFill ? `HoodFlow uses ${isV3RoutedAsset(selectedAsset.ticker) ? "the fork-verified Uniswap V3 pool" : "the best reviewed Uniswap V4 pool"}, signs an exact short-lived Permit2 order, and sends the token directly to your wallet.` : selectedAsset.ticker === "MSFT" ? "A quote exists, but the full router fork test detected a partial fill. HoodFlow blocks the order until complete-input execution is verified." : "No reviewed USDG pool can currently fill the complete input. The asset remains indexed and monitored without exposing your wallet to a forced route."}</p>
               <div className="trade-route-facts"><div><span>NETWORK</span><strong>Robinhood Chain / 4663</strong></div><div><span>PAY</span><strong>USDG</strong></div><div><span>RECEIVE</span><strong>{selectedAsset.ticker} token</strong></div><div><span>ROUTE</span><strong>{selectedAsset.fullFill ? `${isV3RoutedAsset(selectedAsset.ticker) ? "V3" : "V4"} full-fill verified` : "Blocked"}</strong></div></div>
               <button className="primary-action asset-trade-action" onClick={() => openComposer("Buy", selectedAsset.ticker)} disabled={!selectedAsset.fullFill || priceBook[selectedAsset.ticker]?.status !== "live"}>{selectedAsset.fullFill ? priceBook[selectedAsset.ticker]?.status === "live" ? `Buy ${selectedAsset.ticker} with USDG` : "Waiting for live oracle" : "No safe mainnet route"}</button>
-              {!connected && selectedAsset.fullFill && <button className="connect-inline" onClick={() => void connectWallet()}>Connect wallet first</button>}
+              {!connected && selectedAsset.fullFill && <button className="connect-inline" onClick={handleWalletButton}>Connect wallet first</button>}
             </aside>
           </div>
           <div className="asset-contract-card">
@@ -1131,6 +1203,8 @@ export default function Home() {
       )}
 
       {selectedStrategy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedStrategy(null); }}><section className="detail-drawer" role="dialog" aria-modal="true" aria-label={`${selectedStrategy.name} details`}><div className="composer-head"><div><p className="eyebrow">MAINNET ORDER</p><h2>{selectedStrategy.name}</h2></div><button onClick={() => setSelectedStrategy(null)}>x</button></div><div className="order-status-hero"><Mark ticker={selectedStrategy.asset} /><div><strong>{selectedStrategy.status}</strong><span>{selectedStrategy.detail}</span></div></div><div className="health-checks"><div><span>Network</span><strong>Robinhood Chain <b>4663</b></strong></div><div><span>Order type</span><strong>{selectedStrategy.kind} <b>ONCHAIN</b></strong></div><div><span>Asset</span><strong>{selectedStrategy.asset} <b>ONLY</b></strong></div><div><span>Created</span><strong>{new Date(selectedStrategy.createdAt).toLocaleString()}</strong></div></div><div className="permission-summary"><p><span>Rule</span><strong>{selectedStrategy.rule}</strong></p><p><span>Spending cap</span><strong>{selectedStrategy.budget}</strong></p><p><span>Permission expires</span><strong>{selectedStrategy.expires}</strong></p></div>{selectedStrategy.txHash ? <a className="drawer-action receipt-link" href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${selectedStrategy.txHash}`} target="_blank" rel="noreferrer">View mainnet receipt ↗</a> : null}</section></div>}
+
+      {walletModalOpen && !connected && <div className="confirm-backdrop wallet-connect-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !walletConnecting) setWalletModalOpen(false); }}><section className="wallet-connect-card" role="dialog" aria-modal="true" aria-labelledby="wallet-connect-title"><div className="composer-head"><div><p className="eyebrow">NON-CUSTODIAL CONNECTION</p><h2 id="wallet-connect-title">Choose your wallet.</h2></div><button aria-label="Close wallet options" onClick={() => setWalletModalOpen(false)} disabled={walletConnecting}>x</button></div><p className="wallet-connect-intro">HoodFlow never receives your private key. Your wallet signs every mainnet permission and transaction.</p><div className="wallet-connect-options"><button type="button" className="wallet-option wallet-option-wc" onClick={() => void connectWalletConnect()} disabled={walletConnecting || walletConnectReady !== true}><span className="wallet-option-icon">W</span><span><strong>WalletConnect</strong><small>{walletConnectReady === null ? "Checking availability…" : walletConnectReady ? "QR code · mobile deep link · 500+ wallets" : "Activation pending"}</small></span><b>{walletConnectReady ? "RECOMMENDED" : "NEEDS ID"}</b></button><button type="button" className="wallet-option" onClick={() => void connectBrowserWallet()} disabled={walletConnecting}><span className="wallet-option-icon browser">↗</span><span><strong>Browser wallet</strong><small>Robinhood Wallet · MetaMask · injected wallets</small></span><b>DESKTOP</b></button></div><div className="wallet-connect-foot"><span><i /> Robinhood Chain</span><strong>CHAIN ID 4663</strong></div></section></div>}
 
       {infoPanel && <div className="confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setInfoPanel(null); }}><section className="info-card" role="dialog" aria-modal="true" aria-labelledby="info-title"><div className="composer-head"><div><p className="eyebrow">{infoPanel === "docs" ? "QUICK GUIDE" : "MAINNET TERMS"}</p><h2 id="info-title">{infoPanel === "docs" ? "Know every status." : "Clear before you sign."}</h2></div><button aria-label="Close information" onClick={() => setInfoPanel(null)}>x</button></div>{infoPanel === "docs" ? <div className="info-list"><article><span>01</span><p><strong>Buy now</strong><small>Quotes reviewed V4 pools and swaps USDG through the official Universal Router.</small></p></article><article><span>02</span><p><strong>Exact order permission</strong><small>Permit2 signs the selected USDG amount for ten minutes; the router consumes it in this order.</small></p></article><article><span>03</span><p><strong>Full-fill ready</strong><small>The complete input passed the official-router fork test. A fresh quote is still required.</small></p></article><article><span>04</span><p><strong>Watch-only</strong><small>The asset is visible, but HoodFlow blocks its order button.</small></p></article><article><span>05</span><p><strong>Recurring DCA</strong><small>Only activates when the HoodFlow engine address, bytecode and unpaused state are verified.</small></p></article></div> : <div className="info-copy"><p>Direct buys are user-signed Robinhood Chain mainnet transactions. Your wallet remains the sender and receiver.</p><p>Before signing, verify the USDG amount, Universal Router address and minimum output shown by your wallet. Network gas is paid in ETH.</p><p>Prices can move between quote and confirmation. The transaction reverts when output falls below your selected slippage limit.</p><p>Watch-only assets and stale or paused oracle states are blocked. Recurring automation remains unavailable until its engine is deployed and verified.</p></div>}<button className="drawer-action" onClick={() => setInfoPanel(null)}>Got it</button></section></div>}
 

@@ -30,10 +30,10 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(html, /Loading official assets/);
   assert.match(html, /Permission Center/);
   assert.match(html, /Your orders/);
-  assert.match(html, /Every verified route is open/);
+  assert.match(html, /Desktop, QR and mobile wallets/);
   assert.match(html, /All verified buy routes open/);
   assert.match(html, /ROBINHOOD CHAIN [/] MAINNET/);
-  assert.match(html, /V13 MAINNET ROUTING/);
+  assert.match(html, /V14 WALLETCONNECT/);
   assert.match(html, /Three steps\. You stay in control\./);
   assert.match(html, /Buy Now is live on Robinhood Chain mainnet/);
   assert.match(html, /Robinhood Chain/);
@@ -92,7 +92,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /TOKEN CONTRACT/);
   assert.doesNotMatch(page, /price:\s*211\.18/);
   assert.match(page, /DIRECT BUY LIVE/);
-  assert.match(page, /version-badge">V13/);
+  assert.match(page, /version-badge">V14/);
+  assert.match(page, /WalletConnect/);
+  assert.match(page, /@walletconnect\/ethereum-provider/);
   assert.match(page, /PERMIT2_TYPES/);
   assert.match(page, /buildDirectBuyCalldata/);
   assert.match(page, /Buy INTC with USDG/);
