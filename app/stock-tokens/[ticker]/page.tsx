@@ -32,7 +32,7 @@ export default async function StockTokenPage({ params }: { params: Promise<{ tic
   };
   return <main className="seo-shell">
     <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structured) }} />
-    <header className="seo-nav"><Link href="/" className="seo-logo">hoodflow<span>MAINNET BETA</span></Link><nav><Link href="/stock-tokens">All markets</Link><Link href="/security">Security</Link><Link href={`/?asset=${asset.ticker}`} className="seo-cta">Open market</Link></nav></header>
+    <header className="seo-nav"><Link href="/" className="seo-logo">hoodflow<span>MAINNET BETA</span></Link><nav><Link href="/stock-tokens">All markets</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><Link href={`/?asset=${asset.ticker}`} className="seo-cta">Open market</Link></nav></header>
     <section className="seo-token-hero">
       <div><img src={`/logos/${asset.ticker}.png`} alt={`${asset.name} logo`} width="84" height="84" /><p>{asset.type.toUpperCase()} · ROBINHOOD CHAIN</p><h1>{asset.name}<br /><em>{asset.ticker}</em></h1></div>
       <aside><span>EXECUTION STATUS</span><strong className={asset.fullFill ? "ready" : "watch"}>{asset.fullFill ? "FULL-FILL READY" : "WATCH-ONLY"}</strong><p>{asset.fullFill ? "A complete-input fork swap passed. HoodFlow still requests a fresh route quote before every order." : "The market remains visible, but HoodFlow blocks trading until a route passes full-fill verification."}</p><Link href={`/?asset=${asset.ticker}`}>{asset.fullFill ? `Compare ${asset.ticker} routes →` : "View market details →"}</Link></aside>

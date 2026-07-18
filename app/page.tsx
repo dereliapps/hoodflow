@@ -1183,6 +1183,7 @@ export default function Home() {
         </button>
         <nav className="main-nav" aria-label="Main navigation">
           {navigation.map((item) => <button key={item.view} className={view === item.view || (item.view === "assets" && view === "asset") ? "active" : ""} onClick={() => navigate(item.view)}>{item.label}</button>)}
+          <a href="/docs">Docs</a>
         </nav>
         <div className="top-actions">
           <span className="network"><i /> Mainnet <b>#{networkBlock}</b></span>
@@ -1192,6 +1193,7 @@ export default function Home() {
 
       <div className="mobile-nav">
         {navigation.map((item) => <button key={item.view} className={view === item.view || (item.view === "assets" && view === "asset") ? "active" : ""} onClick={() => navigate(item.view)}>{item.label}</button>)}
+        <a href="/docs">Docs</a>
       </div>
 
       {view === "overview" && (
@@ -1370,7 +1372,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Independent interface · Build 26</span><div><a href="/stock-tokens">Market directory</a><a href="/how-it-works">How it works</a><a href="/security">Security</a><button onClick={() => setInfoPanel("terms")}>Product risks</button></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Independent interface · Release 0.4.1</span><div><a href="/stock-tokens">Market directory</a><a href="/docs">Documentation</a><a href="/how-it-works">How it works</a><a href="/security">Security</a><button onClick={() => setInfoPanel("terms")}>Product risks</button></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setComposerOpen(false); }}>
