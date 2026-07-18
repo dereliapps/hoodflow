@@ -33,7 +33,7 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(html, /Strategy workspace/);
   assert.match(html, /25 official assets indexed/);
   assert.match(html, /13 full-fill routes/);
-  assert.match(html, /2\/2 canary runs/);
+  assert.match(html, /2\/2 fork canary/);
   assert.match(html, /Three steps\. You stay in control\./);
   assert.match(html, /NO MAINNET ORDERS/);
   assert.match(html, /Robinhood Chain Testnet/);
@@ -74,8 +74,10 @@ test("ships a bounded, interactive testnet experience", async () => {
   assert.match(page, /Copy as draft/);
   assert.match(page, /Know every status/);
   assert.match(page, /Independent audit/);
+  assert.match(page, /Production RPC \+ oracle map/);
+  assert.match(page, /7 of 11 complete/);
   assert.match(page, /MAINNET LOCKED/);
-  assert.match(page, /version-badge">V8/);
+  assert.match(page, /version-badge">V9/);
   assert.match(layout, /HoodFlow — Safe stock automation/);
   assert.match(layout, /Instrument_Sans/);
   assert.match(layout, /IBM_Plex_Mono/);
