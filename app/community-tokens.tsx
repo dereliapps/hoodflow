@@ -61,6 +61,7 @@ type CommunityMarket = {
   volume24h: number;
   liquidityUsd: number;
   marketCapUsd: number | null;
+  fdvUsd: number | null;
   transactions24h: number;
   pairAddress: string;
   pairUrl: string;
@@ -81,6 +82,8 @@ type CommunityMarket = {
   fdvInVirtual: number | null;
 };
 type MarketSort = "trending" | "volume" | "gainers" | "losers" | "liquidity" | "new";
+type ChartRange = "1D" | "7D" | "30D";
+type ChartPoint = { time: number; open: number; high: number; low: number; close: number; volume: number };
 type Props = {
   walletAddress: string;
   walletProvider: Eip1193Provider | null;
@@ -95,7 +98,7 @@ const MAX_UINT128 = (1n << 128n) - 1n;
 const USDG_SETTLEMENT: Settlement = { address: USDG_ADDRESS, symbol: "USDG", decimals: USDG_DECIMALS };
 const WETH_SETTLEMENT: Settlement = { address: WETH_ADDRESS, symbol: "WETH", decimals: WETH_DECIMALS };
 const VIRTUAL_SETTLEMENT: Settlement = { address: ROBINHOOD_VIRTUAL_ADDRESS, symbol: "VIRTUAL", decimals: 18 };
-const MARKET_CATEGORIES = ["All", "Virtuals Agents", "Memes", "RWA", "DeFi", "AI & Agents", "Infrastructure", "Stablecoins", "Community"] as const;
+const MARKET_CATEGORIES = ["Crypto"] as const;
 
 function message(error: unknown) {
   return friendlyExecutionError(error);
@@ -221,10 +224,14 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
   const [marketsLoading, setMarketsLoading] = useState(true);
   const [marketsError, setMarketsError] = useState("");
   const [marketsUpdatedAt, setMarketsUpdatedAt] = useState<number | null>(null);
-  const [marketCategory, setMarketCategory] = useState<(typeof MARKET_CATEGORIES)[number]>("All");
+  const [marketCategory, setMarketCategory] = useState<(typeof MARKET_CATEGORIES)[number]>("Crypto");
   const [marketSort, setMarketSort] = useState<MarketSort>("volume");
   const [marketSearch, setMarketSearch] = useState("");
   const [marketSearchResults, setMarketSearchResults] = useState<CommunityMarket[]>([]);
+  const [chartRange, setChartRange] = useState<ChartRange>("7D");
+  const [chartPoints, setChartPoints] = useState<ChartPoint[]>([]);
+  const [chartLoading, setChartLoading] = useState(false);
+  const [chartError, setChartError] = useState("");
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -276,16 +283,12 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
     return () => { controller.abort(); window.clearTimeout(start); window.clearInterval(refresh); };
   }, []);
 
-  const categoryCounts = useMemo(() => Object.fromEntries(MARKET_CATEGORIES.map((category) => [
-    category,
-    category === "All" ? markets.length : markets.filter((market) => market.category === category).length,
-  ])) as Record<(typeof MARKET_CATEGORIES)[number], number>, [markets]);
+  const categoryCounts = useMemo(() => ({ Crypto: markets.length }), [markets]);
 
   const visibleMarkets = useMemo(() => {
     const query = marketSearch.trim().toLowerCase();
     const candidates = [...markets, ...marketSearchResults].filter((market, index, all) => all.findIndex((item) => item.address === market.address) === index);
-    const filtered = candidates.filter((market) => (marketCategory === "All" || market.category === marketCategory)
-      && (!query || market.name.toLowerCase().includes(query) || market.symbol.toLowerCase().includes(query) || market.address.includes(query)));
+    const filtered = candidates.filter((market) => !query || market.name.toLowerCase().includes(query) || market.symbol.toLowerCase().includes(query) || market.address.includes(query));
     return [...filtered].sort((left, right) => {
       if (marketSort === "gainers") return (right.priceChange24h ?? -Infinity) - (left.priceChange24h ?? -Infinity);
       if (marketSort === "losers") return (left.priceChange24h ?? Infinity) - (right.priceChange24h ?? Infinity);
@@ -294,13 +297,55 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
       if (marketSort === "trending") return (left.trendingRank ?? 10_000) - (right.trendingRank ?? 10_000) || right.volume24h - left.volume24h;
       return right.volume24h - left.volume24h;
     });
-  }, [marketCategory, marketSearch, marketSearchResults, marketSort, markets]);
+  }, [marketSearch, marketSearchResults, marketSort, markets]);
 
   const marketStats = useMemo(() => ({
     volume: markets.reduce((total, market) => total + market.volume24h, 0),
     liquidity: markets.reduce((total, market) => total + market.liquidityUsd, 0),
     newPools: markets.filter((market) => market.discovery.includes("New pool")).length,
   }), [markets]);
+
+  const pricedMarkets = useMemo(() => markets.filter((market) => market.priceUsd !== null).length, [markets]);
+
+  useEffect(() => {
+    if (!activeMarket?.pairAddress || activeMarket.executionVenue !== "dex") {
+      const clear = window.setTimeout(() => { setChartPoints([]); setChartError(""); setChartLoading(false); }, 0);
+      return () => window.clearTimeout(clear);
+    }
+    const controller = new AbortController();
+    const load = async () => {
+      setChartLoading(true);
+      setChartError("");
+      try {
+        const params = new URLSearchParams({ pool: activeMarket.pairAddress, token: activeMarket.address, range: chartRange });
+        const response = await fetch(`/api/community-markets/chart?${params}`, { cache: "no-store", signal: controller.signal });
+        const payload = await response.json() as { points?: ChartPoint[]; error?: string };
+        if (!response.ok || !Array.isArray(payload.points) || payload.points.length < 2) throw new Error(payload.error || "No chart history is available yet.");
+        setChartPoints(payload.points);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setChartPoints([]);
+          setChartError(error instanceof Error ? error.message : "Chart temporarily unavailable.");
+        }
+      } finally { if (!controller.signal.aborted) setChartLoading(false); }
+    };
+    void load();
+    return () => controller.abort();
+  }, [activeMarket, chartRange]);
+
+  const chartGeometry = useMemo(() => {
+    if (chartPoints.length < 2) return null;
+    const closes = chartPoints.map((point) => point.close);
+    const min = Math.min(...closes);
+    const max = Math.max(...closes);
+    const spread = Math.max(max - min, max * 0.001, 1e-12);
+    const path = chartPoints.map((point, index) => {
+      const x = index / (chartPoints.length - 1) * 1000;
+      const y = 250 - ((point.close - min) / spread) * 220;
+      return `${index ? "L" : "M"}${x.toFixed(2)},${y.toFixed(2)}`;
+    }).join(" ");
+    return { path, min, max, positive: closes.at(-1)! >= closes[0] };
+  }, [chartPoints]);
 
   const outputLabel = useMemo(() => {
     if (!token || !quote) return "—";
@@ -369,10 +414,11 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
       const decimals = Number(decimalsValue);
       if (!name || !symbol || !Number.isInteger(decimals) || decimals < 0 || decimals > 36) throw new Error("This contract does not expose standard ERC-20 metadata.");
       const found = { address, name: String(name).slice(0, 80), symbol: String(symbol).slice(0, 20), decimals };
+      const defaultAmount = nextSettlement.symbol === "WETH" ? "0.01" : nextSettlement.symbol === "USDG" ? "20" : "10";
       setActiveMarket(market);
       setSettlement(nextSettlement);
       setMarketSettlement(nextSettlement);
-      setAmount(nextSettlement.symbol === "WETH" ? "0.01" : nextSettlement.symbol === "USDG" ? "20" : "10");
+      setAmount(defaultAmount);
       setToken(found);
       track("community_token_imported", { ticker: found.symbol, address: found.address });
       setStep(market?.executionVenue === "virtuals-bonding"
@@ -384,11 +430,10 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
         routeLabel = "Virtuals BondingV5";
         setStep("This token is still on the Virtuals bonding curve. HoodFlow will not pretend its empty DEX pair is executable; continue on the official Virtuals market.");
       } else try {
-        const probeAmount = nextSettlement.symbol === "WETH" ? "0.001" : "1";
-        const discovered = await bestRoute(provider, nextSettlement.address, address, parseUnits(probeAmount, nextSettlement.decimals));
+        const discovered = await bestRoute(provider, nextSettlement.address, address, parseUnits(defaultAmount, nextSettlement.decimals));
         setQuote(discovered);
         routeLabel = routeName(discovered);
-        setStep(`${nextSettlement.symbol} route ready. Enter an amount for a fresh executable quote.`);
+        setStep(`${nextSettlement.symbol} live quote ready. It will be verified again before signing.`);
       } catch (error) {
         if (!(error instanceof RouteUnavailableError)) setRouteError(message(error));
         setRouteUnavailable(true);
@@ -516,26 +561,26 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
 
   return <section className="page inner-page community-page">
     <div className="community-hero">
-      <div><p className="eyebrow">ROBINHOOD CHAIN TOKEN TERMINAL</p><h1>Robinhood Chain markets,<br /><span>in one place.</span></h1><p>Browse Virtuals launches, meme tokens, RWAs, DeFi and live DEX pools. HoodFlow checks whether a token is still bonding or already trading on a DEX before it offers a swap.</p></div>
+      <div><p className="eyebrow">CRYPTO · ROBINHOOD CHAIN</p><h1>Every live token.<br /><span>One execution screen.</span></h1><p>Discover active pools, compare real liquidity and trade from your wallet. Meme coins, Virtuals launches and crypto markets appear in one clean live feed.</p></div>
       <div className="community-hero-badge"><strong>24/7</strong><span>WHEN ONCHAIN<br />LIQUIDITY EXISTS</span></div>
     </div>
     <section className="market-pulse" aria-label="Robinhood Chain token market summary">
-      <div><span>TRACKED TOKENS</span><strong>{marketsLoading ? "—" : markets.length}</strong><small>Across live discovery feeds</small></div>
+      <div><span>LIVE MARKETS</span><strong>{marketsLoading ? "—" : markets.length}</strong><small>Deduplicated tokens</small></div>
       <div><span>24H POOL VOLUME</span><strong>{marketsLoading ? "—" : compactMoney(marketStats.volume)}</strong><small>Deduplicated token leaders</small></div>
       <div><span>TRACKED LIQUIDITY</span><strong>{marketsLoading ? "—" : compactMoney(marketStats.liquidity)}</strong><small>Best discovered pool per token</small></div>
-      <div><span>NEW POOLS</span><strong>{marketsLoading ? "—" : marketStats.newPools}</strong><small>Latest Robinhood pool feed</small></div>
+      <div><span>LIVE PRICES</span><strong>{marketsLoading ? "—" : `${pricedMarkets}/${markets.length}`}</strong><small>USD-valued now</small></div>
     </section>
 
     <section className="category-deck">
-      <div className="market-section-title"><div><p className="eyebrow">MARKET CATEGORIES</p><h2>Choose your corner of the chain.</h2></div><p>Virtuals Agents come from Virtuals&apos; official Robinhood Chain feed. RWA status comes from HoodFlow&apos;s canonical registry; remaining categories are inferred from public metadata.</p></div>
+      <div className="market-section-title"><div><p className="eyebrow">CRYPTO</p><h2>All Robinhood Chain tokens.</h2></div><p>Live DEX pools and launchpad markets in one list.</p></div>
       <div className="category-grid">{MARKET_CATEGORIES.map((category, index) => <button key={category} className={marketCategory === category ? "active" : ""} onClick={() => setMarketCategory(category)}><span>{String(index + 1).padStart(2, "0")}</span><strong>{category}</strong><small>{categoryCounts[category]} tokens</small></button>)}</div>
     </section>
 
     <section className="market-board">
-      <div className="market-board-head"><div><p className="eyebrow">LIVE TOKEN TAPE</p><h2>{marketCategory === "All" ? "Robinhood Chain markets" : marketCategory}</h2><span>{marketsUpdatedAt ? `Updated ${new Date(marketsUpdatedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}` : "Connecting to market feeds"}</span></div><label><span>Q</span><input value={marketSearch} onChange={(event) => setMarketSearch(event.target.value)} placeholder="Token, ticker or CA" aria-label="Search community markets" /></label></div>
+      <div className="market-board-head"><div><p className="eyebrow">LIVE MARKETS</p><h2>Crypto</h2><span>{marketsUpdatedAt ? `Updated ${new Date(marketsUpdatedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}` : "Connecting to market feeds"}</span></div><label><span>Q</span><input value={marketSearch} onChange={(event) => setMarketSearch(event.target.value)} placeholder="Name, ticker or contract address" aria-label="Search crypto markets" /></label></div>
       <div className="market-rank-tabs">{(["trending", "volume", "gainers", "losers", "liquidity", "new"] as MarketSort[]).map((sort) => <button key={sort} className={marketSort === sort ? "active" : ""} onClick={() => setMarketSort(sort)}>{sort === "trending" ? "Trending" : sort === "volume" ? "Top volume" : sort === "gainers" ? "Top gainers" : sort === "losers" ? "Top losers" : sort === "liquidity" ? "Liquidity" : "New pools"}</button>)}</div>
       <div className="token-market-table">
-        <div className="token-market-header"><span># / TOKEN</span><span>PRICE</span><span>24H</span><span>VOLUME</span><span>LIQUIDITY</span><span>MCAP / FDV</span><span>POOL</span><span /></div>
+        <div className="token-market-header"><span>TOKEN</span><span>PRICE</span><span>24H</span><span>VOLUME</span><span>LIQUIDITY</span><span>MARKET CAP</span><span>MARKET</span><span /></div>
         {marketsLoading && <div className="market-loading"><i /><strong>Syncing Robinhood Chain pools…</strong><span>Top volume, trending, new pools and canonical RWA routes</span></div>}
         {!marketsLoading && marketsError && !markets.length && <div className="market-loading error"><strong>Market feed temporarily unavailable</strong><span>{marketsError}</span></div>}
         {!marketsLoading && visibleMarkets.map((market, index) => <article className="token-market-row" key={market.address}>
@@ -544,28 +589,34 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
           <strong className={`market-change ${(market.priceChange24h ?? 0) >= 0 ? "up" : "down"}`}>{percent(market.priceChange24h)}</strong>
           <div className="market-number"><strong>{compactMoney(market.volume24h)}</strong><small>{market.transactions24h.toLocaleString("en-US")} txns</small></div>
           <div className="market-number"><strong>{compactMoney(market.liquidityUsd)}</strong><small>pool reserve</small></div>
-          <div className="market-number"><strong>{market.fdvInVirtual !== null ? `${market.fdvInVirtual.toLocaleString("en-US", { maximumFractionDigits: 0 })} VIRTUAL` : compactMoney(market.marketCapUsd)}</strong><small>{market.holderCount !== null ? `${market.holderCount.toLocaleString("en-US")} holders` : market.category}</small></div>
+          <div className="market-number"><strong>{compactMoney(market.marketCapUsd ?? market.fdvUsd)}</strong><small>{market.marketCapUsd !== null ? "Market cap" : market.fdvUsd !== null ? "FDV" : market.fdvInVirtual !== null ? `${market.fdvInVirtual.toLocaleString("en-US", { maximumFractionDigits: 0 })} VIRTUAL FDV` : "Not reported"}</small></div>
           <div className="market-pair"><strong>{market.lifecycle === "bonding" ? "BONDING" : `${market.symbol}/${market.quoteSymbol}`}</strong><small>{market.dex} · {poolAge(market.poolCreatedAt)}</small></div>
           <div className="market-row-actions"><button onClick={() => inspectMarket(market)}>Inspect CA</button><a href={market.externalUrl || market.pairUrl} target="_blank" rel="noreferrer">{market.lifecycle === "bonding" ? "Virtuals ↗" : "Market ↗"}</a></div>
         </article>)}
-        {!marketsLoading && !marketsError && !visibleMarkets.length && <div className="market-loading"><strong>No matching token</strong><span>Choose another category or clear your search.</span></div>}
+        {!marketsLoading && !marketsError && !visibleMarkets.length && <div className="market-loading"><strong>No matching crypto market</strong><span>Try another ticker or paste the contract address.</span></div>}
       </div>
-      <div className="market-data-note"><p><strong>Live market data</strong> from Virtuals, GeckoTerminal and DEX Screener. Bonding tokens stay labeled as bonding until the official lifecycle changes; HoodFlow does not sell ranking positions.</p><span>{marketsError ? `Partial feed: ${marketsError}` : "Refreshes every 60 seconds"}</span></div>
+      <div className="market-data-note"><p><strong>Live, source-labeled data.</strong> Market cap appears only when a provider reports it; otherwise HoodFlow labels FDV or “not reported” instead of inventing a number.</p><span>{marketsError ? `Partial feed: ${marketsError}` : "Refreshes every 60 seconds"}</span></div>
     </section>
 
-    <div id="ca-import" className="ca-import-section"><div className="market-section-title"><div><p className="eyebrow">CONTRACT LOOKUP</p><h2>Check any token by address.</h2></div><p>HoodFlow identifies bonding, graduated liquidity and standard DEX markets. Swaps stay disabled until a verifiable V2, V3 or V4 route exists.</p></div>
+    <div id="ca-import" className="ca-import-section"><div className="market-section-title"><div><p className="eyebrow">TOKEN WORKSPACE</p><h2>Chart, metrics and swap.</h2></div><p>Select a market above or open any Robinhood Chain contract address.</p></div>
     <div className="token-safety-strip"><span>UNREVIEWED TOKEN MODE</span><p>A valid contract, price or rising chart is not proof of safety. Verify the CA, issuer, transfer behavior and liquidity yourself. HoodFlow never labels an imported community token as verified.</p></div>
     <form className="ca-search" onSubmit={discover}><label>CONTRACT ADDRESS (CA)<input value={contractAddress} onChange={(event) => setContractAddress(event.target.value)} placeholder="0x… on Robinhood Chain" spellCheck={false} /></label><button disabled={busy || !contractAddress.trim()}>{busy ? "Checking…" : "Discover token →"}</button></form>
     {token && <div className="community-terminal">
       <header className="terminal-token-head">
         <div className="terminal-token-mark">{activeMarket?.imageUrl ? <img src={activeMarket.imageUrl} alt="" /> : <span style={{ background: `linear-gradient(135deg,#${token.address.slice(2, 8)},#${token.address.slice(-6)})` }}>{token.symbol.slice(0, 2).toUpperCase()}</span>}</div>
         <div><p>ROBINHOOD CHAIN · ERC-20</p><h2>{token.name} <em>{token.symbol}</em></h2><a href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/token/${token.address}`} target="_blank" rel="noreferrer">{compact(token.address)} ↗</a></div>
-        <div className="terminal-market-badges"><span>{activeMarket?.category ?? "Community"}</span><strong>{activeMarket?.lifecycle === "bonding" ? "BONDING" : quote ? "ROUTE LIVE" : routeUnavailable ? "MARKET LINK" : "CHECKING"}</strong></div>
+        <div className="terminal-market-badges"><span>CRYPTO</span><strong>{activeMarket?.lifecycle === "bonding" ? "BONDING" : quote ? "LIVE QUOTE" : routeUnavailable ? "MARKET LINK" : "CHECKING"}</strong></div>
       </header>
       <div className="terminal-body">
         <section className="terminal-market-card">
           <p className="terminal-label">DISCOVERED MARKET</p>
           <div className="terminal-price"><strong>{compactMoney(activeMarket?.priceUsd ?? null, true)}</strong><span className={(activeMarket?.priceChange24h ?? 0) >= 0 ? "up" : "down"}>{percent(activeMarket?.priceChange24h ?? null)}</span></div>
+          <div className="crypto-chart-toolbar"><span>ONCHAIN PRICE HISTORY</span><div>{(["1D", "7D", "30D"] as ChartRange[]).map((range) => <button type="button" key={range} className={chartRange === range ? "active" : ""} onClick={() => setChartRange(range)}>{range}</button>)}</div></div>
+          <div className="crypto-chart-canvas">
+            {chartLoading && <div className="crypto-chart-empty"><i /><span>Loading onchain price history…</span></div>}
+            {!chartLoading && chartGeometry && <><svg viewBox="0 0 1000 280" preserveAspectRatio="none" role="img" aria-label={`${token.symbol} ${chartRange} price chart`}><defs><linearGradient id="cryptoChartFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor={chartGeometry.positive ? "#35df88" : "#ff715f"} stopOpacity="0.26" /><stop offset="1" stopColor={chartGeometry.positive ? "#35df88" : "#ff715f"} stopOpacity="0" /></linearGradient></defs><path className="crypto-chart-area" d={`${chartGeometry.path} L1000,280 L0,280 Z`} fill="url(#cryptoChartFill)" /><path className={chartGeometry.positive ? "crypto-chart-line up" : "crypto-chart-line down"} d={chartGeometry.path} /></svg><div className="crypto-chart-range"><span>{compactMoney(chartGeometry.min, true)}</span><span>{compactMoney(chartGeometry.max, true)}</span></div></>}
+            {!chartLoading && !chartGeometry && <div className="crypto-chart-empty"><strong>{activeMarket?.lifecycle === "bonding" ? "Chart begins after DEX graduation" : "Price history unavailable"}</strong><span>{chartError || "This pool does not have enough historical candles yet."}</span></div>}
+          </div>
           <div className="terminal-market-stats"><div><span>24H VOLUME</span><strong>{compactMoney(activeMarket?.volume24h ?? 0)}</strong></div><div><span>{activeMarket?.lifecycle === "bonding" ? "BONDED" : "LIQUIDITY"}</span><strong>{activeMarket?.lifecycle === "bonding" && activeMarket.bondedVirtual !== null ? `${activeMarket.bondedVirtual.toLocaleString("en-US")} VIRTUAL` : compactMoney(activeMarket?.liquidityUsd ?? 0)}</strong></div><div><span>PAIR</span><strong>{token.symbol}/{marketSettlement.symbol}</strong></div><div><span>VENUE</span><strong>{activeMarket?.dex ?? "Auto route"}</strong></div></div>
           <p className="terminal-risk">Community tokens are unreviewed. Confirm the contract and pool before signing.</p>
         </section>

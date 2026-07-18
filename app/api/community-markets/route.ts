@@ -61,6 +61,7 @@ type Market = {
   volume24h: number;
   liquidityUsd: number;
   marketCapUsd: number | null;
+  fdvUsd: number | null;
   transactions24h: number;
   pairAddress: string;
   pairUrl: string;
@@ -95,8 +96,14 @@ function finite(value: unknown, fallback = 0) {
 }
 
 function nullableNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function positiveNumber(value: unknown) {
+  const parsed = nullableNumber(value);
+  return parsed !== null && parsed > 0 ? parsed : null;
 }
 
 function classify(address: string, name: string, symbol: string) {
@@ -147,7 +154,8 @@ function parseGecko(response: GeckoResponse, discovery: string, trending = false
       priceChange24h: normalizedChange,
       volume24h: finite(attrs.volume_usd?.h24),
       liquidityUsd: finite(attrs.reserve_in_usd),
-      marketCapUsd: nullableNumber(attrs.market_cap_usd) ?? nullableNumber(attrs.fdv_usd),
+      marketCapUsd: positiveNumber(attrs.market_cap_usd),
+      fdvUsd: positiveNumber(attrs.fdv_usd),
       transactions24h: buys + sells,
       pairAddress: String(attrs.address ?? ""),
       pairUrl: `https://www.geckoterminal.com/robinhood/pools/${attrs.address}`,
@@ -191,7 +199,8 @@ function parseCanonical(pairs: DexPair[]): Market[] {
       priceChange24h: tokenIsBase ? change : change !== null && change !== -100 ? (-change / (100 + change)) * 100 : null,
       volume24h: finite(pair.volume?.h24),
       liquidityUsd: finite(pair.liquidity?.usd),
-      marketCapUsd: nullableNumber(pair.marketCap) ?? nullableNumber(pair.fdv),
+      marketCapUsd: positiveNumber(pair.marketCap),
+      fdvUsd: positiveNumber(pair.fdv),
       transactions24h: finite(pair.txns?.h24?.buys) + finite(pair.txns?.h24?.sells),
       pairAddress: String(pair.pairAddress ?? ""),
       pairUrl: pair.url || `https://dexscreener.com/robinhood/${pair.pairAddress}`,
@@ -234,7 +243,8 @@ function parseTargetPairs(pairs: DexPair[], targetAddress: string): Market[] {
       priceChange24h: tokenIsBase ? change : change !== null && change !== -100 ? (-change / (100 + change)) * 100 : null,
       volume24h: finite(pair.volume?.h24),
       liquidityUsd: finite(pair.liquidity?.usd),
-      marketCapUsd: nullableNumber(pair.marketCap) ?? nullableNumber(pair.fdv),
+      marketCapUsd: positiveNumber(pair.marketCap),
+      fdvUsd: positiveNumber(pair.fdv),
       transactions24h: finite(pair.txns?.h24?.buys) + finite(pair.txns?.h24?.sells),
       pairAddress: String(pair.pairAddress ?? ""),
       pairUrl: pair.url || `https://dexscreener.com/robinhood/${pair.pairAddress}`,
@@ -272,6 +282,7 @@ function parseVirtuals(tokens: VirtualsToken[], discovery: string, trending = fa
       volume24h: token.volume24h,
       liquidityUsd: token.liquidityUsd,
       marketCapUsd: null,
+      fdvUsd: null,
       transactions24h: 0,
       pairAddress: token.pairAddress,
       pairUrl: token.externalUrl,
@@ -304,22 +315,29 @@ function mergeMarkets(rows: Market[]) {
       continue;
     }
     const discoveries = Array.from(new Set([...current.discovery, ...row.discovery]));
-    const preferred = row.volume24h > current.volume24h ? row : current;
+    const currentDex = current.executionVenue === "dex" && Boolean(current.pairAddress);
+    const rowDex = row.executionVenue === "dex" && Boolean(row.pairAddress);
+    const preferred = currentDex !== rowDex
+      ? rowDex ? row : current
+      : row.liquidityUsd !== current.liquidityUsd
+        ? row.liquidityUsd > current.liquidityUsd ? row : current
+        : row.volume24h > current.volume24h ? row : current;
+    const hasExecutableDex = currentDex || rowDex;
     merged.set(row.address, {
       ...preferred,
       imageUrl: preferred.imageUrl || current.imageUrl || row.imageUrl,
       discovery: discoveries,
       trendingRank: [current.trendingRank, row.trendingRank].filter((value): value is number => value !== null).sort((a, b) => a - b)[0] ?? null,
       canonical: current.canonical || row.canonical,
-      category: current.canonical || row.canonical ? "RWA" : current.launchpad === "virtuals" || row.launchpad === "virtuals" ? "Virtuals Agents" : preferred.category,
+      category: current.canonical || row.canonical ? "RWA" : preferred.category,
       launchpad: current.launchpad || row.launchpad,
-      lifecycle: current.lifecycle === "bonding" || row.lifecycle === "bonding" ? "bonding" : preferred.lifecycle,
-      executionVenue: current.executionVenue === "virtuals-bonding" || row.executionVenue === "virtuals-bonding" ? "virtuals-bonding" : "dex",
+      lifecycle: hasExecutableDex ? "dex" : current.lifecycle === "bonding" || row.lifecycle === "bonding" ? "bonding" : preferred.lifecycle,
+      executionVenue: hasExecutableDex ? "dex" : "virtuals-bonding",
       externalUrl: current.externalUrl || row.externalUrl,
       holderCount: current.holderCount ?? row.holderCount,
       bondedVirtual: current.bondedVirtual ?? row.bondedVirtual,
       fdvInVirtual: current.fdvInVirtual ?? row.fdvInVirtual,
-      dex: current.lifecycle === "bonding" || row.lifecycle === "bonding" ? "Virtuals BondingV5" : preferred.dex,
+      dex: hasExecutableDex ? preferred.dex : "Virtuals BondingV5",
     });
   }
   return [...merged.values()];

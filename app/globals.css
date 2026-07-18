@@ -11,6 +11,85 @@
   --orange: #ff7847;
 }
 
+/* Crypto workspace refresh */
+.community-page { --crypto-ink: #101612; --crypto-muted: #68746d; --crypto-line: #dbe2dc; --crypto-green: #20c875; }
+.community-page .community-hero { min-height: 420px; margin-top: 24px; padding: 58px; align-items: center; border: 1px solid #d9e2da; border-radius: 28px; background: radial-gradient(circle at 86% 18%,rgba(32,200,117,.22),transparent 26%),linear-gradient(145deg,#fbfdf9 0%,#f1f8f2 100%); overflow: hidden; }
+.community-page .community-hero h1 { max-width: 900px; margin: 18px 0 24px; font-size: clamp(58px,6vw,92px); line-height: .91; letter-spacing: -.065em; }
+.community-page .community-hero h1 span { color: #2a8b58; font-family: inherit; font-style: normal; font-weight: 520; }
+.community-page .community-hero-badge { min-height: 210px; border: 0; border-radius: 22px; color: #effff5; background: #101b15; box-shadow: 0 24px 55px rgba(16,27,21,.16); }
+.community-page .market-pulse { margin: 22px 0 70px; overflow: hidden; border: 1px solid var(--crypto-line); border-radius: 20px; background: #fff; }
+.community-page .market-pulse > div { min-height: 142px; padding: 25px; }
+.community-page .market-pulse span { font-size: 10px; }
+.community-page .market-pulse strong { font-size: 34px; }
+.community-page .market-pulse small { font-size: 12px; }
+.community-page .category-deck { display: none; }
+.community-page .market-board { border-color: #ccd6cf; border-radius: 24px; background: #fff; box-shadow: 0 28px 80px rgba(26,51,35,.08); }
+.community-page .market-board-head { min-height: 160px; padding: 34px 36px 28px; align-items: center; background: linear-gradient(180deg,#fff,#fafcf9); }
+.community-page .market-board-head h2 { font-size: 48px; letter-spacing: -.05em; }
+.community-page .market-board-head > div > span { font-size: 10px; }
+.community-page .market-board-head label { width: min(430px,42%); min-height: 58px; padding: 0 20px; border-radius: 16px; box-shadow: inset 0 0 0 1px rgba(10,28,17,.02); }
+.community-page .market-board-head input { font-size: 15px; }
+.community-page .market-rank-tabs { padding: 0 36px 24px; gap: 8px; border-bottom: 1px solid var(--crypto-line); }
+.community-page .market-rank-tabs button { min-height: 42px; padding: 0 17px; border-radius: 999px; font-size: 12px; }
+.community-page .market-rank-tabs button.active { color: white; background: var(--crypto-ink); }
+.community-page .token-market-header,.community-page .token-market-row { grid-template-columns: minmax(240px,1.45fr) .72fr .52fr .72fr .72fr .8fr .92fr minmax(142px,.7fr); gap: 18px; }
+.community-page .token-market-header { min-height: 50px; padding: 0 26px; font-size: 9px; background: #f2f6f2; }
+.community-page .token-market-row { min-height: 98px; padding: 12px 26px; transition: background .18s ease,transform .18s ease; }
+.community-page .token-market-row:hover { position: relative; z-index: 1; background: #f7fcf8; box-shadow: inset 4px 0 0 var(--crypto-green); }
+.community-page .token-market-identity img,.community-page .token-market-identity > b { width: 48px; height: 48px; border-radius: 15px; }
+.community-page .token-market-identity p strong,.community-page .market-number strong,.community-page .market-pair strong { font-size: 14px; }
+.community-page .token-market-identity p small,.community-page .market-number small,.community-page .market-pair small { margin-top: 4px; font-size: 11px; }
+.community-page .market-change { min-height: 32px; padding: 0 9px; border-radius: 9px; font-size: 11px; }
+.community-page .market-row-actions button,.community-page .market-row-actions a { min-height: 40px; border-radius: 10px; font-size: 10px; }
+.community-page .market-data-note { padding: 22px 28px; font-size: 12px; background: #f6f9f6; }
+.community-page .ca-import-section { margin-top: 82px; }
+.community-page .ca-search { margin-top: 24px; padding: 22px; border: 1px solid var(--crypto-line); border-radius: 20px; background: #f7faf7; }
+.community-page .ca-search label { font-size: 10px; }
+.community-page .ca-search input { min-height: 58px; padding: 0 18px; border-radius: 12px; font-size: 15px; }
+.community-page .ca-search button { border-radius: 12px; }
+.community-page .community-terminal { margin-top: 20px; border-color: #cbd7ce; border-radius: 26px; box-shadow: 0 34px 90px rgba(21,42,29,.13); }
+.community-page .terminal-token-head { min-height: 124px; padding: 26px 30px; background: #fff; }
+.community-page .terminal-body { grid-template-columns: minmax(520px,1.25fr) minmax(420px,.75fr); }
+.community-page .terminal-market-card { min-height: 650px; padding: 32px; background: radial-gradient(circle at 86% 5%,rgba(53,223,136,.2),transparent 34%),linear-gradient(145deg,#121c17,#0b110e); }
+.crypto-chart-toolbar { margin: 24px 0 10px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.crypto-chart-toolbar > span { color: #85a292; font: 10px var(--font-ibm-plex-mono); letter-spacing: .08em; }
+.crypto-chart-toolbar > div { display: flex; gap: 6px; }
+.crypto-chart-toolbar button { min-width: 42px; min-height: 32px; border: 1px solid #33463b; border-radius: 8px; color: #94aa9e; background: transparent; font: 10px var(--font-ibm-plex-mono); cursor: pointer; }
+.crypto-chart-toolbar button.active { border-color: #35df88; color: #07140d; background: #35df88; }
+.crypto-chart-canvas { position: relative; min-height: 260px; overflow: hidden; border: 1px solid #2a3a31; border-radius: 16px; background: linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px),#0c1510; background-size: 100% 25%,20% 100%; }
+.crypto-chart-canvas svg { position: absolute; inset: 18px 14px 26px; width: calc(100% - 28px); height: calc(100% - 44px); overflow: visible; }
+.crypto-chart-line { fill: none; stroke-width: 3.2; vector-effect: non-scaling-stroke; }
+.crypto-chart-line.up { stroke: #35df88; }.crypto-chart-line.down { stroke: #ff715f; }
+.crypto-chart-range { position: absolute; inset: auto 16px 8px; display: flex; justify-content: space-between; color: #789083; font: 9px var(--font-ibm-plex-mono); }
+.crypto-chart-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: #8ea096; text-align: center; }
+.crypto-chart-empty strong { color: #d9e5dd; font-size: 16px; }.crypto-chart-empty span { max-width: 330px; font-size: 12px; }
+.crypto-chart-empty i { width: 24px; height: 24px; border: 2px solid #31463a; border-top-color: #35df88; border-radius: 50%; animation: spin .8s linear infinite; }
+.community-page .terminal-market-stats { margin-top: 18px; }
+.community-page .community-trade-panel { padding: 30px; background: #fbfdfb; }
+
+@media (max-width: 1100px) {
+  .community-page .community-hero { padding: 40px; grid-template-columns: 1fr 210px; gap: 32px; }
+  .community-page .terminal-body { grid-template-columns: 1fr; }
+  .community-page .token-market-table { overflow-x: auto; }
+  .community-page .token-market-header,.community-page .token-market-row { min-width: 1180px; }
+}
+@media (max-width: 620px) {
+  .community-page .community-hero { margin-top: 10px; padding: 30px 22px; border-radius: 22px; }
+  .community-page .community-hero h1 { font-size: 48px; }
+  .community-page .community-hero-badge { min-height: 110px; }
+  .community-page .market-pulse { margin-bottom: 48px; border-radius: 16px; }
+  .community-page .market-board { border-radius: 18px; }
+  .community-page .market-board-head { padding: 24px 18px; }
+  .community-page .market-board-head h2 { font-size: 38px; }
+  .community-page .market-rank-tabs { padding: 0 18px 18px; flex-wrap: nowrap; overflow-x: auto; }
+  .community-page .token-market-table { overflow: visible; }
+  .community-page .token-market-header { display: none; }
+  .community-page .token-market-row { min-width: 0; grid-template-columns: 1fr 1fr; padding: 20px 18px; gap: 18px 12px; }
+  .community-page .token-market-row > :nth-child(4),.community-page .token-market-row > :nth-child(5),.community-page .token-market-row > :nth-child(7) { display: none; }
+  .community-page .terminal-market-card { min-height: 600px; padding: 22px 18px; }
+  .crypto-chart-canvas { min-height: 230px; }
+}
+
 * { box-sizing: border-box; }
 html { background: var(--paper); }
 body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-instrument-sans), Arial, sans-serif; font-feature-settings: "ss01" 1, "ss03" 1; }

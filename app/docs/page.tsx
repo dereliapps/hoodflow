@@ -23,7 +23,7 @@ const sections = [
   ["quotes", "Prices and quotes"],
   ["permissions", "Wallet permissions"],
   ["routes", "Route states"],
-  ["community", "Meme + Crypto"],
+  ["community", "Crypto"],
   ["rewards", "Referral rewards"],
   ["dca", "DCA engine"],
   ["troubleshooting", "Troubleshooting"],

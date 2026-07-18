@@ -20,8 +20,8 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>HoodFlow \| Stock Token Trading on Robinhood Chain<\/title>/i);
-  assert.match(html, /The execution layer for Stock Tokens/);
+  assert.match(html, /<title>HoodFlow \| Crypto &amp; Stock Token Markets on Robinhood Chain<\/title>/i);
+  assert.match(html, /Every live token\. One execution screen\./);
   assert.match(html, /Compare live routes/);
   assert.match(html, /Find the route/);
   assert.match(html, /HoodFlow workspace loading/);
@@ -40,7 +40,7 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(html, /Stock Tokens are not shares/);
   assert.match(html, /Compare live routes/);
   assert.match(html, /Robinhood Chain/);
-  assert.match(html, /og\.png/);
+  assert.match(html, /og-crypto\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
@@ -111,7 +111,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /PROTECTED QUOTES/);
   assert.match(page, /Price feed temporarily unavailable\. Trading is disabled until verification completes\./);
   assert.match(page, /Release 0\.7\.0/);
-  assert.match(page, /Meme \+ Crypto/);
+  assert.match(page, /label: "Crypto"/);
   assert.match(page, /ReferralRewards/);
   assert.match(page, /href="\/docs"/);
   assert.match(docs, /Buy a Stock Token with USDG/);
@@ -119,7 +119,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(docs, /Reference price versus execution quote/);
   assert.match(docs, /Common messages/);
   assert.match(docs, /Discover tokens by contract address/);
-  assert.match(community, /Robinhood Chain markets/);
+  assert.match(community, /Every live token/);
   assert.match(community, /Top gainers/);
   assert.match(community, /MARKET_CATEGORIES/);
   assert.match(community, /V3_FEES = \[100, 500, 3_000, 10_000\]/);
@@ -129,6 +129,8 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(community, /Native pair routing/);
   assert.match(community, /USDG, WETH or the listed pool/);
   assert.match(community, /UNREVIEWED TOKEN MODE/);
+  assert.match(community, /ONCHAIN PRICE HISTORY/);
+  assert.match(community, /marketCapUsd \?\? market\.fdvUsd/);
   assert.match(rewards, /HOODFLOW REWARDS \/ SEASON 0/);
   assert.match(rewards, /PLANNED \$HFLOW ELIGIBILITY/);
   assert.match(rewards, /LIVE LEADERBOARD/);
@@ -143,7 +145,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(communityMarketRoute, /Virtuals official/);
   assert.match(communityMarketRoute, /virtuals-bonding/);
   assert.match(communityMarketRoute, /token-pairs\/v1\/robinhood/);
-  assert.match(layout, /HoodFlow \| Stock Token Trading/);
+  assert.match(layout, /HoodFlow \| Crypto & Stock Token Markets/);
   assert.match(layout, /Instrument_Sans/);
   assert.match(layout, /IBM_Plex_Mono/);
   assert.match(layout, /summary_large_image/);
