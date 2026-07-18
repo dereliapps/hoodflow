@@ -36,6 +36,7 @@ import {
   buildV3DirectBuyCalldata,
   buildV3ExactInputCalldata,
   buildExactInputQuoteParams,
+  friendlyExecutionError,
   isRoutedAsset,
   isV3RoutedAsset,
   type PoolCandidate,
@@ -147,14 +148,7 @@ function compactAddress(address: string) {
 }
 
 function errorMessage(error: unknown) {
-  if (error && typeof error === "object") {
-    const walletError = error as { code?: string | number; shortMessage?: string; reason?: string; message?: string };
-    if (walletError.code === 4001 || walletError.code === "ACTION_REJECTED") return "Wallet request declined.";
-    if (walletError.shortMessage) return walletError.shortMessage;
-    if (walletError.reason) return walletError.reason;
-    if (walletError.message) return walletError.message;
-  }
-  return error instanceof Error ? error.message : "The wallet request could not be completed.";
+  return friendlyExecutionError(error);
 }
 
 async function getBestV4Quote(provider: BrowserProvider, tokenIn: string, tokenOut: string, amountIn: bigint) {
@@ -915,9 +909,11 @@ export default function Home() {
           signature,
         });
 
+    const router = new Contract(UNIVERSAL_ROUTER_ADDRESS, UNIVERSAL_ROUTER_ABI, signer);
+    setTransactionStep("Simulating the protected buy…");
+    await router.execute.staticCall(calldata.commands, calldata.inputs, now + 300);
     track("transaction_started", { ticker: draftAsset, side: "buy" });
     setTransactionStep(`Confirm the ${draftAsset} buy in your wallet…`);
-    const router = new Contract(UNIVERSAL_ROUTER_ADDRESS, UNIVERSAL_ROUTER_ABI, signer);
     const transaction = await router.execute(calldata.commands, calldata.inputs, now + 300);
     setTransactionStep("Waiting for mainnet confirmation…");
     const receipt = await transaction.wait();
@@ -1007,9 +1003,11 @@ export default function Home() {
       ? buildV3ExactInputCalldata({ tokenIn: tokenInAddress, tokenOut: USDG_ADDRESS, recipient: address, amountIn, minAmountOut, fee: quote.fee, permit, signature })
       : buildV4ExactInputCalldata({ tokenIn: tokenInAddress, tokenOut: USDG_ADDRESS, amountIn, minAmountOut, route: quote.route as PoolCandidate, permit, signature });
 
+    const router = new Contract(UNIVERSAL_ROUTER_ADDRESS, UNIVERSAL_ROUTER_ABI, signer);
+    setTransactionStep("Simulating the protected sell…");
+    await router.execute.staticCall(calldata.commands, calldata.inputs, now + 300);
     track("transaction_started", { ticker: draftAsset, side: "sell" });
     setTransactionStep(`Confirm the ${draftAsset} sell in your wallet…`);
-    const router = new Contract(UNIVERSAL_ROUTER_ADDRESS, UNIVERSAL_ROUTER_ABI, signer);
     const transaction = await router.execute(calldata.commands, calldata.inputs, now + 300);
     setTransactionStep("Waiting for mainnet confirmation…");
     const receipt = await transaction.wait();

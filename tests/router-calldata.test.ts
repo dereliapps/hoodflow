@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { AbiCoder } from "ethers";
 
-import { buildV2ExactInputCalldata } from "../lib/hoodflow-mainnet.js";
+import { buildV2ExactInputCalldata, friendlyExecutionError } from "../lib/hoodflow-mainnet.js";
 
 const USDG = "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168";
 const VIRTUAL = "0xc6911796042b15d7fa4f6cde69e245ddcd3d9c31";
@@ -28,11 +28,33 @@ test("encodes an atomic V2 route through the selected market settlement token", 
 
   assert.equal(calldata.commands, "0x0a08");
   const decoded = AbiCoder.defaultAbiCoder().decode(
-    ["address", "uint256", "uint256", "address[]", "bool"],
+    ["address", "uint256", "uint256", "address[]", "bool", "uint256[]"],
     calldata.inputs[1],
   );
   assert.deepEqual(decoded[3].map((address: string) => address.toLowerCase()), [USDG, VIRTUAL, TOKEN].map((address) => address.toLowerCase()));
   assert.equal(decoded[4], true);
+  assert.equal(decoded[5].length, 0);
+});
+
+test("maps the deployed router's SliceOutOfBounds selector to a safe user message", () => {
+  const error = {
+    code: "CALL_EXCEPTION",
+    action: "estimateGas",
+    data: "0x3b99b53d",
+    message: "execution reverted (unknown custom error)",
+  };
+  assert.equal(
+    friendlyExecutionError(error),
+    "The router rejected outdated route data. Refresh the page and request a new quote.",
+  );
+});
+
+test("never exposes raw estimateGas payloads to users", () => {
+  const error = new Error("execution reverted while estimating gas: 0xdeadbeef");
+  assert.equal(
+    friendlyExecutionError(error),
+    "Trade simulation failed before any transaction was sent. Refresh the quote; if it repeats, use the live pool link.",
+  );
 });
 
 test("rejects a V2 path that does not match the selected output token", () => {

@@ -36,6 +36,7 @@ import {
   buildV2ExactInputCalldata,
   buildV3ExactInputCalldata,
   buildV4ExactInputCalldata,
+  friendlyExecutionError,
   type PermitSingle,
   type PoolCandidate,
 } from "@/lib/hoodflow-mainnet";
@@ -97,8 +98,7 @@ const VIRTUAL_SETTLEMENT: Settlement = { address: ROBINHOOD_VIRTUAL_ADDRESS, sym
 const MARKET_CATEGORIES = ["All", "Virtuals Agents", "Memes", "RWA", "DeFi", "AI & Agents", "Infrastructure", "Stablecoins", "Community"] as const;
 
 function message(error: unknown) {
-  if (error instanceof Error) return error.message.replace("execution reverted: ", "");
-  return "The request could not be completed.";
+  return friendlyExecutionError(error);
 }
 
 function compact(value: string) {
@@ -472,9 +472,11 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
         : liveQuote.protocol === "V3"
           ? buildV3ExactInputCalldata({ tokenIn, tokenOut, recipient: walletAddress, amountIn, minAmountOut, fee: liveQuote.fee, permit, signature })
           : buildV4ExactInputCalldata({ tokenIn, tokenOut, amountIn, minAmountOut, route: liveQuote.route, permit, signature });
+      const router = new Contract(UNIVERSAL_ROUTER_ADDRESS, UNIVERSAL_ROUTER_ABI, signer);
+      setStep("Simulating the protected trade…");
+      await router.execute.staticCall(calldata.commands, calldata.inputs, now + 300);
       setStep("Confirm the protected mainnet trade in your wallet…");
       track("transaction_started", { ticker: token.symbol, side });
-      const router = new Contract(UNIVERSAL_ROUTER_ADDRESS, UNIVERSAL_ROUTER_ABI, signer);
       const transaction = await router.execute(calldata.commands, calldata.inputs, now + 300);
       setStep("Waiting for Robinhood Chain confirmation…");
       const receipt = await transaction.wait();

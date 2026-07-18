@@ -120,6 +120,44 @@ export type PermitSingle = {
   sigDeadline: number;
 };
 
+const ROUTER_ERROR_MESSAGES: ReadonlyArray<readonly [string, string]> = [
+  ["0x3b99b53d", "The router rejected outdated route data. Refresh the page and request a new quote."],
+  ["0xaaad13f7", "The router rejected malformed route data. Refresh the quote before trying again."],
+  ["0x849eaf98", "The V2 pool output moved below your protected minimum. Refresh the quote or adjust slippage."],
+  ["0x39d35496", "The V3 pool output moved below your protected minimum. Refresh the quote or adjust slippage."],
+  ["0x8b063d73", "The V4 pool output moved below your protected minimum. Refresh the quote or adjust slippage."],
+  ["0x756688fe", "The order permission nonce changed. Request a fresh quote and sign again."],
+  ["0xd81b2f2e", "The token permission expired. Request a fresh quote and sign again."],
+  ["0xcd21db4f", "The order signature expired. Request a fresh quote and sign again."],
+  ["0xf96fb071", "The exact token permission is no longer sufficient. Refresh the order and approve again."],
+];
+
+function collectErrorDetails(value: unknown, depth = 0, seen = new Set<object>()): string[] {
+  if (depth > 4 || value === null || value === undefined) return [];
+  if (typeof value === "string" || typeof value === "number") return [String(value)];
+  if (typeof value !== "object" || seen.has(value)) return [];
+  seen.add(value);
+  const record = value as Record<string, unknown>;
+  return ["code", "shortMessage", "reason", "message", "data", "error", "info"]
+    .flatMap((key) => collectErrorDetails(record[key], depth + 1, seen));
+}
+
+export function friendlyExecutionError(error: unknown): string {
+  const details = collectErrorDetails(error);
+  const combined = details.join(" ");
+  if (details.includes("4001") || combined.includes("ACTION_REJECTED")) return "Wallet request declined.";
+  for (const [selector, userMessage] of ROUTER_ERROR_MESSAGES) {
+    if (combined.toLowerCase().includes(selector)) return userMessage;
+  }
+  if (/CALL_EXCEPTION|estimateGas|execution reverted|missing revert data/i.test(combined)) {
+    return "Trade simulation failed before any transaction was sent. Refresh the quote; if it repeats, use the live pool link.";
+  }
+  const record = error && typeof error === "object" ? error as Record<string, unknown> : null;
+  const preferred = record?.shortMessage ?? record?.reason ?? record?.message;
+  if (typeof preferred === "string" && preferred.trim()) return preferred.replace(/^execution reverted:\s*/i, "");
+  return error instanceof Error ? error.message : "The wallet request could not be completed.";
+}
+
 export function isRoutedAsset(ticker: string): boolean {
   return ROUTED_ASSETS.includes(ticker) && Boolean(ROBINHOOD_TOKENS[ticker]);
 }
@@ -279,13 +317,14 @@ export function buildV2ExactInputCalldata(args: {
     throw new Error("The V2 route path does not match the selected input and output tokens.");
   }
   const swapInput = coder.encode(
-    ["address", "uint256", "uint256", "address[]", "bool"],
+    ["address", "uint256", "uint256", "address[]", "bool", "uint256[]"],
     [
       getAddress(args.recipient),
       args.amountIn,
       args.minAmountOut,
       path,
       true,
+      [],
     ],
   );
   const permitInput = coder.encode(
