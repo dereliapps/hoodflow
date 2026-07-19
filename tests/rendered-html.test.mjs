@@ -120,6 +120,10 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(docs, /Common messages/);
   assert.match(docs, /Discover tokens by contract address/);
   assert.match(community, /Every live token/);
+  assert.match(community, /metric-price/);
+  assert.match(community, /metric-volume/);
+  assert.match(community, /metric-liquidity/);
+  assert.match(community, /metric-cap/);
   assert.match(community, /Top gainers/);
   assert.match(community, /MARKET_CATEGORIES/);
   assert.match(community, /V3_FEES = \[100, 500, 3_000, 10_000\]/);
@@ -144,6 +148,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(communityMarketRoute, /DEX Screener/);
   assert.match(communityMarketRoute, /Virtuals official/);
   assert.match(communityMarketRoute, /virtuals-bonding/);
+  assert.match(css, /Authoritative responsive layout for the crypto workspace/);
+  assert.match(css, /@media \(max-width: 1100px\)/);
+  assert.match(css, /@media \(max-width: 700px\)/);
   assert.match(communityMarketRoute, /token-pairs\/v1\/robinhood/);
   assert.match(layout, /HoodFlow \| Crypto & Stock Token Markets/);
   assert.match(layout, /Instrument_Sans/);
