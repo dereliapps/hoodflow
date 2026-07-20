@@ -59,6 +59,7 @@ import MarketStatus from "./market-status";
 import type { PrivyWalletController } from "./privy-wallet-bridge";
 import { PRIVY_CONFIGURED } from "./providers";
 import ReferralRewards from "./referral-rewards";
+import RobinHoodIntro from "./robin-hood-intro";
 
 const PrivyWalletBridge = dynamic(() => import("./privy-wallet-bridge"), { ssr: false });
 
@@ -68,7 +69,6 @@ type StrategyStatus = "Prepared" | "Paused" | "Confirmed";
 type MarketplaceSort = "featured" | "cadence" | "risk";
 type ActivityFilter = "all" | "trades" | "dca";
 type InfoPanel = "docs" | "terms";
-type BootPhase = "ready" | "leaving" | "done";
 type PriceState = "loading" | "live" | "degraded" | "error";
 type WalletConnectionKind = "browser" | "walletconnect" | "privy";
 type HoodFlowWalletProvider = Eip1193Provider & { disconnect?: () => Promise<void> };
@@ -312,8 +312,6 @@ function orderStorageKey(walletAddress: string) {
 }
 
 export default function Home() {
-  const [bootPhase, setBootPhase] = useState<BootPhase>("ready");
-  const [bootProgress, setBootProgress] = useState(0);
   const [view, setView] = useState<View>("overview");
   const [walletAddress, setWalletAddress] = useState("");
   const [walletBalance, setWalletBalance] = useState("");
@@ -338,9 +336,6 @@ export default function Home() {
   const [kind, setKind] = useState<StrategyKind>("DCA");
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const hydratedWalletRef = useRef("");
-  const bootCompletedRef = useRef(false);
-  const bootExitTimerRef = useRef<number | null>(null);
-  const bootThumbDraggedRef = useRef(false);
   const priceHistoryCacheRef = useRef<Record<string, { points: HistoryPoint[]; error: string }>>({});
   const [toast, setToast] = useState("");
   const [draftName, setDraftName] = useState("Monday Apple");
@@ -549,40 +544,6 @@ export default function Home() {
     unrealized: total.unrealized + (row.unrealizedPnl ?? 0),
     realized: total.realized + row.realizedPnl,
   }), { value: 0, unrealized: 0, realized: 0 }), [portfolioRows]);
-  const enterWorkspace = useCallback((progress = 100) => {
-    if (progress < 84) {
-      setBootProgress(0);
-      return;
-    }
-    if (bootCompletedRef.current) return;
-    bootCompletedRef.current = true;
-    setBootProgress(100);
-    setBootPhase("leaving");
-    try { window.sessionStorage.setItem("hoodflow-boot-seen-v2", "1"); } catch { /* Session storage is an optional convenience. */ }
-    bootExitTimerRef.current = window.setTimeout(() => {
-      setBootPhase("done");
-      document.body.classList.remove("boot-locked");
-    }, 620);
-  }, []);
-
-  useEffect(() => {
-    let bootSeen = false;
-    try { bootSeen = window.sessionStorage.getItem("hoodflow-boot-seen-v2") === "1"; } catch { /* Show the gate when session storage is unavailable. */ }
-    if (bootSeen) {
-      const finish = window.setTimeout(() => {
-        setBootProgress(100);
-        setBootPhase("done");
-        document.body.classList.remove("boot-locked");
-      }, 0);
-      return () => window.clearTimeout(finish);
-    }
-    document.body.classList.add("boot-locked");
-    return () => {
-      if (bootExitTimerRef.current !== null) window.clearTimeout(bootExitTimerRef.current);
-      document.body.classList.remove("boot-locked");
-    };
-  }, []);
-
   useEffect(() => {
     const activeWallet = walletAddress.toLowerCase();
     hydratedWalletRef.current = "";
@@ -1567,77 +1528,8 @@ export default function Home() {
 
   return (
     <main className="app-shell">
+      <RobinHoodIntro />
       {PRIVY_CONFIGURED && <PrivyWalletBridge onController={(controller) => { privyControllerRef.current = controller; }} onWallet={activatePrivyWallet} onError={notify} />}
-      {bootPhase !== "done" && <div className={`launch-screen ${bootPhase === "leaving" ? "is-leaving" : ""}`} role="dialog" aria-modal="true" aria-labelledby="launch-title">
-        <div className="launch-grid" aria-hidden="true" />
-        <div className="launch-glow" aria-hidden="true" />
-        <div className="launch-top"><div className="launch-brand"><span className="brand-mark"><i /><i /><i /></span><strong>hoodflow</strong></div><span>INDEPENDENT INTERFACE · ROBINHOOD CHAIN</span></div>
-        <div className="launch-center" style={{ "--slide": `${bootProgress}%` } as React.CSSProperties}>
-          <p>ROBINHOOD CHAIN · MAINNET</p>
-          <div className="launch-wordstage">
-            <span className="launch-flight-arrow" aria-hidden="true">➜</span>
-            <h1 id="launch-title">hoodflow</h1>
-            <span className="launch-word-reveal" aria-hidden="true">hoodflow</span>
-          </div>
-          <p className="launch-instruction">Move the arrow. Open the flow.</p>
-          <div className="launch-slider-shell">
-            <div className="launch-slider-fill" aria-hidden="true" />
-            <span className="launch-slider-copy" aria-hidden="true">SLIDE TO ENTER</span>
-            <button
-              className="launch-slider-thumb"
-              type="button"
-              aria-label="Open HoodFlow"
-              onPointerDown={(event) => {
-                bootThumbDraggedRef.current = false;
-                event.currentTarget.setPointerCapture(event.pointerId);
-              }}
-              onPointerMove={(event) => {
-                if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-                const track = event.currentTarget.parentElement?.getBoundingClientRect();
-                if (!track) return;
-                const next = Math.max(0, Math.min(100, ((event.clientX - track.left) / track.width) * 100));
-                if (Math.abs(next - bootProgress) > 2) bootThumbDraggedRef.current = true;
-                setBootProgress(next);
-              }}
-              onPointerUp={(event) => {
-                const track = event.currentTarget.parentElement?.getBoundingClientRect();
-                const next = track ? Math.max(0, Math.min(100, ((event.clientX - track.left) / track.width) * 100)) : bootProgress;
-                if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-                enterWorkspace(next);
-              }}
-              onClick={() => {
-                if (!bootThumbDraggedRef.current) enterWorkspace();
-                bootThumbDraggedRef.current = false;
-              }}
-            >→</button>
-            <input
-              className="launch-slider-input"
-              type="range"
-              min="0"
-              max="100"
-              step="1"
-              value={bootProgress}
-              aria-label="Slide to enter HoodFlow"
-              aria-valuetext={`${bootProgress}% toward opening HoodFlow`}
-              onChange={(event) => {
-                const next = Number(event.currentTarget.value);
-                setBootProgress(next);
-                if (next >= 98) enterWorkspace(next);
-              }}
-              onPointerUp={(event) => enterWorkspace(Number(event.currentTarget.value))}
-              onPointerCancel={() => setBootProgress(0)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  enterWorkspace();
-                }
-              }}
-            />
-          </div>
-          <div className="launch-status"><span><i />SELF-CUSTODY READY</span><strong>{bootProgress >= 84 ? "RELEASE TO OPEN" : "DRAG →"}</strong></div>
-        </div>
-        <div className="launch-bottom"><span>NON-CUSTODIAL</span><span>PROTECTED ROUTES</span><span>25 INDEXED TOKENS</span></div>
-      </div>}
       <header className="topbar">
         <button className="brand" onClick={() => navigate("overview")} aria-label="HoodFlow home">
           <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">MAINNET BETA</b>

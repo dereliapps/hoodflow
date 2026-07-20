@@ -24,9 +24,9 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(html, /Every live token\. One execution screen\./);
   assert.match(html, /Compare live routes/);
   assert.match(html, /Find the route/);
-  assert.match(html, /Slide to enter HoodFlow/);
-  assert.match(html, /Move the arrow\. Open the flow\./);
-  assert.match(html, /SLIDE TO ENTER/);
+  assert.match(html, /Hold to draw\. Release to enter\./);
+  assert.match(html, /Hold anywhere · Space [/] Enter/);
+  assert.match(html, /Skip/);
   assert.match(html, /Direct settlement/);
   assert.match(html, /Reviewed execution markets/);
   assert.match(html, /Protected minimum/);
@@ -44,8 +44,9 @@ test("server-renders the HoodFlow product shell", async () => {
 });
 
 test("ships a bounded, interactive Robinhood mainnet experience", async () => {
-  const [page, layout, css, packageJson, priceRoute, priceLib, historyRoute, stockHistory, docs, community, rewards, referralRoute, communityMarketRoute] = await Promise.all([
+  const [page, intro, layout, css, packageJson, priceRoute, priceLib, historyRoute, stockHistory, docs, community, rewards, referralRoute, communityMarketRoute] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/robin-hood-intro.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -111,7 +112,15 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /Sell now/);
   assert.match(page, /Sell to USDG/);
   assert.match(page, /Compare live routes/);
-  assert.match(page, /PROTECTED ROUTES/);
+  assert.match(intro, /RobinHoodIntro/);
+  assert.match(intro, /hoodflow-robinhood-intro-v1/);
+  assert.match(intro, /sessionStorage\.setItem/);
+  assert.match(intro, /new URLSearchParams\(window\.location\.search\)\.get\("intro"\) === "1"/);
+  assert.match(intro, /Math\.min\(window\.devicePixelRatio \|\| 1, 2\)/);
+  assert.match(intro, /prefers-reduced-motion: reduce/);
+  assert.match(intro, /onPointerDown/);
+  assert.match(intro, /onKeyDown/);
+  assert.match(intro, /setStep\("open"\)/);
   assert.match(page, /Automatic retries are active/);
   assert.match(page, /Release 0\.10\.2/);
   assert.match(page, /DCA command center/);
@@ -171,10 +180,11 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(layout, /IBM_Plex_Mono/);
   assert.match(layout, /summary_large_image/);
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
-  assert.match(css, /\.launch-screen/);
-  assert.match(css, /\.launch-slider-shell/);
-  assert.match(css, /\.launch-flight-arrow/);
-  assert.doesNotMatch(css, /launch-fallback/);
+  assert.match(css, /\.rh-intro/);
+  assert.match(css, /\.rh-intro-door-left/);
+  assert.match(css, /\.rh-intro-arrow/);
+  assert.match(css, /@keyframes rh-flight/);
+  assert.doesNotMatch(css, /\.launch-screen|\.launch-slider-shell|\.launch-flight-arrow/);
   assert.match(css, /\.price-source-bar/);
   assert.match(css, /\.price-cell\.stale/);
   assert.match(css, /\.asset-detail-grid/);
@@ -208,6 +218,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 
   await access(new URL("../public/og.png", import.meta.url));
+  await access(new URL("../public/assets/hoodflow-sherwood.webp", import.meta.url));
   await Promise.all([
     "AAPL", "AMD", "AMZN", "BABA", "BE", "COIN", "CRCL", "CRWV", "GOOGL", "INTC",
     "META", "MSFT", "MU", "NVDA", "ORCL", "PLTR", "SNDK", "SPCX", "TSLA", "USAR",
