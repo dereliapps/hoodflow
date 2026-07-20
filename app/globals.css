@@ -915,6 +915,27 @@ html, body, .app-shell { max-width: 100%; overflow-x: clip; }
   background: #37f08a;
   box-shadow: 0 0 0 4px rgba(55,240,138,.1),0 0 12px rgba(55,240,138,.7);
 }
+
+@media (min-width: 1101px) {
+  .topbar .brand {
+    display: grid;
+    grid-template-columns: 28px minmax(0,1fr);
+    column-gap: 11px;
+    row-gap: 10px;
+    align-items: center;
+  }
+  .topbar .brand > span:nth-child(2) { min-width: 0; white-space: nowrap; }
+  .topbar .version-badge {
+    grid-column: 2;
+    justify-self: start;
+    margin: 0;
+    min-height: 22px;
+    padding: 0 9px 0 20px;
+    font-size: 7px;
+  }
+  .topbar .version-badge::before { left: 8px; width: 5px; height: 5px; }
+  .topbar .main-nav { margin-top: 45px; }
+}
 .market-load-more {
   min-height: 72px;
   padding: 14px 22px;
