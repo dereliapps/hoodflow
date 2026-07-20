@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element -- local brand marks are intentionally served as original logo assets. */
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BrowserProvider,
   Contract,
@@ -52,6 +52,8 @@ import {
 import { ROBINHOOD_PRICE_FEEDS } from "@/config/robinhood-price-feeds";
 import { track } from "@/lib/analytics-client";
 import CommunityTokens from "./community-tokens";
+import PrivyWalletBridge, { type PrivyWalletController } from "./privy-wallet-bridge";
+import { PRIVY_CONFIGURED } from "./providers";
 import ReferralRewards from "./referral-rewards";
 
 type View = "overview" | "strategies" | "assets" | "asset" | "community" | "rewards" | "marketplace" | "activity" | "controls";
@@ -61,15 +63,16 @@ type MarketplaceSort = "featured" | "cadence" | "risk";
 type InfoPanel = "docs" | "terms";
 type BootPhase = "loading" | "leaving" | "done";
 type PriceState = "loading" | "live" | "degraded" | "error";
-type WalletConnectionKind = "browser" | "walletconnect";
+type WalletConnectionKind = "browser" | "walletconnect" | "privy";
 type HoodFlowWalletProvider = Eip1193Provider & { disconnect?: () => Promise<void> };
 type InjectedWalletProvider = HoodFlowWalletProvider & {
   providers?: InjectedWalletProvider[];
   isMetaMask?: boolean;
+  isRabby?: boolean;
   isOkxWallet?: boolean;
   isOKExWallet?: boolean;
 };
-type InjectedWalletPreference = "metamask" | "okx" | "browser";
+type InjectedWalletPreference = "rabby" | "metamask" | "okx" | "browser";
 type WalletConnectConfig = { enabled: boolean; projectId: string | null };
 
 type Strategy = {
@@ -267,6 +270,7 @@ export default function Home() {
   const [walletUsdgBalance, setWalletUsdgBalance] = useState("");
   const [walletProvider, setWalletProvider] = useState<HoodFlowWalletProvider | null>(null);
   const [walletKind, setWalletKind] = useState<WalletConnectionKind | null>(null);
+  const privyControllerRef = useRef<PrivyWalletController | null>(null);
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [walletConnecting, setWalletConnecting] = useState(false);
   const [walletConnectReady, setWalletConnectReady] = useState<boolean | null>(null);
@@ -753,7 +757,7 @@ export default function Home() {
     await refreshWalletBalances(address, browserProvider);
     setWalletModalOpen(false);
     track("wallet_connected", { kind });
-    notify(kind === "walletconnect" ? "WalletConnect session ready on Robinhood Chain" : "Browser wallet connected to Robinhood Chain");
+    notify(kind === "privy" ? "Privy wallet ready on Robinhood Chain" : kind === "walletconnect" ? "WalletConnect session ready on Robinhood Chain" : "Browser wallet connected to Robinhood Chain");
   }
 
   function selectInjectedWallet(preference: InjectedWalletPreference) {
@@ -761,6 +765,7 @@ export default function Home() {
     const root = window.ethereum;
     if (!root) return null;
     const providers = root.providers?.length ? root.providers : [root];
+    if (preference === "rabby") return providers.find((provider) => provider.isRabby) ?? null;
     if (preference === "metamask") return providers.find((provider) => provider.isMetaMask && !provider.isOkxWallet && !provider.isOKExWallet) ?? null;
     if (preference === "okx") return providers.find((provider) => provider.isOkxWallet || provider.isOKExWallet) ?? null;
     return root;
@@ -769,7 +774,7 @@ export default function Home() {
   async function connectBrowserWallet(preference: InjectedWalletPreference = "browser") {
     const provider = selectInjectedWallet(preference);
     if (!provider) {
-      const walletName = preference === "metamask" ? "MetaMask" : preference === "okx" ? "OKX Wallet" : "browser wallet";
+      const walletName = preference === "rabby" ? "Rabby Wallet" : preference === "metamask" ? "MetaMask" : preference === "okx" ? "OKX Wallet" : "browser wallet";
       notify(`${walletName} was not found. Install it or use WalletConnect.`);
       return;
     }
@@ -818,6 +823,7 @@ export default function Home() {
   async function disconnectWallet() {
     try {
       if (walletKind === "walletconnect") await walletProvider?.disconnect?.();
+      if (walletKind === "privy") await privyControllerRef.current?.logout();
     } catch {
       // The local session is still cleared if the remote wallet already disconnected.
     } finally {
@@ -834,7 +840,31 @@ export default function Home() {
     if (connected) void disconnectWallet();
     else {
       track("wallet_connect_started");
+      if (PRIVY_CONFIGURED && privyControllerRef.current) {
+        privyControllerRef.current.open();
+        return;
+      }
       setWalletModalOpen(true);
+    }
+  }
+
+  function openPrivy() {
+    if (!privyControllerRef.current) {
+      notify("Privy is still loading. Try again in a moment.");
+      return;
+    }
+    setWalletModalOpen(false);
+    privyControllerRef.current.open();
+  }
+
+  async function activatePrivyWallet(provider: unknown) {
+    setWalletConnecting(true);
+    try {
+      await activateWallet(provider as HoodFlowWalletProvider, "privy");
+    } catch (error) {
+      notify(errorMessage(error));
+    } finally {
+      setWalletConnecting(false);
     }
   }
 
@@ -1269,6 +1299,7 @@ export default function Home() {
 
   return (
     <main className="app-shell">
+      {PRIVY_CONFIGURED && <PrivyWalletBridge onController={(controller) => { privyControllerRef.current = controller; }} onWallet={activatePrivyWallet} onError={notify} />}
       {bootPhase !== "done" && <div className={`launch-screen ${bootPhase === "leaving" ? "is-leaving" : ""}`} role="status" aria-live="polite" aria-label="HoodFlow workspace loading">
         <div className="launch-grid" aria-hidden="true" />
         <div className="launch-top"><div className="launch-brand"><span className="brand-mark"><i /><i /><i /></span><strong>hoodflow</strong></div><span>SECURE AUTOMATION LAYER / 08</span></div>
@@ -1291,7 +1322,7 @@ export default function Home() {
         </nav>
         <div className="top-actions">
           <span className="network"><i /> Mainnet <b>#{networkBlock}</b></span>
-          <button className={connected ? "wallet connected" : "wallet"} onClick={handleWalletButton}>{connected ? `${compactAddress(walletAddress)} · ${walletKind === "walletconnect" ? "WC" : "WEB"}` : "Connect wallet"}</button>
+          <button className={connected ? "wallet connected" : "wallet"} onClick={handleWalletButton}>{connected ? `${compactAddress(walletAddress)} · ${walletKind === "privy" ? "PRIVY" : walletKind === "walletconnect" ? "WC" : "WEB"}` : "Connect wallet"}</button>
         </div>
       </header>
 
@@ -1511,17 +1542,19 @@ export default function Home() {
 
       {walletModalOpen && !connected && <div className="confirm-backdrop wallet-connect-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !walletConnecting) setWalletModalOpen(false); }}><section className="wallet-connect-card" role="dialog" aria-modal="true" aria-labelledby="wallet-connect-title">
         <button className="wallet-connect-close" type="button" aria-label="Close wallet options" onClick={() => setWalletModalOpen(false)} disabled={walletConnecting}>×</button>
-        <div className="wallet-connect-heading"><p>CONNECT YOUR WALLET</p><h2 id="wallet-connect-title">Log in to HoodFlow</h2></div>
         <div className="wallet-brand-orb" aria-hidden="true"><img src="/favicon.svg" alt="" width={58} height={58} /></div>
-        <p className="wallet-connect-intro">Choose a wallet to trade on Robinhood Chain. HoodFlow never sees your seed phrase or private key.</p>
+        <div className="wallet-connect-heading"><h2 id="wallet-connect-title">Log in or sign up</h2><p>Connect to HoodFlow</p></div>
+        <p className="wallet-connect-intro">Use a self-custody wallet to trade on Robinhood Chain. HoodFlow never sees your seed phrase or private key.</p>
         <div className="wallet-connect-options">
+          {PRIVY_CONFIGURED && <button type="button" className="wallet-option wallet-option-privy" onClick={openPrivy} disabled={walletConnecting}><span className="wallet-option-icon privy">P</span><span><strong>Continue with Privy</strong><small>Email, Google, X, passkey or wallet</small></span><b>SECURE</b></button>}
+          <button type="button" className="wallet-option" onClick={() => void connectBrowserWallet("rabby")} disabled={walletConnecting}><span className="wallet-option-icon rabby">R</span><span><strong>Rabby Wallet</strong><small>Best detected EVM wallet experience</small></span><b>4663</b></button>
           <button type="button" className="wallet-option" onClick={() => void connectBrowserWallet("metamask")} disabled={walletConnecting}><span className="wallet-option-icon metamask">M</span><span><strong>MetaMask</strong><small>Browser extension and mobile app</small></span><b>4663</b></button>
           <button type="button" className="wallet-option" onClick={() => void connectBrowserWallet("okx")} disabled={walletConnecting}><span className="wallet-option-icon okx">OKX</span><span><strong>OKX Wallet</strong><small>Connect the installed OKX extension</small></span><b>4663</b></button>
-          <button type="button" className="wallet-option wallet-option-wc" onClick={() => void connectWalletConnect()} disabled={walletConnecting || walletConnectReady !== true}><span className="wallet-option-icon walletconnect">W</span><span><strong>More wallets</strong><small>{walletConnectReady === null ? "Checking WalletConnect…" : walletConnectReady ? "Scan QR or open your mobile wallet" : "WalletConnect is temporarily unavailable"}</small></span><b>{walletConnectReady ? "QR" : "OFFLINE"}</b></button>
-          <button type="button" className="wallet-option wallet-option-browser" onClick={() => void connectBrowserWallet("browser")} disabled={walletConnecting}><span className="wallet-option-icon browser">↗</span><span><strong>Other browser wallet</strong><small>Robinhood Wallet and compatible extensions</small></span><b>WEB3</b></button>
+          <div className="wallet-connect-divider"><span>OR</span></div>
+          <button type="button" className="wallet-option wallet-option-wc" onClick={() => void connectWalletConnect()} disabled={walletConnecting || walletConnectReady !== true}><span className="wallet-option-icon walletconnect">W</span><span><strong>Continue with a wallet</strong><small>{walletConnectReady === null ? "Checking WalletConnect…" : walletConnectReady ? "Scan QR or open your mobile wallet" : "WalletConnect is temporarily unavailable"}</small></span><b>{walletConnectReady ? "QR" : "OFFLINE"}</b></button>
         </div>
         <p className="wallet-connect-terms">By connecting, you confirm that you understand the product risks and jurisdiction restrictions.</p>
-        <div className="wallet-connect-foot"><span><i /> Robinhood Chain mainnet</span><strong>CHAIN ID 4663</strong></div>
+        <div className="wallet-connect-foot"><span><i /> Robinhood Chain mainnet</span><strong>{PRIVY_CONFIGURED ? "PROTECTED BY PRIVY" : "CHAIN ID 4663"}</strong></div>
       </section></div>}
 
       {infoPanel && <div className="confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setInfoPanel(null); }}><section className="info-card" role="dialog" aria-modal="true" aria-labelledby="info-title"><div className="composer-head"><div><p className="eyebrow">{infoPanel === "docs" ? "QUICK GUIDE" : "PRODUCT RISKS"}</p><h2 id="info-title">{infoPanel === "docs" ? "Know every status." : "Understand before you trade."}</h2></div><button aria-label="Close information" onClick={() => setInfoPanel(null)}>x</button></div>{infoPanel === "docs" ? <div className="info-list"><article><span>01</span><p><strong>Buy or sell</strong><small>HoodFlow compares reviewed liquidity routes and returns a protected quote.</small></p></article><article><span>02</span><p><strong>Exact order permission</strong><small>Permit2 signs only the selected token amount for ten minutes.</small></p></article><article><span>03</span><p><strong>Full-fill ready</strong><small>The complete input passed a router fork test. A fresh quote is still required.</small></p></article><article><span>04</span><p><strong>Watch-only</strong><small>The token remains visible, but HoodFlow blocks trading until a route is verified.</small></p></article><article><span>05</span><p><strong>Recurring DCA</strong><small>A separate optional automation layer; direct Buy and Sell remain the primary product.</small></p></article></div> : <div className="info-copy"><p><strong>Stock Tokens are not shares.</strong> Robinhood describes them as derivative contracts that track an underlying security without granting shareholder rights.</p><p>Stock Tokens carry a high level of risk, may not be appropriate for every investor, and eligibility or jurisdictional restrictions can apply.</p><p>HoodFlow is an independent interface built on Robinhood Chain. It is not affiliated with or endorsed by Robinhood Markets, Inc.</p><p>Verify the token amount, minimum output and router address in your wallet before signing. Network gas is paid in ETH.</p><p><a href="https://robinhood.com/eu/en/support/articles/about-stock-tokens/" target="_blank" rel="noreferrer">Review Robinhood&apos;s Stock Token explanation and risks ↗</a></p></div>}<button className="drawer-action" onClick={() => setInfoPanel(null)}>Got it</button></section></div>}

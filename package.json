@@ -34,6 +34,7 @@
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.6.1",
+    "@privy-io/react-auth": "^3.35.1",
     "@walletconnect/ethereum-provider": "^2.23.10",
     "drizzle-orm": "0.45.2",
     "ethers": "^6.17.0",
@@ -78,6 +79,15 @@
     "mocha": {
       "diff": "8.0.3",
       "serialize-javascript": "7.0.5"
+    },
+    "@privy-io/react-auth": {
+      "ws": "8.21.1"
+    },
+    "@wagmi/connectors": {
+      "ws": "8.21.1"
+    },
+    "viem": {
+      "ws": "8.21.1"
     }
   }
 }

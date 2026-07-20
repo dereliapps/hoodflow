@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Mono, Instrument_Sans } from "next/font/google";
 import { headers } from "next/headers";
 import { Analytics } from "./analytics";
+import { Providers } from "./providers";
 import "./globals.css";
 
 const instrumentSans = Instrument_Sans({ variable: "--font-instrument-sans", subsets: ["latin"] });
@@ -50,5 +51,5 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       { "@type": "WebApplication", "@id": "https://hoodflow.app/#app", name: "HoodFlow", url: "https://hoodflow.app", applicationCategory: "FinanceApplication", operatingSystem: "Web", description: "Self-custody Stock Token execution interface for Robinhood Chain.", provider: { "@id": "https://hoodflow.app/#organization" } },
     ],
   };
-  return <html lang="en"><body className={`${instrumentSans.variable} ${ibmPlexMono.variable}`}><script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }} /><Analytics />{children}</body></html>;
+  return <html lang="en"><body className={`${instrumentSans.variable} ${ibmPlexMono.variable}`}><script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }} /><Analytics /><Providers>{children}</Providers></body></html>;
 }
