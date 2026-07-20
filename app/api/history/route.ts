@@ -4,8 +4,8 @@ import {
   ROBINHOOD_PRICE_FEEDS,
   type RobinhoodPriceTicker,
 } from "@/config/robinhood-price-feeds";
+import stockHistorySnapshot from "@/generated/stock-price-history.json";
 import { decodeLatestRoundData, scalePrice } from "@/lib/chainlink";
-import { PUBLIC_ROBINHOOD_PRICE_RPC_URL } from "@/lib/robinhood-prices";
 
 const LATEST_ROUND_DATA = "0xfeaf968c";
 const GET_ROUND_DATA = "0x9a6fc8f5";
@@ -83,7 +83,7 @@ async function readHistory(rpcUrl: string, ticker: RobinhoodPriceTicker, feed: s
   return points;
 }
 
-function historyResponse(ticker: RobinhoodPriceTicker, entry: HistoryCacheEntry, cacheState: "fresh" | "stale" | "miss") {
+function historyResponse(ticker: RobinhoodPriceTicker, entry: HistoryCacheEntry, cacheState: "fresh" | "stale" | "miss" | "snapshot") {
   return NextResponse.json({
     ticker,
     feed: entry.feed,
@@ -111,14 +111,31 @@ export async function GET(request: Request) {
     });
   }
 
+  const snapshot = stockHistorySnapshot as {
+    generatedAt: string;
+    assets: Record<string, { feed: string; points: HistoryPoint[] }>;
+  };
+  const snapshotAsset = snapshot.assets[ticker];
+  const snapshotEntry = snapshotAsset?.points.length >= 2
+    ? { feed: snapshotAsset.feed, points: snapshotAsset.points, cachedAt: Date.parse(snapshot.generatedAt) }
+    : null;
+
   const cached = historyCache.get(ticker);
   if (cached && Date.now() - cached.cachedAt <= HISTORY_CACHE_TTL_MS) {
     return historyResponse(ticker, cached, "fresh");
   }
 
-  const rpcUrls = [process.env.ROBINHOOD_PRICE_RPC_URL, PUBLIC_ROBINHOOD_PRICE_RPC_URL]
+  const rpcUrls = [process.env.ROBINHOOD_PRICE_RPC_URL]
     .filter((url): url is string => Boolean(url))
     .filter((url, index, all) => all.indexOf(url) === index);
+
+  // The public Robinhood RPC is rate-limited and explicitly not production
+  // infrastructure. Serve the verified build snapshot instantly until a
+  // dedicated archive endpoint is configured; the UI appends the current live
+  // oracle point when it is newer than the snapshot.
+  if (rpcUrls.length === 0 && snapshotEntry) {
+    return historyResponse(ticker, snapshotEntry, "snapshot");
+  }
 
   try {
     const points = await Promise.any(rpcUrls.map((rpcUrl) => readHistory(rpcUrl, ticker, feed)));
@@ -129,6 +146,7 @@ export async function GET(request: Request) {
     if (cached && Date.now() - cached.cachedAt <= STALE_CACHE_TTL_MS) {
       return historyResponse(ticker, cached, "stale");
     }
+    if (snapshotEntry) return historyResponse(ticker, snapshotEntry, "snapshot");
     return NextResponse.json({ ticker, points: [], error: "Onchain price history is temporarily unavailable" }, {
       status: 503,
       headers: { "cache-control": "no-store" },

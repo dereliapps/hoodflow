@@ -44,7 +44,7 @@ test("server-renders the HoodFlow product shell", async () => {
 });
 
 test("ships a bounded, interactive Robinhood mainnet experience", async () => {
-  const [page, layout, css, packageJson, priceRoute, priceLib, historyRoute, docs, community, rewards, referralRoute, communityMarketRoute] = await Promise.all([
+  const [page, layout, css, packageJson, priceRoute, priceLib, historyRoute, stockHistory, docs, community, rewards, referralRoute, communityMarketRoute] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
@@ -52,6 +52,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
     readFile(new URL("../app/api/prices/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/robinhood-prices.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/history/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../generated/stock-price-history.json", import.meta.url), "utf8"),
     readFile(new URL("../app/docs/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/community-tokens.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/referral-rewards.tsx", import.meta.url), "utf8"),
@@ -112,7 +113,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /Compare live routes/);
   assert.match(page, /PROTECTED ROUTES/);
   assert.match(page, /Automatic retries are active/);
-  assert.match(page, /Release 0\.10\.1/);
+  assert.match(page, /Release 0\.10\.2/);
   assert.match(page, /DCA command center/);
   assert.match(page, /TRACKED TRADE VOLUME/);
   assert.match(page, /price-skeleton/);
@@ -196,6 +197,11 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(historyRoute, /HISTORY_CACHE_TTL_MS/);
   assert.match(historyRoute, /Promise\.any/);
   assert.match(historyRoute, /History RPC returned fewer than two rounds/);
+  assert.match(historyRoute, /stockHistorySnapshot/);
+  assert.match(historyRoute, /"snapshot"/);
+  const parsedStockHistory = JSON.parse(stockHistory);
+  assert.ok(Object.keys(parsedStockHistory.assets).length >= 20);
+  assert.equal(parsedStockHistory.assets.AAPL.points.length, 32);
   assert.match(page, /priceHistoryCacheRef/);
   assert.match(page, /cache: "default"/);
   assert.match(historyRoute, /decodeLatestRoundData/);

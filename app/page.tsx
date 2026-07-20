@@ -233,39 +233,57 @@ function PriceCell({ point, loading }: { point?: PricePoint; loading: boolean })
   return <div className={`price-cell ${point.status}`}><strong>{formatPrice(point.price)}</strong><small><i />{detail}</small></div>;
 }
 
-function PriceHistoryChart({ points, loading, livePrice }: { points: HistoryPoint[]; loading: boolean; livePrice?: number | null }) {
+function PriceHistoryChart({ points, loading, livePoint }: { points: HistoryPoint[]; loading: boolean; livePoint?: PricePoint }) {
   if (loading) {
     return <div className="history-chart history-loading" aria-label="Loading verified Chainlink rounds"><div className="history-grid" /><div className="history-loading-line" /><i className="history-loading-dot" /><span>Loading verified rounds…</span></div>;
   }
+  const livePrice = livePoint?.price;
   if (points.length < 2) {
     if (livePrice) {
       return <div className="history-chart history-live-point" aria-label={`Current verified oracle price ${formatPrice(livePrice)}`}><div className="history-grid" /><div className="history-reference-line" /><i className="latest" /><span><strong>{formatPrice(livePrice)}</strong>Current verified oracle point</span></div>;
     }
     return <div className="history-chart empty"><span>Price history is reconnecting.</span></div>;
   }
-  const prices = points.map((point) => point.price);
+  const latestHistoryPoint = points.at(-1);
+  const chartPoints = livePrice && livePoint?.updatedAt && (!latestHistoryPoint || livePoint.updatedAt > latestHistoryPoint.updatedAt)
+    ? [...points, { roundId: `live:${livePoint.updatedAt}`, price: livePrice, updatedAt: livePoint.updatedAt }]
+    : points;
+  const prices = chartPoints.map((point) => point.price);
   const low = Math.min(...prices);
   const high = Math.max(...prices);
   const spread = Math.max(high - low, high * 0.0025);
-  const coordinates = points.map((point, index) => {
-    const x = points.length === 1 ? 0 : index / (points.length - 1) * 100;
+  const coordinates = chartPoints.map((point, index) => {
+    const x = chartPoints.length === 1 ? 0 : index / (chartPoints.length - 1) * 100;
     const y = 88 - (point.price - low) / spread * 76;
     return `${x.toFixed(2)}% ${Math.max(8, Math.min(92, y)).toFixed(2)}%`;
   });
   const area = `polygon(${coordinates.join(",")}, 100% 100%, 0 100%)`;
-  const first = new Date(points[0].updatedAt * 1_000);
-  const last = new Date(points.at(-1)!.updatedAt * 1_000);
+  const first = new Date(chartPoints[0].updatedAt * 1_000);
+  const last = new Date(chartPoints.at(-1)!.updatedAt * 1_000);
   return <div className="history-chart" aria-label={`Onchain price history from ${first.toLocaleDateString()} to ${last.toLocaleDateString()}`}>
     <div className="history-grid" />
     <div className="history-area" style={{ clipPath: area }} />
-    {points.filter((_, index) => index % Math.max(1, Math.floor(points.length / 8)) === 0 || index === points.length - 1).map((point, index, visible) => {
-      const sourceIndex = points.indexOf(point);
-      const x = sourceIndex / (points.length - 1) * 100;
+    {chartPoints.filter((_, index) => index % Math.max(1, Math.floor(chartPoints.length / 8)) === 0 || index === chartPoints.length - 1).map((point, index, visible) => {
+      const sourceIndex = chartPoints.indexOf(point);
+      const x = sourceIndex / (chartPoints.length - 1) * 100;
       const y = 88 - (point.price - low) / spread * 76;
       return <i key={point.roundId} className={index === visible.length - 1 ? "latest" : ""} style={{ left: `${x}%`, top: `${Math.max(8, Math.min(92, y))}%` }} />;
     })}
     <div className="history-axis"><span>{first.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span><span>{last.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></div>
   </div>;
+}
+
+async function readPriceHistoryApi(ticker: string, signal: AbortSignal) {
+  const response = await fetch(`/api/history?ticker=${encodeURIComponent(ticker)}`, {
+    headers: { accept: "application/json" },
+    cache: "default",
+    signal,
+  });
+  const payload = await response.json() as { points?: HistoryPoint[]; error?: string };
+  if (!response.ok || !Array.isArray(payload.points) || payload.points.length < 2) {
+    throw new Error(payload.error || "History request failed");
+  }
+  return payload.points;
 }
 
 function Hint({ label, children }: { label: string; children: React.ReactNode }) {
@@ -653,15 +671,8 @@ export default function Home() {
         setHistoryLoading(true);
       }
       try {
-        const response = await fetch(`/api/history?ticker=${encodeURIComponent(selectedAssetTicker)}`, {
-          headers: { accept: "application/json" },
-          cache: "default",
-          signal: controller.signal,
-        });
-        const payload = await response.json() as { points?: HistoryPoint[]; error?: string };
-        if (!response.ok && !Array.isArray(payload.points)) throw new Error(payload.error || "History request failed");
-        const points = Array.isArray(payload.points) ? payload.points : [];
-        const error = payload.error ?? "";
+        const points = await readPriceHistoryApi(selectedAssetTicker, controller.signal);
+        const error = "";
         priceHistoryCacheRef.current[selectedAssetTicker] = { points, error };
         setPriceHistory(points);
         setHistoryError(error);
@@ -1760,7 +1771,7 @@ export default function Home() {
           <div className="asset-detail-grid">
             <article className="asset-chart-card">
               <div className="asset-price-line"><div><span>ONCHAIN TOKEN PRICE</span><strong>{priceBook[selectedAsset.ticker]?.price ? formatPrice(priceBook[selectedAsset.ticker].price) : <span className="price-skeleton detail" aria-label="Live price loading" />}</strong><small>{priceBook[selectedAsset.ticker]?.status === "live" ? formatPriceAge(priceBook[selectedAsset.ticker].updatedAt) : priceState === "error" ? "Automatic verification retry active" : "Connecting to live onchain feed"}</small></div>{historyStats && <div className={historyStats.change >= 0 ? "positive" : "negative"}><span>ROUND RANGE</span><strong>{historyStats.change >= 0 ? "+" : ""}{historyStats.change.toFixed(2)}%</strong><small>{priceHistory.length} verified rounds</small></div>}</div>
-              <PriceHistoryChart points={priceHistory} loading={historyLoading} livePrice={priceBook[selectedAsset.ticker]?.price} />
+              <PriceHistoryChart points={priceHistory} loading={historyLoading} livePoint={priceBook[selectedAsset.ticker]} />
               <div className="asset-chart-foot"><div><span>RANGE LOW</span><strong>{historyStats ? formatPrice(historyStats.low) : "—"}</strong></div><div><span>RANGE HIGH</span><strong>{historyStats ? formatPrice(historyStats.high) : "—"}</strong></div><div><span>HEARTBEAT</span><strong>{Math.round((priceBook[selectedAsset.ticker]?.heartbeat ?? 86_400) / 3_600)}h</strong></div><div><span>ORACLE</span><strong>{priceBook[selectedAsset.ticker]?.oraclePaused === false ? "Active" : priceBook[selectedAsset.ticker]?.oraclePaused === true ? "Paused" : "Unavailable"}</strong></div></div>
               {historyError && <p className="history-error">{historyError}</p>}
             </article>
@@ -1852,7 +1863,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Independent interface · Release 0.10.1</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Independent interface · Release 0.10.2</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setComposerOpen(false); }}>
