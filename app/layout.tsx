@@ -18,7 +18,7 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase: new URL(origin),
     icons: { icon: "/favicon.svg", shortcut: "/favicon.svg", apple: "/favicon.svg" },
     title: { default: "HoodFlow | Crypto & Stock Token Markets on Robinhood Chain", template: "%s | HoodFlow" },
-    description: "Discover live Robinhood Chain crypto pools, charts, market cap, volume and liquidity, then compare protected self-custody swap routes.",
+    description: "Compare live Stock Token and crypto liquidity on Robinhood Chain, review transparent fees and protected minimum output, then trade from a self-custody wallet.",
     keywords: ["Robinhood Chain", "Stock Tokens", "tokenized stocks", "meme tokens", "crypto trading", "USDG", "Uniswap V4", "self-custody"],
     alternates: { canonical: "/" },
     category: "finance",
@@ -34,6 +34,8 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     twitter: {
       card: "summary_large_image",
+      site: "@hoodfloow",
+      creator: "@hoodfloow",
       title: "HoodFlow | Every live token. One execution screen.",
       description: "Live crypto markets, onchain charts and protected self-custody execution on Robinhood Chain.",
       images: [`${origin}/og-crypto.png`],

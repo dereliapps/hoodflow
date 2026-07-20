@@ -3,6 +3,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import {
   BrowserProvider,
   Contract,
@@ -53,13 +54,15 @@ import {
 import { ROBINHOOD_PRICE_FEEDS } from "@/config/robinhood-price-feeds";
 import { track } from "@/lib/analytics-client";
 import CommunityTokens from "./community-tokens";
+import AssetRequestBoard from "./asset-request-board";
+import MarketStatus from "./market-status";
 import type { PrivyWalletController } from "./privy-wallet-bridge";
 import { PRIVY_CONFIGURED } from "./providers";
 import ReferralRewards from "./referral-rewards";
 
 const PrivyWalletBridge = dynamic(() => import("./privy-wallet-bridge"), { ssr: false });
 
-type View = "overview" | "strategies" | "assets" | "asset" | "community" | "rewards" | "marketplace" | "activity" | "controls";
+type View = "overview" | "strategies" | "assets" | "asset" | "community" | "portfolio" | "rewards" | "marketplace" | "activity" | "controls";
 type StrategyKind = "Buy" | "Sell" | "DCA";
 type StrategyStatus = "Prepared" | "Paused" | "Confirmed";
 type MarketplaceSort = "featured" | "cadence" | "risk";
@@ -91,6 +94,16 @@ type Strategy = {
   createdAt: number;
   txHash?: string;
   chainStrategyId?: string;
+  inputAmount?: number;
+  outputAmount?: number;
+};
+
+type DirectQuotePreview = {
+  protocol: "V3" | "V4";
+  feeBps: number;
+  amountOut: string;
+  minimumOut: string;
+  updatedAt: number;
 };
 
 type HistoryPoint = {
@@ -165,7 +178,7 @@ function errorMessage(error: unknown) {
   return friendlyExecutionError(error);
 }
 
-async function getBestV4Quote(provider: BrowserProvider, tokenIn: string, tokenOut: string, amountIn: bigint) {
+async function getBestV4Quote(provider: BrowserProvider | JsonRpcProvider, tokenIn: string, tokenOut: string, amountIn: bigint) {
   const quoter = new Contract(V4_QUOTER_ADDRESS, V4_QUOTER_ABI, provider);
   const attempts = await Promise.allSettled(V4_POOL_CANDIDATES.map(async (route) => {
     const result = await quoter.quoteExactInputSingle.staticCall(
@@ -249,12 +262,16 @@ function PriceHistoryChart({ points, loading }: { points: HistoryPoint[]; loadin
   </div>;
 }
 
+function Hint({ label, children }: { label: string; children: React.ReactNode }) {
+  return <span className="term-hint" tabIndex={0}><span>{label}</span><b aria-hidden="true">?</b><span className="term-tooltip" role="tooltip">{children}</span></span>;
+}
+
 function isStoredStrategy(value: unknown): value is Strategy {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<Strategy>;
   return typeof item.id === "number"
     && typeof item.name === "string"
-    && ["Buy", "DCA"].includes(item.kind ?? "")
+    && ["Buy", "Sell", "DCA"].includes(item.kind ?? "")
     && typeof item.asset === "string"
     && typeof item.rule === "string"
     && typeof item.detail === "string"
@@ -283,6 +300,9 @@ export default function Home() {
   const [engineChecking, setEngineChecking] = useState(contractConfigured);
   const [enginePaused, setEnginePaused] = useState(false);
   const [engineOwner, setEngineOwner] = useState("");
+  const [engineOwnerType, setEngineOwnerType] = useState<"EOA" | "Contract" | "Unknown">("Unknown");
+  const [engineFeeBps, setEngineFeeBps] = useState<number | null>(null);
+  const [rpcHealth, setRpcHealth] = useState<{ endpoint: string; configuredEndpoints: number; latencyMs: number } | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null);
   const [kind, setKind] = useState<StrategyKind>("DCA");
@@ -311,6 +331,11 @@ export default function Home() {
   const [priceHistory, setPriceHistory] = useState<HistoryPoint[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
+  const [portfolioBalances, setPortfolioBalances] = useState<Record<string, number>>({});
+  const [portfolioLoading, setPortfolioLoading] = useState(false);
+  const [composerQuote, setComposerQuote] = useState<DirectQuotePreview | null>(null);
+  const [composerQuoteBusy, setComposerQuoteBusy] = useState(false);
+  const [composerQuoteError, setComposerQuoteError] = useState("");
 
   const connected = Boolean(walletAddress);
   const preparedCount = useMemo(() => strategies.filter((item) => item.status === "Prepared").length, [strategies]);
@@ -403,6 +428,50 @@ export default function Home() {
   const activityRows = useMemo(() => strategies
     .filter((item) => item.txHash)
     .sort((left, right) => right.createdAt - left.createdAt), [strategies]);
+  const portfolioRows = useMemo(() => {
+    const ledger = new Map<string, { quantity: number; cost: number; realized: number }>();
+    [...strategies].sort((left, right) => left.createdAt - right.createdAt).forEach((item) => {
+      if (item.status !== "Confirmed" || !item.inputAmount || !item.outputAmount || !assetByTicker[item.asset]) return;
+      const current = ledger.get(item.asset) ?? { quantity: 0, cost: 0, realized: 0 };
+      if (item.kind === "Buy") {
+        current.quantity += item.outputAmount;
+        current.cost += item.inputAmount;
+      } else if (item.kind === "Sell" && current.quantity > 0) {
+        const sold = Math.min(current.quantity, item.inputAmount);
+        const removedCost = current.cost * sold / current.quantity;
+        current.quantity -= sold;
+        current.cost = Math.max(0, current.cost - removedCost);
+        current.realized += item.outputAmount - removedCost;
+      }
+      ledger.set(item.asset, current);
+    });
+    return assetRegistry.flatMap((asset) => {
+      const balance = portfolioBalances[asset.ticker] ?? 0;
+      if (balance <= 0.00000001) return [];
+      const price = priceBook[asset.ticker]?.price ?? null;
+      const tracked = ledger.get(asset.ticker);
+      const trackedQuantity = tracked ? Math.min(balance, tracked.quantity) : 0;
+      const trackedCost = tracked && tracked.quantity > 0 ? tracked.cost * trackedQuantity / tracked.quantity : 0;
+      const currentValue = price ? balance * price : null;
+      const trackedValue = price ? trackedQuantity * price : null;
+      return [{
+        ...asset,
+        balance,
+        price,
+        currentValue,
+        trackedQuantity,
+        averageEntry: trackedQuantity > 0 ? trackedCost / trackedQuantity : null,
+        unrealizedPnl: trackedValue !== null && trackedQuantity > 0 ? trackedValue - trackedCost : null,
+        realizedPnl: tracked?.realized ?? 0,
+        importedQuantity: Math.max(0, balance - trackedQuantity),
+      }];
+    });
+  }, [portfolioBalances, priceBook, strategies]);
+  const portfolioTotals = useMemo(() => portfolioRows.reduce((total, row) => ({
+    value: total.value + (row.currentValue ?? 0),
+    unrealized: total.unrealized + (row.unrealizedPnl ?? 0),
+    realized: total.realized + row.realizedPnl,
+  }), { value: 0, unrealized: 0, realized: 0 }), [portfolioRows]);
   const bootMessage = bootProgress < 32 ? "Loading token registry" : bootProgress < 60 ? "Verifying onchain prices" : bootProgress < 82 ? "Checking trade routes" : bootProgress < 100 ? "Preparing your workspace" : "Workspace ready";
 
   useEffect(() => {
@@ -489,7 +558,7 @@ export default function Home() {
         setView("community");
       } else if (params.get("ref")) {
         setView("rewards");
-      } else if (requestedView && ["overview", "strategies", "assets", "community", "rewards", "marketplace", "activity", "controls"].includes(requestedView)) {
+      } else if (requestedView && ["overview", "strategies", "assets", "community", "portfolio", "rewards", "marketplace", "activity", "controls"].includes(requestedView)) {
         setView(requestedView);
       } else if (view === "asset") {
         setView("assets");
@@ -635,6 +704,9 @@ export default function Home() {
         owner?: string;
         paused?: boolean;
         configured?: boolean;
+        protocolFeeBps?: number;
+        ownerType?: "EOA" | "Contract";
+        rpc?: { endpoint: string; configuredEndpoints: number; latencyMs: number };
         error?: string;
       };
       if (!response.ok || typeof status.blockNumber !== "number" || !status.owner) {
@@ -643,6 +715,9 @@ export default function Home() {
       setNetworkBlock(status.blockNumber.toLocaleString("en-US"));
       setEngineOwner(status.owner);
       setEnginePaused(Boolean(status.paused));
+      setEngineOwnerType(status.ownerType ?? "Unknown");
+      setEngineFeeBps(typeof status.protocolFeeBps === "number" ? status.protocolFeeBps : null);
+      setRpcHealth(status.rpc ?? null);
       setContractReady(!status.paused && Boolean(status.configured));
       setContractStatus(status.paused
         ? "Engine deployed · owner activation required"
@@ -669,6 +744,67 @@ export default function Home() {
       document.removeEventListener("visibilitychange", refreshVisible);
     };
   }, [refreshEngineStatus]);
+
+  const refreshComposerQuote = useCallback(async () => {
+    if (!composerOpen || (kind !== "Buy" && kind !== "Sell") || !isRoutedAsset(draftAsset)) {
+      setComposerQuote(null);
+      setComposerQuoteError("");
+      return;
+    }
+    let amountIn: bigint;
+    try {
+      amountIn = parseUnits(draftAmount || "0", kind === "Buy" ? USDG_DECIMALS : STOCK_TOKEN_DECIMALS);
+      if (amountIn <= 0n) throw new Error("Enter an amount to request a quote.");
+    } catch {
+      setComposerQuote(null);
+      setComposerQuoteError("Enter a valid amount.");
+      return;
+    }
+    setComposerQuoteBusy(true);
+    try {
+      const provider = new JsonRpcProvider(ROBINHOOD_MAINNET.rpcUrls[0], ROBINHOOD_MAINNET.chainIdNumber, { staticNetwork: true });
+      const tokenAddress = ROBINHOOD_TOKENS[draftAsset];
+      const tokenIn = kind === "Buy" ? USDG_ADDRESS : tokenAddress;
+      const tokenOut = kind === "Buy" ? tokenAddress : USDG_ADDRESS;
+      const route = isV3RoutedAsset(draftAsset)
+        ? await (async () => {
+            const fee = V3_ROUTE_FEES[draftAsset];
+            const quoter = new Contract(V3_QUOTER_ADDRESS, V3_QUOTER_ABI, provider);
+            const result = await quoter.quoteExactInputSingle.staticCall({ tokenIn, tokenOut, amountIn, fee, sqrtPriceLimitX96: 0 }) as readonly [bigint, bigint, bigint, bigint];
+            return { protocol: "V3" as const, amountOut: BigInt(result[0]), feeBps: fee / 100 };
+          })()
+        : await getBestV4Quote(provider, tokenIn, tokenOut, amountIn).then((result) => ({ protocol: "V4" as const, amountOut: result.amountOut, feeBps: result.route.fee / 100 }));
+      if (route.amountOut <= 0n) throw new Error("No live route is available for this amount.");
+      const slippageBps = Math.max(10, Math.min(500, Math.round(Number(draftSlippage || 0.5) * 100)));
+      const minimum = route.amountOut * BigInt(10_000 - slippageBps) / 10_000n;
+      const decimals = kind === "Buy" ? STOCK_TOKEN_DECIMALS : USDG_DECIMALS;
+      setComposerQuote({
+        protocol: route.protocol,
+        feeBps: route.feeBps,
+        amountOut: formatUnits(route.amountOut, decimals),
+        minimumOut: formatUnits(minimum, decimals),
+        updatedAt: Date.now(),
+      });
+      setComposerQuoteError("");
+    } catch (error) {
+      setComposerQuote(null);
+      setComposerQuoteError(errorMessage(error));
+    } finally {
+      setComposerQuoteBusy(false);
+    }
+  }, [composerOpen, draftAmount, draftAsset, draftSlippage, kind]);
+
+  useEffect(() => {
+    if (!composerOpen || (kind !== "Buy" && kind !== "Sell")) return;
+    const start = window.setTimeout(() => void refreshComposerQuote(), 250);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshComposerQuote();
+    }, 12_000);
+    return () => {
+      window.clearTimeout(start);
+      window.clearInterval(interval);
+    };
+  }, [composerOpen, kind, refreshComposerQuote]);
 
   function notify(message: string) {
     setToast(message);
@@ -720,13 +856,32 @@ export default function Home() {
   }
 
   async function refreshWalletBalances(address: string, provider: BrowserProvider) {
+    setPortfolioLoading(true);
     const usdG = new Contract(USDG_ADDRESS, ERC20_ABI, provider);
-    const [nativeBalance, usdGBalance] = await Promise.all([
-      provider.getBalance(address),
-      usdG.balanceOf(address) as Promise<bigint>,
-    ]);
-    setWalletBalance(Number(formatEther(nativeBalance)).toFixed(4));
-    setWalletUsdgBalance(Number(formatUnits(usdGBalance, USDG_DECIMALS)).toFixed(2));
+    try {
+      const loadTokenBalances = async () => {
+        const entries: Array<readonly [string, number]> = [];
+        for (let index = 0; index < assetRegistry.length; index += 5) {
+          const batch = await Promise.allSettled(assetRegistry.slice(index, index + 5).map(async (asset) => {
+            const token = new Contract(ROBINHOOD_TOKENS[asset.ticker], ERC20_ABI, provider);
+            const balance = await token.balanceOf(address) as bigint;
+            return [asset.ticker, Number(formatUnits(balance, STOCK_TOKEN_DECIMALS))] as const;
+          }));
+          entries.push(...batch.flatMap((result) => result.status === "fulfilled" ? [result.value] : []));
+        }
+        return entries;
+      };
+      const [nativeBalance, usdGBalance, tokenBalances] = await Promise.all([
+        provider.getBalance(address),
+        usdG.balanceOf(address) as Promise<bigint>,
+        loadTokenBalances(),
+      ]);
+      setWalletBalance(Number(formatEther(nativeBalance)).toFixed(4));
+      setWalletUsdgBalance(Number(formatUnits(usdGBalance, USDG_DECIMALS)).toFixed(2));
+      setPortfolioBalances(Object.fromEntries(tokenBalances));
+    } finally {
+      setPortfolioLoading(false);
+    }
   }
 
   async function switchToRobinhoodChain(provider: HoodFlowWalletProvider) {
@@ -835,6 +990,7 @@ export default function Home() {
       setWalletAddress("");
       setWalletBalance("");
       setWalletUsdgBalance("");
+      setPortfolioBalances({});
       notify("Wallet disconnected from HoodFlow");
     }
   }
@@ -906,6 +1062,8 @@ export default function Home() {
     setDraftExecutions("12");
     setDraftSlippage("0.5");
     setTransactionStep("");
+    setComposerQuote(null);
+    setComposerQuoteError("");
     setComposerOpen(true);
   }
 
@@ -1044,6 +1202,7 @@ export default function Home() {
       id: Date.now(), name: draftName, kind: "Buy", asset: draftAsset,
       rule: `Buy once with ${draftAmount} USDG`, detail: `${Number(formatUnits(received, STOCK_TOKEN_DECIMALS)).toFixed(6)} ${draftAsset} received`, status: "Confirmed",
       budget: `${Number(draftAmount).toFixed(2)} USDG`, expires: "Completed", createdAt: Date.now(), txHash: receipt.hash,
+      inputAmount: Number(draftAmount), outputAmount: Number(formatUnits(received, STOCK_TOKEN_DECIMALS)),
     }, ...current]);
     await refreshWalletBalances(address, provider);
     setComposerOpen(false);
@@ -1137,6 +1296,7 @@ export default function Home() {
       id: Date.now(), name: draftName, kind: "Sell", asset: draftAsset,
       rule: `Sell ${draftAmount} ${draftAsset}`, detail: `${Number(formatUnits(received, USDG_DECIMALS)).toFixed(2)} USDG received`, status: "Confirmed",
       budget: `${draftAmount} ${draftAsset}`, expires: "Completed", createdAt: Date.now(), txHash: receipt.hash,
+      inputAmount: Number(draftAmount), outputAmount: Number(formatUnits(received, USDG_DECIMALS)),
     }, ...current]);
     await refreshWalletBalances(address, provider);
     setComposerOpen(false);
@@ -1294,6 +1454,7 @@ export default function Home() {
     { view: "overview", label: "Home" },
     { view: "assets", label: "Stock Tokens" },
     { view: "community", label: "Crypto" },
+    { view: "portfolio", label: "Portfolio" },
     { view: "marketplace", label: "DCA" },
     { view: "rewards", label: "Rewards" },
     { view: "activity", label: "Activity" },
@@ -1338,12 +1499,14 @@ export default function Home() {
         <section className="page overview-page hf-home">
           <div className="hf-announcement"><span><i /> ROBINHOOD CHAIN MAINNET</span><strong>15 reviewed Stock Token routes are execution-enabled.</strong><button onClick={() => navigate("assets")}>See markets →</button></div>
           <div className="independence-notice"><strong>Independent interface built on Robinhood Chain.</strong><span>Not affiliated with or endorsed by Robinhood Markets, Inc.</span></div>
+          <MarketStatus />
 
           <section className="hf-hero">
             <div className="hf-hero-copy">
               <p className="eyebrow">THE EXECUTION LAYER FOR STOCK TOKENS</p>
               <h1>Find the route.<br /><em>Keep the upside.</em></h1>
-              <p className="hf-hero-lede">HoodFlow compares reviewed Uniswap V3 and V4 liquidity, blocks unsafe fills and settles canonical Stock Tokens directly to your wallet.</p>
+              <p className="hf-hero-lede">HoodFlow finds a live route for your exact amount, blocks unsafe fills and sends the purchased Stock Token directly to your wallet.</p>
+              <div className="hf-term-strip"><Hint label="Route">The path and liquidity pool used to exchange one token for another.</Hint><Hint label="Oracle">A reference price used as a safety check, not the price your swap is guaranteed to receive.</Hint><Hint label="Permit">A short-lived wallet signature allowing only the amount shown in your order.</Hint></div>
               <div className="hf-hero-actions"><button className="hf-primary" onClick={() => navigate("assets")}>Compare live routes <span>→</span></button><a href="/how-it-works">How execution works</a></div>
               <p className="hf-risk-line">Stock Tokens are not shares and may be restricted in your jurisdiction. <a href="https://robinhood.com/eu/en/support/articles/about-stock-tokens/" target="_blank" rel="noreferrer">Review product risks ↗</a></p>
             </div>
@@ -1427,6 +1590,7 @@ export default function Home() {
             {visibleAssets.map(({ ticker, name, type, fullFill }) => <article className="asset-catalog-row" key={ticker}><button className="asset-identity" onClick={() => openAsset(ticker)}><Mark ticker={ticker} /><p><strong>{ticker}</strong><small>{name}</small></p><span>Open →</span></button><PriceCell point={priceBook[ticker]} loading={priceState === "loading"} /><span className="asset-type">{type}</span><b className={fullFill ? "route-ready" : "route-watch"}><i />{fullFill ? "Ready" : "Watch-only"}</b>{fullFill ? <div className="asset-row-actions"><button onClick={() => openAsset(ticker)}>Details</button><button className="asset-buy" onClick={() => openComposer("Buy", ticker)}>Buy with USDG</button></div> : <button className="asset-details-only" onClick={() => openAsset(ticker)}>{ticker === "MSFT" ? "Partial fill · details" : "No route · details"}</button>}</article>)}
             {visibleAssets.length === 0 && <div className="empty-state"><strong>No matching asset</strong><span>Try another ticker or clear the current filter.</span></div>}
           </div>
+          <AssetRequestBoard walletAddress={walletAddress} walletProvider={walletProvider} onWallet={handleWalletButton} notify={notify} />
           <p className="asset-footnote">Oracle prices are checked every 10 seconds but update only when Chainlink publishes a new round. They are informational references, not execution quotes. Every Buy or Sell receives a fresh DEX quote before wallet confirmation.</p>
         </section>
       )}
@@ -1466,6 +1630,17 @@ export default function Home() {
 
       {view === "community" && <CommunityTokens walletAddress={walletAddress} walletProvider={walletProvider} onWallet={handleWalletButton} notify={notify} onTradeConfirmed={qualifyReferral} />}
 
+      {view === "portfolio" && (
+        <section className="page inner-page portfolio-page">
+          <div className="inner-heading"><div><p className="eyebrow">MY PORTFOLIO</p><h1>Your positions,<br />read from the chain.</h1><p>Live wallet balances with token value, browser-tracked entry cost and confirmed HoodFlow receipts.</p></div><button className="primary-action" onClick={() => connected && walletProvider ? void refreshWalletBalances(walletAddress, new BrowserProvider(walletProvider, "any")) : handleWalletButton()}>{connected ? "Refresh wallet" : "Connect wallet"}</button></div>
+          {!connected ? <div className="portfolio-connect"><span>01</span><h2>Connect to read your Stock Tokens.</h2><p>HoodFlow reads public balances. It does not import private keys or custody assets.</p><button onClick={handleWalletButton}>Connect wallet →</button></div> : <>
+            <div className="portfolio-summary"><article><span>TOKEN VALUE</span><strong>{usdFormatter.format(portfolioTotals.value)}</strong><small>{portfolioRows.length} positions with balance</small></article><article><span>TRACKED UNREALIZED PNL</span><strong className={portfolioTotals.unrealized >= 0 ? "positive" : "negative"}>{portfolioTotals.unrealized >= 0 ? "+" : ""}{usdFormatter.format(portfolioTotals.unrealized)}</strong><small>HoodFlow trades saved in this browser</small></article><article><span>TRACKED REALIZED PNL</span><strong className={portfolioTotals.realized >= 0 ? "positive" : "negative"}>{portfolioTotals.realized >= 0 ? "+" : ""}{usdFormatter.format(portfolioTotals.realized)}</strong><small>Average-cost method</small></article><article><span>AVAILABLE CASH</span><strong>{walletUsdgBalance || "0.00"} USDG</strong><small>{walletBalance || "0.0000"} ETH for gas</small></article></div>
+            <div className="portfolio-table"><div className="portfolio-table-head"><span>ASSET</span><span>BALANCE</span><span>VALUE</span><span>AVG ENTRY</span><span>PNL</span><span /></div>{portfolioRows.map((row) => <article key={row.ticker}><div><Mark ticker={row.ticker} /><p><strong>{row.ticker}</strong><small>{row.name}</small></p></div><strong>{row.balance.toLocaleString("en-US", { maximumFractionDigits: 6 })}</strong><strong>{row.currentValue === null ? "Price unavailable" : usdFormatter.format(row.currentValue)}</strong><span>{row.averageEntry === null ? "Not tracked" : usdFormatter.format(row.averageEntry)}</span><span className={(row.unrealizedPnl ?? 0) >= 0 ? "positive" : "negative"}>{row.unrealizedPnl === null ? "—" : `${row.unrealizedPnl >= 0 ? "+" : ""}${usdFormatter.format(row.unrealizedPnl)}`}</span><button onClick={() => openAsset(row.ticker)}>Open →</button>{row.importedQuantity > 0.00000001 && <small className="portfolio-imported">{row.importedQuantity.toLocaleString("en-US", { maximumFractionDigits: 6 })} tokens have no HoodFlow cost basis in this browser.</small>}</article>)}{!portfolioLoading && portfolioRows.length === 0 && <div className="empty-state"><strong>No Stock Token balance found</strong><span>This wallet does not currently hold one of HoodFlow&apos;s 25 indexed Stock Tokens.</span></div>}{portfolioLoading && <div className="empty-state"><strong>Reading onchain balances…</strong><span>Checking the indexed token registry.</span></div>}</div>
+            <p className="portfolio-note">PnL is informational. Average entry uses only confirmed HoodFlow trades saved in this browser; transferred or previously acquired tokens are shown without an invented cost basis.</p>
+          </>}
+        </section>
+      )}
+
       {view === "rewards" && <ReferralRewards walletAddress={walletAddress} walletProvider={walletProvider} onWallet={handleWalletButton} notify={notify} />}
 
       {view === "marketplace" && (
@@ -1504,6 +1679,8 @@ export default function Home() {
             <article className="control-card"><span>CUSTODY</span><strong>Funds stay in your wallet</strong><p>HoodFlow cannot withdraw assets by itself. Every Buy and Sell order requires your wallet confirmation.</p><b className="control-ok">YOU CONTROL</b></article>
             <article className="control-card"><span>BUY & SELL</span><strong>15 verified routes</strong><p>Fresh quotes, maximum slippage protection, and exact short-lived order permissions.</p><b className="control-ok">LIVE</b></article>
             <article className="control-card dca-control"><span>RECURRING DCA</span><strong>{contractReady ? "Active on mainnet" : enginePaused ? "Ready to activate" : engineChecking ? "Verifying engine" : "Verification delayed"}</strong><p>{contractReady ? "Capped recurring strategies can be created and executed onchain." : enginePaused ? "Only the owner wallet can switch the DCA engine on." : contractStatus}</p><div><b className={`control-ok ${contractReady ? "" : "warning"}`}>{contractReady ? "LIVE" : engineChecking ? "CHECKING" : enginePaused ? "OWNER ACTION" : "AUTO RETRY"}</b>{!contractReady && !engineChecking && <button type="button" className="engine-retry" onClick={() => void refreshEngineStatus()}>Retry now</button>}</div></article>
+            <article className="control-card"><span>RPC HEALTH</span><strong>{rpcHealth ? `${rpcHealth.endpoint} · ${rpcHealth.latencyMs} ms` : "Checking endpoints"}</strong><p>Server reads retry the configured RPC list automatically. Wallet transactions still use the endpoint selected inside your wallet.</p><b className="control-ok">{rpcHealth ? `${rpcHealth.configuredEndpoints} ENDPOINT${rpcHealth.configuredEndpoints === 1 ? "" : "S"}` : "CHECKING"}</b></article>
+            <article className="control-card"><span>ENGINE CONTROL</span><strong>{engineOwner ? `${compactAddress(engineOwner)} · ${engineOwnerType}` : "Reading owner"}</strong><p>{engineOwnerType === "EOA" ? "The current owner is a single externally owned wallet. A multisig or timelock is not verified." : engineOwnerType === "Contract" ? "The controller is a contract, but its multisig or timelock policy has not been independently verified." : "Controller type is still being checked."}</p><b className={`control-ok ${engineOwnerType === "EOA" ? "warning" : ""}`}>{engineOwnerType === "EOA" ? "CENTRALIZATION RISK" : "VERIFY ONCHAIN"}</b></article>
           </div>
           <div className="permissions-card">
             <div className="permissions-head"><div><p className="eyebrow">ONCHAIN ORDERS</p><h2>Strategy permissions</h2></div><span>{strategies.length} records</span></div>
@@ -1514,7 +1691,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Independent interface · Release 0.7.0</span><div><button onClick={() => navigate("assets")}>Market directory</button><button onClick={() => navigate("community")}>Crypto</button><button onClick={() => navigate("rewards")}>Rewards</button><a href="/docs">Documentation</a><a href="/security">Security</a><button onClick={() => setInfoPanel("terms")}>Product risks</button></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Independent interface · Release 0.8.0</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setComposerOpen(false); }}>
@@ -1532,10 +1709,12 @@ export default function Home() {
               </div>
               {kind === "DCA" && <div className="form-pair"><label>SCHEDULE<select name="frequency" value={draftFrequency} onChange={(event) => setDraftFrequency(event.target.value)} disabled={onchainBusy}><option>Daily</option><option>Weekly</option><option>Monthly</option></select></label><label>NUMBER OF BUYS<span className="input-unit"><input name="executions" type="number" min="2" max={draftFrequency === "Daily" ? "52" : draftFrequency === "Weekly" ? "52" : "12"} value={draftExecutions} onChange={(event) => setDraftExecutions(event.target.value)} disabled={onchainBusy} /><b>×</b></span></label></div>}
               <div className="live-order-banner"><i /><span><strong>{kind === "Buy" ? "Buy stock tokens with USDG" : kind === "Sell" ? `Sell ${draftAsset} back to USDG` : contractReady ? "Mainnet recurring strategy" : enginePaused ? "DCA engine awaits owner activation" : "Checking recurring engine"}</strong><small>{kind === "Buy" ? "Your wallet confirms a protected mainnet buy." : kind === "Sell" ? "Your wallet confirms an exact-token sell; USDG returns directly to you." : contractReady ? "The onchain engine enforces your schedule and lifetime cap." : enginePaused ? "Connect the owner wallet and confirm one activation transaction." : "Buy and Sell remain available while the engine check completes."}</small></span><b>{kind !== "DCA" || contractReady ? "LIVE" : enginePaused ? "READY" : "CHECKING"}</b></div>
-              <div className="execution-preview"><div className="preview-head"><span>ORDER REVIEW</span><b>{kind === "DCA" ? contractReady ? "MAINNET DCA" : enginePaused ? "OWNER ACTIVATION REQUIRED" : "ENGINE CHECK" : "MAINNET · WALLET CONFIRMATION"}</b></div><div className="preview-grid"><p><span>Estimated receive</span><strong>{kind === "Sell" ? `${estimatedUnits} USDG` : `${estimatedUnits} ${draftAsset}${kind === "DCA" ? " each" : ""}`}</strong></p><p><span>{kind === "Sell" ? "Sell amount" : "Total USDG cap"}</span><strong>{kind === "Sell" ? `${draftAmount || "0"} ${draftAsset}` : `${draftTotalBudget.toFixed(2)} USDG`}</strong></p><p><span>Execution protection</span><strong>{kind === "DCA" ? `${draftSlippage}% max · engine cap` : `${isV3RoutedAsset(draftAsset) ? "Verified V3 pool" : "Best reviewed V4 pool"} · ${draftSlippage}% max`}</strong></p><p><span>Oracle status</span><strong>{priceBook[draftAsset]?.status === "live" ? formatPriceAge(priceBook[draftAsset].updatedAt) : priceBook[draftAsset]?.status ?? "Syncing"}</strong></p></div></div>
+              <div className="execution-preview"><div className="preview-head"><span>ORDER REVIEW</span><b>{kind === "DCA" ? contractReady ? "MAINNET DCA" : enginePaused ? "OWNER ACTIVATION REQUIRED" : "ENGINE CHECK" : composerQuoteBusy ? "UPDATING QUOTE" : composerQuote ? `LIVE ${composerQuote.protocol} QUOTE` : "WAITING FOR ROUTE"}</b></div><div className="preview-grid"><p><span>Estimated receive</span><strong>{kind === "DCA" ? `${estimatedUnits} ${draftAsset} each` : composerQuote ? `${Number(composerQuote.amountOut).toLocaleString("en-US", { maximumFractionDigits: 8 })} ${kind === "Sell" ? "USDG" : draftAsset}` : "—"}</strong></p><p><span>{kind === "Sell" ? "Sell amount" : "Total USDG cap"}</span><strong>{kind === "Sell" ? `${draftAmount || "0"} ${draftAsset}` : `${draftTotalBudget.toFixed(2)} USDG`}</strong></p><p><span>Minimum received</span><strong>{kind === "DCA" ? `${draftSlippage}% max · engine cap` : composerQuote ? `${Number(composerQuote.minimumOut).toLocaleString("en-US", { maximumFractionDigits: 8 })} ${kind === "Sell" ? "USDG" : draftAsset}` : "Waiting for route"}</strong></p><p><span>Oracle status</span><strong>{priceBook[draftAsset]?.status === "live" ? formatPriceAge(priceBook[draftAsset].updatedAt) : priceBook[draftAsset]?.status ?? "Syncing"}</strong></p></div></div>
+              <div className="fee-review"><div><span>POOL FEE</span><strong>{kind === "DCA" ? "Selected at execution" : composerQuote ? `${(composerQuote.feeBps / 100).toFixed(2)}%` : "—"}</strong></div><div><span>HOODFLOW FEE</span><strong>{kind === "DCA" ? engineFeeBps === null ? "Checking" : `${(engineFeeBps / 100).toFixed(2)}%` : "0.00%"}</strong></div><div><span>NETWORK GAS</span><strong>Shown in wallet</strong></div><div><span>QUOTE REFRESH</span><strong>{kind === "DCA" ? "At execution" : composerQuote ? `${Math.max(0, Math.floor((Date.now() - composerQuote.updatedAt) / 1_000))}s ago · auto` : composerQuoteBusy ? "Updating" : "Unavailable"}</strong></div></div>
+              {composerQuoteError && kind !== "DCA" && <div className="quote-inline-error"><strong>Route unavailable for this amount.</strong><span>{composerQuoteError}</span><button type="button" onClick={() => void refreshComposerQuote()}>Try again</button></div>}
               <div className="limit-note"><span>✓</span><p><strong>{kind === "DCA" ? "Spending limits stay enforced onchain." : "The order permission is exact and short-lived."}</strong><small>{kind === "Buy" ? "HoodFlow signs only this USDG amount for the router." : kind === "Sell" ? `HoodFlow signs only the selected ${draftAsset} amount; sale proceeds return as USDG.` : "The recurring engine cannot execute outside the selected asset, total budget, schedule and expiry."}</small></p></div>
               {transactionStep && <div className="transaction-step"><i /><span>{transactionStep}</span></div>}
-              <div className="composer-actions"><button type="button" onClick={() => setComposerOpen(false)} disabled={onchainBusy}>Cancel</button><button type="submit" className="primary-action" disabled={onchainBusy || (kind === "DCA" && !contractReady && !enginePaused)}>{onchainBusy ? "Working…" : kind === "Buy" ? connected ? `Buy ${draftAsset} with USDG` : "Connect wallet first" : kind === "Sell" ? connected ? `Sell ${draftAsset} for USDG` : "Connect wallet first" : contractReady ? "Create onchain DCA" : enginePaused ? connected ? "Activate DCA engine" : "Connect owner wallet to activate" : "Checking engine"} <span>&rarr;</span></button></div>
+              <div className="composer-actions"><button type="button" onClick={() => setComposerOpen(false)} disabled={onchainBusy}>Cancel</button><button type="submit" className="primary-action" disabled={onchainBusy || ((kind === "Buy" || kind === "Sell") && (!composerQuote || composerQuoteBusy)) || (kind === "DCA" && !contractReady && !enginePaused)}>{onchainBusy ? "Working…" : kind === "Buy" ? connected ? `Buy ${draftAsset} with USDG` : "Connect wallet first" : kind === "Sell" ? connected ? `Sell ${draftAsset} for USDG` : "Connect wallet first" : contractReady ? "Create onchain DCA" : enginePaused ? connected ? "Activate DCA engine" : "Connect owner wallet to activate" : "Checking engine"} <span>&rarr;</span></button></div>
             </form>
           </section>
         </div>

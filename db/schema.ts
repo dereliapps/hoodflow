@@ -46,3 +46,14 @@ export const referralClaims = sqliteTable("referral_claims", {
   uniqueIndex("referral_claim_invitee_idx").on(table.inviteeWallet),
   index("referral_claim_referrer_idx").on(table.referrerWallet),
 ]);
+
+export const assetRequestVotes = sqliteTable("asset_request_votes", {
+  id: text("id").primaryKey(),
+  wallet: text("wallet").notNull(),
+  ticker: text("ticker").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  uniqueIndex("asset_request_wallet_ticker_idx").on(table.wallet, table.ticker),
+  index("asset_request_ticker_time_idx").on(table.ticker, table.createdAt),
+  index("asset_request_wallet_time_idx").on(table.wallet, table.createdAt),
+]);

@@ -37,7 +37,7 @@ export default function DocsPage() {
   return <main className="seo-shell docs-shell">
     <header className="seo-nav">
       <Link href="/" className="seo-logo">hoodflow<span>MAINNET BETA</span></Link>
-      <nav><Link href="/stock-tokens">Markets</Link><Link href="/how-it-works">How it works</Link><Link href="/security">Security</Link><Link href="/?view=assets" className="seo-cta">Open app</Link></nav>
+      <nav><Link href="/stock-tokens">Markets</Link><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/security">Security</Link><Link href="/?view=assets" className="seo-cta">Open app</Link></nav>
     </header>
 
     <section className="docs-hero">
@@ -142,6 +142,6 @@ export default function DocsPage() {
     </div>
 
     <section className="seo-risk"><strong>Stock Tokens are not shares.</strong><p>They may be restricted in your jurisdiction and do not provide shareholder rights. HoodFlow is an independent interface built on Robinhood Chain and is not affiliated with Robinhood Markets, Inc.</p></section>
-    <footer className="seo-footer"><span>Documentation · Release 0.7.0</span><Link href="/security">Review security & known limitations →</Link></footer>
+    <footer className="seo-footer"><span>Documentation · Release 0.8.0</span><Link href="/learn">Read plain-language guides</Link><Link href="/security">Review security & known limitations →</Link><a href="https://x.com/hoodfloow" target="_blank" rel="noreferrer">𝕏 @hoodfloow</a></footer>
   </main>;
 }

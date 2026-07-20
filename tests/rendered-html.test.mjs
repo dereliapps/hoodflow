@@ -110,7 +110,11 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /Compare live routes/);
   assert.match(page, /PROTECTED QUOTES/);
   assert.match(page, /Price feed temporarily unavailable\. Trading is disabled until verification completes\./);
-  assert.match(page, /Release 0\.7\.0/);
+  assert.match(page, /Release 0\.8\.0/);
+  assert.match(page, /MY PORTFOLIO/);
+  assert.match(page, /AssetRequestBoard/);
+  assert.match(page, /HOODFLOW FEE/);
+  assert.match(page, /MarketStatus/);
   assert.match(page, /label: "Crypto"/);
   assert.match(page, /ReferralRewards/);
   assert.match(page, /href="\/docs"/);

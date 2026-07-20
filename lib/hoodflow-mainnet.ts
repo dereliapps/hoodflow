@@ -86,6 +86,7 @@ export const HOODFLOW_ENGINE_ABI = [
   "function allowedTokenCount() view returns (uint256)",
   "function maxTrancheAmount() view returns (uint128)",
   "function maxStrategyBudget() view returns (uint128)",
+  "function protocolFeeBps() view returns (uint16)",
   "function tokenConfigs(address token) view returns (address priceFeed,uint48 heartbeat,uint8 tokenDecimals,uint8 feedDecimals,bool allowed,bool checkOraclePause)",
   "function unpauseEverything()",
   "function createStrategy(address tokenIn,address tokenOut,uint128 amountPerExecution,uint128 totalBudget,uint48 interval,uint48 startAt,uint48 expiresAt,uint16 maxSlippageBps) returns (uint256 strategyId)",
