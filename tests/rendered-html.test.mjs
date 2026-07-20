@@ -137,7 +137,8 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(community, /marketCapUsd \?\? market\.fdvUsd/);
   assert.match(rewards, /HOODFLOW REWARDS \/ SEASON 0/);
   assert.match(rewards, /PLANNED \$HFLOW ELIGIBILITY/);
-  assert.match(rewards, /LIVE LEADERBOARD/);
+  assert.match(rewards, /SEASON 0 · COMING SOON/);
+  assert.match(rewards, /Rankings open later/);
   assert.match(rewards, /Create my referral link/);
   assert.match(referralRoute, /verifyMessage/);
   assert.match(referralRoute, /SEASON_REFERRAL_CAP/);

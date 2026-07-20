@@ -273,6 +273,7 @@ export default function Home() {
   const [networkBlock, setNetworkBlock] = useState("Checking");
   const [contractStatus, setContractStatus] = useState(contractConfigured ? "Checking DCA engine" : "Engine address missing");
   const [contractReady, setContractReady] = useState(false);
+  const [engineChecking, setEngineChecking] = useState(contractConfigured);
   const [enginePaused, setEnginePaused] = useState(false);
   const [engineOwner, setEngineOwner] = useState("");
   const [composerOpen, setComposerOpen] = useState(false);
@@ -398,6 +399,16 @@ export default function Home() {
   const bootMessage = bootProgress < 32 ? "Loading token registry" : bootProgress < 60 ? "Verifying onchain prices" : bootProgress < 82 ? "Checking trade routes" : bootProgress < 100 ? "Preparing your workspace" : "Workspace ready";
 
   useEffect(() => {
+    const bootSeen = window.sessionStorage.getItem("hoodflow-boot-seen-v1") === "1";
+    if (bootSeen) {
+      const finish = window.setTimeout(() => {
+        setBootProgress(100);
+        setBootPhase("done");
+        document.body.classList.remove("boot-locked");
+      }, 0);
+      return () => window.clearTimeout(finish);
+    }
+    window.sessionStorage.setItem("hoodflow-boot-seen-v1", "1");
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     document.body.classList.add("boot-locked");
     if (reducedMotion) {
@@ -460,12 +471,15 @@ export default function Home() {
 
   useEffect(() => {
     const syncAssetFromUrl = () => {
-      const params = new URL(window.location.href).searchParams;
+      const currentUrl = new URL(window.location.href);
+      const params = currentUrl.searchParams;
       const ticker = params.get("asset")?.toUpperCase();
       const requestedView = params.get("view") as View | null;
       if (ticker && assetByTicker[ticker]) {
         setSelectedAssetTicker(ticker);
         setView("asset");
+      } else if (/^\/crypto\/0x[a-fA-F0-9]{40}\/?$/.test(currentUrl.pathname)) {
+        setView("community");
       } else if (params.get("ref")) {
         setView("rewards");
       } else if (requestedView && ["overview", "strategies", "assets", "community", "rewards", "marketplace", "activity", "controls"].includes(requestedView)) {
@@ -598,12 +612,56 @@ export default function Home() {
         }
       } catch {
         setNetworkBlock("Online");
-        if (contractConfigured) setContractStatus("RPC check failed");
-        setContractReady(false);
+        if (contractConfigured) setContractStatus("Verification temporarily unavailable · retrying automatically");
       }
     }
     void readNetwork();
   }, []);
+
+  const refreshEngineStatus = useCallback(async () => {
+    if (!contractConfigured) return;
+    setEngineChecking(true);
+    try {
+      const response = await fetch("/api/engine-status", { cache: "no-store" });
+      const status = await response.json() as {
+        blockNumber?: number;
+        owner?: string;
+        paused?: boolean;
+        configured?: boolean;
+        error?: string;
+      };
+      if (!response.ok || typeof status.blockNumber !== "number" || !status.owner) {
+        throw new Error(status.error || "Engine verification is temporarily unavailable.");
+      }
+      setNetworkBlock(status.blockNumber.toLocaleString("en-US"));
+      setEngineOwner(status.owner);
+      setEnginePaused(Boolean(status.paused));
+      setContractReady(!status.paused && Boolean(status.configured));
+      setContractStatus(status.paused
+        ? "Engine deployed · owner activation required"
+        : status.configured ? "Engine live · verified onchain" : "Engine configuration needs review");
+    } catch {
+      setContractStatus("Verification temporarily unavailable · retrying automatically");
+    } finally {
+      setEngineChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const initial = window.setTimeout(() => void refreshEngineStatus(), 0);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshEngineStatus();
+    }, 30_000);
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void refreshEngineStatus();
+    };
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshVisible);
+    };
+  }, [refreshEngineStatus]);
 
   function notify(message: string) {
     setToast(message);
@@ -785,21 +843,22 @@ export default function Home() {
     track("asset_opened", { ticker });
     setSelectedAssetTicker(ticker);
     setView("asset");
-    const url = new URL(window.location.href);
+    const url = new URL("/", window.location.origin);
     url.searchParams.set("asset", ticker);
     window.history.pushState({}, "", `${url.pathname}${url.search}`);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0, behavior: "auto" });
   }
 
   function navigate(nextView: View) {
     setView(nextView);
     if (nextView !== "asset") {
-      const url = new URL(window.location.href);
+      const url = new URL("/", window.location.origin);
       url.searchParams.delete("asset");
       if (nextView === "overview") url.searchParams.delete("view");
       else url.searchParams.set("view", nextView);
       window.history.pushState({}, "", `${url.pathname}${url.search}`);
     }
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
   }
 
   function openComposer(nextKind: StrategyKind = "Buy", nextAsset?: string) {
@@ -1200,8 +1259,9 @@ export default function Home() {
   }, [marketSearch, marketSort]);
   const navigation: Array<{ view: View; label: string }> = [
     { view: "overview", label: "Home" },
-    { view: "assets", label: "Markets" },
+    { view: "assets", label: "Stock Tokens" },
     { view: "community", label: "Crypto" },
+    { view: "marketplace", label: "DCA" },
     { view: "rewards", label: "Rewards" },
     { view: "activity", label: "Activity" },
     { view: "controls", label: "Security" },
@@ -1301,7 +1361,7 @@ export default function Home() {
         <section className="page inner-page">
           <div className="inner-heading"><div><p className="eyebrow">ORDER ACTIVITY</p><h1>Orders & receipts</h1><p>Direct buys, sells and confirmed onchain transaction references in one place.</p></div><button className="primary-action" onClick={() => openComposer("Buy")}><span>+</span> New trade</button></div>
           <div className="device-save-note"><span><i /> RECEIPTS SAVED ON THIS DEVICE</span><p>Only your confirmed transaction references and onchain strategy IDs are kept here. Wallet keys and account data are never stored.</p></div>
-          <div className="summary-row"><div><span>Confirmed buys</span><strong>{confirmedCount}</strong></div><div><span>Prepared DCA</span><strong>{preparedCount}</strong></div><div><span>Mainnet records</span><strong>{activityRows.length}</strong></div><div><span>DCA engine</span><strong>{contractReady ? "Live" : "Pending"}</strong></div></div>
+          <div className="summary-row"><div><span>Confirmed buys</span><strong>{confirmedCount}</strong></div><div><span>Prepared DCA</span><strong>{preparedCount}</strong></div><div><span>Mainnet records</span><strong>{activityRows.length}</strong></div><div><span>DCA engine</span><strong>{contractReady ? "Live" : engineChecking ? "Checking" : enginePaused ? "Activation" : "Retrying"}</strong></div></div>
           <div className="table-card">
             <div className="table-head upgraded"><span>ORDER</span><span>RULE</span><span>RESULT / NEXT ACTION</span><span>CHAIN</span><span>STATUS</span><span /></div>
             {strategies.map((item) => <StrategyRow key={item.id} item={item} detailed onToggle={() => toggleStrategy(item.id)} onInspect={() => setSelectedStrategy(item)} />)}
@@ -1409,7 +1469,7 @@ export default function Home() {
           <div className="control-grid">
             <article className="control-card"><span>CUSTODY</span><strong>Funds stay in your wallet</strong><p>HoodFlow cannot withdraw assets by itself. Every Buy and Sell order requires your wallet confirmation.</p><b className="control-ok">YOU CONTROL</b></article>
             <article className="control-card"><span>BUY & SELL</span><strong>15 verified routes</strong><p>Fresh quotes, maximum slippage protection, and exact short-lived order permissions.</p><b className="control-ok">LIVE</b></article>
-            <article className="control-card"><span>RECURRING DCA</span><strong>{contractReady ? "Active" : enginePaused ? "Ready to activate" : "Checking"}</strong><p>{contractReady ? "Your capped recurring strategies can run onchain." : enginePaused ? "Only the owner wallet can switch the DCA engine on." : contractStatus}</p><b className={`control-ok ${contractReady ? "" : "warning"}`}>{contractReady ? "LIVE" : "OWNER ACTION"}</b></article>
+            <article className="control-card dca-control"><span>RECURRING DCA</span><strong>{contractReady ? "Active on mainnet" : enginePaused ? "Ready to activate" : engineChecking ? "Verifying engine" : "Verification delayed"}</strong><p>{contractReady ? "Capped recurring strategies can be created and executed onchain." : enginePaused ? "Only the owner wallet can switch the DCA engine on." : contractStatus}</p><div><b className={`control-ok ${contractReady ? "" : "warning"}`}>{contractReady ? "LIVE" : engineChecking ? "CHECKING" : enginePaused ? "OWNER ACTION" : "AUTO RETRY"}</b>{!contractReady && !engineChecking && <button type="button" className="engine-retry" onClick={() => void refreshEngineStatus()}>Retry now</button>}</div></article>
           </div>
           <div className="permissions-card">
             <div className="permissions-head"><div><p className="eyebrow">ONCHAIN ORDERS</p><h2>Strategy permissions</h2></div><span>{strategies.length} records</span></div>

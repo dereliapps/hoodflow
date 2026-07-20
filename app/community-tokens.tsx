@@ -99,6 +99,7 @@ const USDG_SETTLEMENT: Settlement = { address: USDG_ADDRESS, symbol: "USDG", dec
 const WETH_SETTLEMENT: Settlement = { address: WETH_ADDRESS, symbol: "WETH", decimals: WETH_DECIMALS };
 const VIRTUAL_SETTLEMENT: Settlement = { address: ROBINHOOD_VIRTUAL_ADDRESS, symbol: "VIRTUAL", decimals: 18 };
 const MARKET_CATEGORIES = ["Crypto"] as const;
+const INITIAL_MARKET_LIMIT = 40;
 
 function message(error: unknown) {
   return friendlyExecutionError(error);
@@ -235,6 +236,8 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
   const [marketSort, setMarketSort] = useState<MarketSort>("volume");
   const [marketSearch, setMarketSearch] = useState("");
   const [marketSearchResults, setMarketSearchResults] = useState<CommunityMarket[]>([]);
+  const [marketLimit, setMarketLimit] = useState(INITIAL_MARKET_LIMIT);
+  const initialPathHandled = useRef(false);
   const [chartRange, setChartRange] = useState<ChartRange>("7D");
   const [chartPoints, setChartPoints] = useState<ChartPoint[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
@@ -292,7 +295,7 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
 
   const categoryCounts = useMemo(() => ({ Crypto: markets.length }), [markets]);
 
-  const visibleMarkets = useMemo(() => {
+  const filteredMarkets = useMemo(() => {
     const query = marketSearch.trim().toLowerCase();
     const candidates = [...markets, ...marketSearchResults].filter((market, index, all) => all.findIndex((item) => item.address === market.address) === index);
     const filtered = candidates.filter((market) => !query || market.name.toLowerCase().includes(query) || market.symbol.toLowerCase().includes(query) || market.address.includes(query));
@@ -305,6 +308,13 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
       return right.volume24h - left.volume24h;
     });
   }, [marketSearch, marketSearchResults, marketSort, markets]);
+
+  const visibleMarkets = useMemo(() => filteredMarkets.slice(0, marketLimit), [filteredMarkets, marketLimit]);
+
+  useEffect(() => {
+    const reset = window.setTimeout(() => setMarketLimit(INITIAL_MARKET_LIMIT), 0);
+    return () => window.clearTimeout(reset);
+  }, [marketCategory, marketSearch, marketSort]);
 
   const marketStats = useMemo(() => ({
     volume: markets.reduce((total, market) => total + market.volume24h, 0),
@@ -594,9 +604,24 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
 
   function inspectMarket(market: CommunityMarket) {
     track("community_market_opened", { ticker: market.symbol, category: market.category });
+    window.history.pushState({}, "", `/crypto/${market.address}`);
     document.getElementById("ca-import")?.scrollIntoView({ behavior: "smooth", block: "start" });
     void discover(undefined, market.address, market);
   }
+
+  useEffect(() => {
+    if (initialPathHandled.current) return;
+    const match = window.location.pathname.match(/^\/crypto\/(0x[a-fA-F0-9]{40})\/?$/);
+    if (!match) return;
+    initialPathHandled.current = true;
+    const address = match[1];
+    const market = markets.find((item) => item.address.toLowerCase() === address.toLowerCase());
+    document.getElementById("ca-import")?.scrollIntoView({ behavior: "auto", block: "start" });
+    const start = window.setTimeout(() => void discover(undefined, address, market), 0);
+    return () => window.clearTimeout(start);
+  // The pathname is consumed once; discover resolves missing market metadata itself.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markets]);
 
   function chooseSettlement(option: Settlement) {
     setSettlement(option);
@@ -643,8 +668,9 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
           <div className="market-pair"><strong>{market.lifecycle === "bonding" ? "BONDING" : `${market.symbol}/${market.quoteSymbol}`}</strong><small>{market.dex} · {poolAge(market.poolCreatedAt)}</small></div>
           <div className="market-row-actions"><a href={market.externalUrl || market.pairUrl} target="_blank" rel="noreferrer" aria-label={`Open ${market.symbol} source market`} onClick={(event) => event.stopPropagation()}>↗</a></div>
         </article>)}
-        {!marketsLoading && !marketsError && !visibleMarkets.length && <div className="market-loading"><strong>No matching crypto market</strong><span>Try another ticker or paste the contract address.</span></div>}
+        {!marketsLoading && !marketsError && !filteredMarkets.length && <div className="market-loading"><strong>No matching crypto market</strong><span>Try another ticker or paste the contract address.</span></div>}
       </div>
+      {!marketsLoading && filteredMarkets.length > visibleMarkets.length && <div className="market-load-more"><span>Showing {visibleMarkets.length} of {filteredMarkets.length} markets</span><button type="button" onClick={() => setMarketLimit((current) => current + INITIAL_MARKET_LIMIT)}>Load 40 more</button></div>}
       <div className="market-data-note"><p><strong>Live, source-labeled data.</strong> Market cap appears only when a provider reports it; otherwise HoodFlow labels FDV or “not reported” instead of inventing a number.</p><span>{marketsError ? `Partial feed: ${marketsError}` : "Refreshes every 60 seconds"}</span></div>
     </section>
 
