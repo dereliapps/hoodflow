@@ -66,6 +66,7 @@ type View = "overview" | "strategies" | "assets" | "asset" | "community" | "port
 type StrategyKind = "Buy" | "Sell" | "DCA";
 type StrategyStatus = "Prepared" | "Paused" | "Confirmed";
 type MarketplaceSort = "featured" | "cadence" | "risk";
+type ActivityFilter = "all" | "trades" | "dca";
 type InfoPanel = "docs" | "terms";
 type BootPhase = "loading" | "leaving" | "done";
 type PriceState = "loading" | "live" | "degraded" | "error";
@@ -122,6 +123,7 @@ declare global {
 const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_HOODFLOW_CONTRACT_ADDRESS?.trim() || HOODFLOW_DCA_ADDRESS;
 const contractConfigured = /^0x[a-fA-F0-9]{40}$/.test(CONTRACT_ADDRESS);
 const ORDER_STORAGE_KEY = "hoodflow-mainnet-orders-v3";
+const PRICE_CACHE_KEY = "hoodflow-live-prices-v1";
 const MAX_UINT128 = (1n << 128n) - 1n;
 
 const assetRegistry = [
@@ -215,7 +217,7 @@ function formatPriceAge(updatedAt: number | null) {
 
 function PriceCell({ point, loading }: { point?: PricePoint; loading: boolean }) {
   if (loading && !point) {
-    return <div className="price-cell loading"><strong>Syncing</strong><small>Chainlink feed</small></div>;
+    return <div className="price-cell loading" aria-label="Connecting to the live Chainlink feed"><strong><span className="price-skeleton" /></strong><small><i />Connecting live feed</small></div>;
   }
   if (!point || point.price === null) {
     return <div className="price-cell unavailable"><strong>Unavailable</strong><small>No current feed</small></div>;
@@ -320,6 +322,7 @@ export default function Home() {
   const [assetScope, setAssetScope] = useState<"all" | "routed" | "registry">("all");
   const [marketSearch, setMarketSearch] = useState("");
   const [marketSort, setMarketSort] = useState<MarketplaceSort>("featured");
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [infoPanel, setInfoPanel] = useState<InfoPanel | null>(null);
   const [draftsHydrated, setDraftsHydrated] = useState(false);
   const [priceBook, setPriceBook] = useState<Record<string, PricePoint>>({});
@@ -338,8 +341,6 @@ export default function Home() {
   const [composerQuoteError, setComposerQuoteError] = useState("");
 
   const connected = Boolean(walletAddress);
-  const preparedCount = useMemo(() => strategies.filter((item) => item.status === "Prepared").length, [strategies]);
-  const confirmedCount = useMemo(() => strategies.filter((item) => item.status === "Confirmed").length, [strategies]);
   const draftTotalBudget = useMemo(() => {
     const amount = Number(draftAmount || 0);
     if (!Number.isFinite(amount) || amount <= 0) return 0;
@@ -348,13 +349,17 @@ export default function Home() {
   }, [draftAmount, draftExecutions, kind]);
   const refreshPrices = useCallback(async (signal?: AbortSignal) => {
     setPriceRefreshing(true);
+    const requestController = new AbortController();
+    const abortRequest = () => requestController.abort();
+    signal?.addEventListener("abort", abortRequest, { once: true });
+    const requestTimeout = window.setTimeout(() => requestController.abort(), 6_500);
     try {
       let data: PriceResponse | null = null;
       try {
         const response = await fetch("/api/prices", {
           headers: { accept: "application/json" },
           cache: "no-store",
-          signal,
+          signal: requestController.signal,
         });
         if (response.ok) {
           const candidate = await response.json() as PriceResponse;
@@ -369,22 +374,49 @@ export default function Home() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(buildRobinhoodPriceRequests()),
           cache: "no-store",
-          signal,
+          signal: requestController.signal,
         });
         if (!rpcResponse.ok) throw new Error(`Price RPC returned ${rpcResponse.status}`);
         data = parseRobinhoodPriceResults(await rpcResponse.json());
       }
       setPriceBook(data.prices);
       setPriceUpdatedAt(Date.parse(data.fetchedAt));
-      setPriceState(data.liveCount >= 24 ? "live" : "degraded");
-      setPriceError("");
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
+      setPriceState(data.liveCount >= 15 ? "live" : data.liveCount > 0 ? "degraded" : "error");
+      setPriceError(data.liveCount > 0 ? "" : "Live feed is delayed. HoodFlow is retrying automatically; trading remains locked until a verified price arrives.");
+      if (data.liveCount > 0) {
+        try { window.sessionStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(data)); } catch { /* Optional fast-return cache. */ }
+      }
+    } catch {
+      if (signal?.aborted) return;
       setPriceState((current) => current === "loading" ? "error" : "degraded");
-      setPriceError("Live prices are temporarily unavailable. Existing values are not used for execution.");
+      setPriceError("Live feed is delayed. HoodFlow is retrying automatically; no order can use an unverified price.");
     } finally {
+      window.clearTimeout(requestTimeout);
+      signal?.removeEventListener("abort", abortRequest);
       if (!signal?.aborted) setPriceRefreshing(false);
     }
+  }, []);
+
+  useEffect(() => {
+    const hydrate = window.setTimeout(() => {
+      try {
+        const cached = window.sessionStorage.getItem(PRICE_CACHE_KEY);
+        if (!cached) return;
+        const data = JSON.parse(cached) as PriceResponse;
+        const fetchedAt = Date.parse(data.fetchedAt);
+        if (!data.prices || !Number.isFinite(fetchedAt) || Date.now() - fetchedAt > 5 * 60_000) return;
+        setPriceBook(Object.fromEntries(Object.entries(data.prices).map(([ticker, point]) => [ticker, {
+          ...point,
+          status: point.status === "live" ? "stale" : point.status,
+        }])));
+        setPriceUpdatedAt(fetchedAt);
+        setPriceState("degraded");
+        setPriceError("Showing the last verified snapshot while a fresh onchain check completes.");
+      } catch {
+        // A damaged optional cache is ignored and replaced by the next live response.
+      }
+    }, 0);
+    return () => window.clearTimeout(hydrate);
   }, []);
 
   useEffect(() => {
@@ -428,6 +460,16 @@ export default function Home() {
   const activityRows = useMemo(() => strategies
     .filter((item) => item.txHash)
     .sort((left, right) => right.createdAt - left.createdAt), [strategies]);
+  const visibleActivityRows = useMemo(() => activityRows.filter((item) => activityFilter === "all"
+    || (activityFilter === "dca" ? item.kind === "DCA" : item.kind === "Buy" || item.kind === "Sell")), [activityFilter, activityRows]);
+  const dcaRows = useMemo(() => strategies.filter((item) => item.kind === "DCA"), [strategies]);
+  const activeDcaCount = useMemo(() => dcaRows.filter((item) => item.status === "Prepared").length, [dcaRows]);
+  const scheduledDcaBudget = useMemo(() => dcaRows.reduce((sum, item) => sum + (Number.parseFloat(item.budget) || 0), 0), [dcaRows]);
+  const trackedTradeVolume = useMemo(() => activityRows.reduce((sum, item) => {
+    if (item.kind === "Buy") return sum + (item.inputAmount ?? 0);
+    if (item.kind === "Sell") return sum + (item.outputAmount ?? 0);
+    return sum;
+  }, 0), [activityRows]);
   const portfolioRows = useMemo(() => {
     const ledger = new Map<string, { quantity: number; cost: number; realized: number }>();
     [...strategies].sort((left, right) => left.createdAt - right.createdAt).forEach((item) => {
@@ -635,7 +677,7 @@ export default function Home() {
     if (priceState !== "loading") return;
     const timeout = window.setTimeout(() => {
       setPriceState("error");
-      setPriceError("Price feed temporarily unavailable. Trading is disabled until verification completes.");
+      setPriceError("The live feed is taking longer than expected. Automatic retries are active and trading stays locked until verification completes.");
     }, 7_000);
     return () => window.clearTimeout(timeout);
   }, [priceState]);
@@ -1098,6 +1140,7 @@ export default function Home() {
 
   async function executeDirectBuy(provider: BrowserProvider, address: string) {
     if (!isRoutedAsset(draftAsset)) throw new Error(`${draftAsset} is watch-only until a full-fill route passes.`);
+    if (priceState !== "live") throw new Error("A fresh full-market price verification is required before buying.");
     if (priceBook[draftAsset]?.status !== "live") throw new Error(`${draftAsset} oracle is not live. The buy is blocked.`);
     const amountIn = parseUnits(draftAmount, USDG_DECIMALS);
     if (amountIn <= 0n || amountIn > MAX_UINT128) throw new Error("Enter a valid USDG amount.");
@@ -1212,6 +1255,7 @@ export default function Home() {
 
   async function executeDirectSell(provider: BrowserProvider, address: string) {
     if (!isRoutedAsset(draftAsset)) throw new Error(`${draftAsset} is watch-only until a full-fill route passes.`);
+    if (priceState !== "live") throw new Error("A fresh full-market price verification is required before selling.");
     if (priceBook[draftAsset]?.status !== "live") throw new Error(`${draftAsset} oracle is not live. The sell is blocked.`);
     const amountIn = parseUnits(draftAmount, STOCK_TOKEN_DECIMALS);
     if (amountIn <= 0n || amountIn > MAX_UINT128) throw new Error(`Enter a valid ${draftAsset} amount.`);
@@ -1308,6 +1352,7 @@ export default function Home() {
     if (!contractConfigured || !contractReady) throw new Error(`Recurring engine is not live yet (${contractStatus}).`);
     if (!isRoutedAsset(draftAsset)) throw new Error(`${draftAsset} is not enabled for recurring execution.`);
     if (isV3RoutedAsset(draftAsset)) throw new Error(`${draftAsset} is enabled for Buy Now, but not for recurring V4 execution.`);
+    if (priceState !== "live") throw new Error("A fresh full-market price verification is required before creating DCA.");
     if (priceBook[draftAsset]?.status !== "live") throw new Error(`${draftAsset} oracle is not live. The strategy is blocked.`);
     const executions = Number.parseInt(draftExecutions, 10);
     if (!Number.isInteger(executions) || executions < 2 || executions > 52) throw new Error("Choose between 2 and 52 executions.");
@@ -1512,9 +1557,9 @@ export default function Home() {
             </div>
             <aside className="hf-execution-card">
               <div className="hf-window-head"><span><i /> LIVE ROUTE DESK</span><b>BLOCK #{networkBlock}</b></div>
-              <div className="hf-window-title"><p>Reviewed execution markets</p><strong>{priceState === "loading" ? "Verifying onchain prices" : `${priceCounts.live} oracle references ready`}</strong></div>
+              <div className="hf-window-title"><p>Reviewed execution markets</p><strong>{priceState === "loading" ? "15 routes ready · live feed connecting" : priceState === "error" ? "Routes ready · price check retrying" : `${priceCounts.live} oracle references ready`}</strong></div>
               <div className="hf-route-list">
-                {["AAPL", "NVDA", "SPY"].map((ticker) => <button key={ticker} onClick={() => openAsset(ticker)}><Mark ticker={ticker} small /><span><strong>{ticker} / USDG</strong><small>{isV3RoutedAsset(ticker) ? "Uniswap V3" : "Uniswap V4"} · full-fill verified</small></span><b>{formatPrice(priceBook[ticker]?.price)}</b><i>→</i></button>)}
+                {["AAPL", "NVDA", "SPY"].map((ticker) => <button key={ticker} onClick={() => openAsset(ticker)}><Mark ticker={ticker} small /><span><strong>{ticker} / USDG</strong><small>{isV3RoutedAsset(ticker) ? "Uniswap V3" : "Uniswap V4"} · full-fill verified</small></span><b>{priceBook[ticker]?.price ? formatPrice(priceBook[ticker].price) : <span className="price-skeleton route" aria-label="Live price loading" />}</b><i>→</i></button>)}
               </div>
               <div className="hf-window-foot"><span><b>01</b> Fresh quote</span><span><b>02</b> Protected minimum</span><span><b>03</b> Direct settlement</span></div>
             </aside>
@@ -1539,7 +1584,7 @@ export default function Home() {
 
           <div className="price-tape-head"><span>ONCHAIN ORACLE REFERENCES</span><button onClick={() => navigate("assets")}>Explore all 25 <b>→</b></button></div>
           <div className="price-tape">
-            {priceSpotlight.map((ticker) => <button key={ticker} onClick={() => openAsset(ticker)}><Mark ticker={ticker} small /><p><span>{ticker}</span><strong>{formatPrice(priceBook[ticker]?.price)}</strong></p><small className={priceBook[ticker]?.status ?? "loading"}><i />{priceBook[ticker]?.status === "live" ? formatPriceAge(priceBook[ticker].updatedAt) : priceBook[ticker]?.status ?? "Syncing"}</small></button>)}
+            {priceSpotlight.map((ticker) => <button key={ticker} onClick={() => openAsset(ticker)}><Mark ticker={ticker} small /><p><span>{ticker}</span><strong>{priceBook[ticker]?.price ? formatPrice(priceBook[ticker].price) : <span className="price-skeleton compact" aria-label="Live price loading" />}</strong></p><small className={priceBook[ticker]?.status ?? "loading"}><i />{priceBook[ticker]?.status === "live" ? formatPriceAge(priceBook[ticker].updatedAt) : priceState === "error" ? "Auto-retrying" : "Connecting live feed"}</small></button>)}
           </div>
           <p className="hf-market-note">Oracle references can remain unchanged while underlying markets are closed. Every Buy or Sell requests a fresh DEX execution quote before your wallet signs.</p>
 
@@ -1550,20 +1595,24 @@ export default function Home() {
 
           <section className="hf-final-cta"><div><p className="eyebrow">ROBINHOOD CHAIN / MAINNET BETA</p><h2>Trade the route,<br /><em>not the promise.</em></h2></div><div><p>25 canonical markets are indexed. Fifteen are execution-enabled. The rest stay visible and blocked until their routes pass.</p><button onClick={() => navigate("assets")}>Open the market directory →</button></div></section>
 
-          <section className="hf-faq"><p className="eyebrow">QUESTIONS BEFORE YOU SIGN</p><details><summary>Does HoodFlow custody my assets?</summary><p>No. The connected wallet signs the router transaction and received tokens remain in that wallet.</p></details><details><summary>Are Stock Tokens actual shares?</summary><p>No. Stock Tokens provide economic exposure without shareholder rights and may be restricted in your jurisdiction.</p></details><details><summary>Why are only 15 markets trade-enabled?</summary><p>HoodFlow keeps a token watch-only until a reviewed route completes a full-input fork execution and a fresh quote is available.</p></details><details><summary>Is HoodFlow independently audited?</summary><p>Not yet. The interface is labeled Mainnet Beta and the independent audit remains pending.</p></details></section>
+          <section className="hf-faq"><p className="eyebrow">QUESTIONS BEFORE YOU SIGN</p><details><summary>Does HoodFlow custody my assets?</summary><p>No. The connected wallet signs the router transaction and received tokens remain in that wallet.</p></details><details><summary>Are Stock Tokens actual shares?</summary><p>No. Stock Tokens provide economic exposure without shareholder rights and may be restricted in your jurisdiction.</p></details><details><summary>Why are only 15 markets trade-enabled?</summary><p>HoodFlow keeps a token watch-only until a reviewed route completes a full-input fork execution and a fresh quote is available.</p></details><details><summary>Is HoodFlow independently audited?</summary><p>Not yet. Until a public final report exists, HoodFlow exposes its contract source, onchain addresses, automated checks, known limitations and a private responsible-disclosure channel on the <a href="/security">Security page</a>.</p></details></section>
         </section>
       )}
 
       {view === "strategies" && (
-        <section className="page inner-page">
-          <div className="inner-heading"><div><p className="eyebrow">ORDER ACTIVITY</p><h1>Orders & receipts</h1><p>Direct buys, sells and confirmed onchain transaction references in one place.</p></div><button className="primary-action" onClick={() => openComposer("Buy")}><span>+</span> New trade</button></div>
-          <div className="device-save-note"><span><i /> RECEIPTS SAVED ON THIS DEVICE</span><p>Only your confirmed transaction references and onchain strategy IDs are kept here. Wallet keys and account data are never stored.</p></div>
-          <div className="summary-row"><div><span>Confirmed buys</span><strong>{confirmedCount}</strong></div><div><span>Prepared DCA</span><strong>{preparedCount}</strong></div><div><span>Mainnet records</span><strong>{activityRows.length}</strong></div><div><span>DCA engine</span><strong>{contractReady ? "Live" : engineChecking ? "Checking" : enginePaused ? "Activation" : "Retrying"}</strong></div></div>
+        <section className="page inner-page dca-page">
+          <div className="inner-heading"><div><p className="eyebrow">RECURRING ORDERS</p><h1>DCA command center</h1><p>Choose an asset, set an exact USDG amount and lifetime cap, then let the onchain schedule enforce the rest.</p></div><button className="primary-action" onClick={() => openComposer("DCA")}><span>+</span> Create DCA</button></div>
+          <div className={`dca-live-strip ${contractReady ? "ready" : "waiting"}`}><div><span><i /> MAINNET ENGINE</span><strong>{contractReady ? "Recurring execution is live" : enginePaused ? "Owner activation required" : "Engine verification retrying"}</strong></div><p>{contractReady ? "The keeper can execute only when the asset, schedule, remaining budget, oracle and slippage checks all pass." : contractStatus}</p><div><span>DCA FEE</span><strong>{engineFeeBps === null ? "Checking" : `${(engineFeeBps / 100).toFixed(2)}%`}</strong></div></div>
+          <div className="dca-quick-grid"><article><span>01 · WEEKLY CORE</span><Mark ticker="AAPL" small /><h2>20 USDG into AAPL</h2><p>A simple weekly schedule with a 12-buy lifetime cap.</p><button onClick={() => applyTemplate("AAPL", "Weekly", "Weekly Apple")}>Build this plan →</button></article><article><span>02 · MONTHLY INDEX</span><Mark ticker="SPY" small /><h2>50 USDG into SPY</h2><p>A slower index schedule with every limit visible before signing.</p><button onClick={() => applyTemplate("SPY", "Monthly", "Monthly Index")}>Build this plan →</button></article><article><span>03 · CHIP ACCUMULATION</span><Mark ticker="NVDA" small /><h2>25 USDG into NVDA</h2><p>A weekly semiconductor plan you can pause from the same wallet.</p><button onClick={() => applyTemplate("NVDA", "Weekly", "Weekly NVIDIA")}>Build this plan →</button></article></div>
+          <div className="summary-row dca-summary"><div><span>Saved automations</span><strong>{dcaRows.length}</strong></div><div><span>Active schedules</span><strong>{activeDcaCount}</strong></div><div><span>Scheduled cap</span><strong>{scheduledDcaBudget.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDG</strong></div><div><span>Engine status</span><strong>{contractReady ? "Live" : engineChecking ? "Checking" : enginePaused ? "Activation" : "Retrying"}</strong></div></div>
+          <div className="dca-how"><article><span>1</span><p><strong>You choose the rules</strong><small>Asset, amount per buy, cadence, total number of buys and maximum slippage.</small></p></article><article><span>2</span><p><strong>The contract enforces the cap</strong><small>No execution can spend above the per-buy amount or remaining lifetime budget.</small></p></article><article><span>3</span><p><strong>You keep control</strong><small>Pause, resume or cancel from the strategy owner wallet. Tokens settle directly to it.</small></p></article></div>
+          <div className="device-save-note"><span><i /> RECEIPTS SAVED ON THIS DEVICE</span><p>Confirmed transaction references and onchain strategy IDs are kept locally. Wallet keys and account data are never stored.</p></div>
           <div className="table-card">
-            <div className="table-head upgraded"><span>ORDER</span><span>RULE</span><span>RESULT / NEXT ACTION</span><span>CHAIN</span><span>STATUS</span><span /></div>
+            <div className="table-head upgraded"><span>ORDER / AUTOMATION</span><span>RULE</span><span>RESULT / NEXT ACTION</span><span>CHAIN</span><span>STATUS</span><span /></div>
             {strategies.map((item) => <StrategyRow key={item.id} item={item} detailed onToggle={() => toggleStrategy(item.id)} onInspect={() => setSelectedStrategy(item)} />)}
-            {strategies.length === 0 && <div className="empty-state order-empty"><strong>No onchain orders saved</strong><span>Place a mainnet buy and its receipt will appear here.</span><button onClick={() => openComposer("Buy")}>New mainnet order</button></div>}
+            {strategies.length === 0 && <div className="empty-state order-empty dca-empty"><strong>Your first DCA takes about a minute to configure</strong><span>Start with a template, edit every limit, and review the exact onchain cap before your wallet signs.</span><button onClick={() => openComposer("DCA")}>Create first DCA</button></div>}
           </div>
+          <p className="dca-risk-note">Automation does not guarantee execution or returns. A stale oracle, paused token, insufficient allowance, low liquidity or slippage breach stops the scheduled buy.</p>
         </section>
       )}
 
@@ -1575,9 +1624,9 @@ export default function Home() {
           </div>
           <div className="asset-logo-cloud" aria-label="All supported brands">{assetRegistry.map((asset) => <Mark key={asset.ticker} ticker={asset.ticker} small />)}<span>20 stocks + 5 ETFs</span></div>
           <div className={`price-source-bar ${priceState}`}>
-            <div><span><i /> CHAINLINK ORACLE / ROBINHOOD MAINNET</span><strong>{priceState === "loading" ? "Syncing price feeds" : `${priceCounts.live} current · ${priceCounts.guarded} guarded · ${25 - priceCounts.available} unavailable`}</strong></div>
-            <p><strong>Onchain token price</strong><span>Includes Robinhood&apos;s corporate-action multiplier, so it can differ from the headline share price.</span>{priceError && <small>{priceError}</small>}</p>
-            <div className="price-refresh"><span>{priceUpdatedAt ? `Checked ${new Date(priceUpdatedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · every 10s` : "Waiting for first check"}</span><button onClick={() => void refreshPrices()} disabled={priceRefreshing}>{priceRefreshing ? "Checking" : "Check now"}</button></div>
+            <div><span><i /> CHAINLINK ORACLE / ROBINHOOD MAINNET</span><strong>{priceState === "loading" ? "Connecting secure price sources" : priceState === "error" ? "Automatic recovery in progress" : `${priceCounts.live} current · ${priceCounts.guarded} guarded · ${25 - priceCounts.available} unavailable`}</strong></div>
+            <p><strong>{priceState === "live" ? "Onchain token prices verified" : priceState === "degraded" ? "Verified snapshot · refreshing" : priceState === "error" ? "Routes online · price feed delayed" : "Live checks are running"}</strong><span>{priceState === "live" ? "Each value passed its onchain price and token pause checks. Execution still uses a fresh pool quote." : "Each market appears as soon as both its onchain price and pause state verify."}</span>{priceError && <small>{priceError}</small>}</p>
+            <div className="price-refresh"><span>{priceUpdatedAt ? `Last verified ${new Date(priceUpdatedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · every 10s` : "First check in progress · every 10s"}</span><button onClick={() => void refreshPrices()} disabled={priceRefreshing}>{priceRefreshing ? "Checking live feed" : "Check now"}</button></div>
           </div>
           <div className="route-explainer"><div><b className="route-ready"><i />READY</b><p><strong>Can be bought with USDG</strong><span>A full-input fork swap passed. All reviewed pools are quoted again before every mainnet order.</span></p></div><div><b className="route-watch"><i />WATCH</b><p><strong>Visible, never forced</strong><span>No order is enabled until a full-fill route passes. MSFT stays blocked after a deterministic-fork partial fill, even when a live quote appears.</span></p></div></div>
           <div className="asset-toolbar">
@@ -1604,7 +1653,7 @@ export default function Home() {
           </div>
           <div className="asset-detail-grid">
             <article className="asset-chart-card">
-              <div className="asset-price-line"><div><span>ONCHAIN TOKEN PRICE</span><strong>{formatPrice(priceBook[selectedAsset.ticker]?.price)}</strong><small>{priceBook[selectedAsset.ticker]?.status === "live" ? formatPriceAge(priceBook[selectedAsset.ticker].updatedAt) : priceBook[selectedAsset.ticker]?.status ?? "Syncing"}</small></div>{historyStats && <div className={historyStats.change >= 0 ? "positive" : "negative"}><span>ROUND RANGE</span><strong>{historyStats.change >= 0 ? "+" : ""}{historyStats.change.toFixed(2)}%</strong><small>{priceHistory.length} verified rounds</small></div>}</div>
+              <div className="asset-price-line"><div><span>ONCHAIN TOKEN PRICE</span><strong>{priceBook[selectedAsset.ticker]?.price ? formatPrice(priceBook[selectedAsset.ticker].price) : <span className="price-skeleton detail" aria-label="Live price loading" />}</strong><small>{priceBook[selectedAsset.ticker]?.status === "live" ? formatPriceAge(priceBook[selectedAsset.ticker].updatedAt) : priceState === "error" ? "Automatic verification retry active" : "Connecting to live onchain feed"}</small></div>{historyStats && <div className={historyStats.change >= 0 ? "positive" : "negative"}><span>ROUND RANGE</span><strong>{historyStats.change >= 0 ? "+" : ""}{historyStats.change.toFixed(2)}%</strong><small>{priceHistory.length} verified rounds</small></div>}</div>
               <PriceHistoryChart points={priceHistory} loading={historyLoading} />
               <div className="asset-chart-foot"><div><span>RANGE LOW</span><strong>{historyStats ? formatPrice(historyStats.low) : "—"}</strong></div><div><span>RANGE HIGH</span><strong>{historyStats ? formatPrice(historyStats.high) : "—"}</strong></div><div><span>HEARTBEAT</span><strong>{Math.round((priceBook[selectedAsset.ticker]?.heartbeat ?? 86_400) / 3_600)}h</strong></div><div><span>ORACLE</span><strong>{priceBook[selectedAsset.ticker]?.oraclePaused === false ? "Active" : priceBook[selectedAsset.ticker]?.oraclePaused === true ? "Paused" : "Unavailable"}</strong></div></div>
               {historyError && <p className="history-error">{historyError}</p>}
@@ -1663,12 +1712,17 @@ export default function Home() {
       )}
 
       {view === "activity" && (
-        <section className="page inner-page">
-          <div className="inner-heading"><div><p className="eyebrow">MAINNET RECEIPTS</p><h1>Activity</h1><p>Only wallet-confirmed transactions saved by this browser appear here.</p></div><button className="secondary-action" onClick={exportActivity} disabled={activityRows.length === 0}>Export CSV</button></div>
+        <section className="page inner-page activity-page">
+          <div className="inner-heading"><div><p className="eyebrow">MAINNET RECEIPTS</p><h1>Activity</h1><p>A readable timeline of confirmed trades and DCA creation transactions saved by this browser.</p></div><div className="activity-head-actions"><button className="secondary-action" onClick={exportActivity} disabled={activityRows.length === 0}>Export CSV</button><button className="primary-action" onClick={() => openComposer("Buy")}>New trade</button></div></div>
+          <div className="activity-overview"><article><span>CONFIRMED RECEIPTS</span><strong>{activityRows.length}</strong><small>Explorer-linked mainnet transactions</small></article><article><span>TRACKED TRADE VOLUME</span><strong>{trackedTradeVolume.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDG</strong><small>Buys spent plus sell proceeds</small></article><article><span>DCA CREATED</span><strong>{activityRows.filter((item) => item.kind === "DCA").length}</strong><small>Onchain automation receipts</small></article><article><span>LAST ACTIVITY</span><strong>{activityRows[0] ? new Date(activityRows[0].createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "None yet"}</strong><small>{activityRows[0] ? new Date(activityRows[0].createdAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "Your first receipt will appear here"}</small></article></div>
+          <div className="activity-toolbar"><div>{(["all", "trades", "dca"] as ActivityFilter[]).map((filter) => <button key={filter} className={activityFilter === filter ? "selected" : ""} onClick={() => setActivityFilter(filter)}>{filter === "all" ? `All ${activityRows.length}` : filter === "trades" ? "Buy & Sell" : "DCA"}</button>)}</div><span><i /> Confirmed on Robinhood Chain</span></div>
           <div className="activity-card">
-            {activityRows.map((item) => <div className="activity-row" key={item.id}><Mark ticker={item.asset} /><div><strong>{item.kind === "Buy" ? "Mainnet buy" : "Recurring strategy created"}</strong><small>{item.name}</small></div><p>{item.detail}</p><time>{new Date(item.createdAt).toLocaleString()}</time><a className="activity-status" href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${item.txHash}`} target="_blank" rel="noreferrer">Receipt ↗</a></div>)}
-            {activityRows.length === 0 && <div className="empty-state order-empty"><strong>No mainnet activity yet</strong><span>Completed buys and confirmed DCA strategies will appear here with explorer receipts.</span><button onClick={() => openComposer("Buy")}>Place an order</button></div>}
+            {visibleActivityRows.map((item) => <div className="activity-row upgraded" key={item.id}><Mark ticker={item.asset} /><div><span className={`activity-kind ${item.kind.toLowerCase()}`}>{item.kind}</span><strong>{item.kind === "Buy" ? `Bought ${item.asset}` : item.kind === "Sell" ? `Sold ${item.asset}` : `${item.asset} DCA created`}</strong><small>{item.name}</small></div><p><strong>{item.detail}</strong><small>{item.rule}</small></p><time>{new Date(item.createdAt).toLocaleString()}</time><a className="activity-status" href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${item.txHash}`} target="_blank" rel="noreferrer">View receipt ↗</a></div>)}
+            {activityRows.length === 0 && <div className="empty-state order-empty activity-empty"><strong>No confirmed mainnet activity yet</strong><span>Start with a live quote. Once the wallet confirms, HoodFlow stores the transaction reference here and links the block explorer receipt.</span><div><button onClick={() => openComposer("Buy")}>Buy a Stock Token</button><button onClick={() => openComposer("DCA")}>Create a DCA</button></div></div>}
+            {activityRows.length > 0 && visibleActivityRows.length === 0 && <div className="empty-state"><strong>No receipts in this filter</strong><span>Your other confirmed activity remains available under All.</span></div>}
           </div>
+          <div className="activity-proof"><article><span>01</span><p><strong>Wallet confirmed</strong><small>Prepared quotes never appear as completed activity.</small></p></article><article><span>02</span><p><strong>Explorer linked</strong><small>Every row opens the public transaction receipt.</small></p></article><article><span>03</span><p><strong>Exportable</strong><small>Download the same local receipt history as CSV.</small></p></article></div>
+          <p className="activity-local-note">This is a device-local activity index, not a complete wallet tax record. Clearing browser storage removes these labels but never changes onchain transactions.</p>
         </section>
       )}
 
@@ -1691,7 +1745,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Independent interface · Release 0.8.0</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Independent interface · Release 0.9.0</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setComposerOpen(false); }}>

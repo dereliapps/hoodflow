@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { seoAssets } from "@/lib/seo-assets";
 
@@ -14,7 +15,7 @@ export default function StockTokensPage() {
     <section className="seo-hero"><p>ROBINHOOD CHAIN MARKET DIRECTORY</p><h1>Stock Tokens,<br /><em>mapped for execution.</em></h1><div><p>Explore every canonical Stock Token and tokenized ETF currently indexed by HoodFlow. A trade button appears only after a reviewed Uniswap route passes a complete-input fork test.</p><span>25 indexed · 15 execution-enabled · 10 watch-only</span></div></section>
     <section className="seo-directory">
       {seoAssets.map((asset, index) => <Link key={asset.ticker} href={`/stock-tokens/${asset.ticker.toLowerCase()}`} className="seo-asset-row">
-        <span>{String(index + 1).padStart(2, "0")}</span><img src={`/logos/${asset.ticker}.png`} alt="" width="40" height="40" /><div><strong>{asset.ticker}</strong><small>{asset.name}</small></div><p>{asset.type}</p><b className={asset.fullFill ? "ready" : "watch"}>{asset.fullFill ? "FULL-FILL READY" : "WATCH-ONLY"}</b><i>View market →</i>
+        <span>{String(index + 1).padStart(2, "0")}</span><Image src={`/logos/${asset.ticker}.png`} alt="" width={40} height={40} /><div><strong>{asset.ticker}</strong><small>{asset.name}</small></div><p>{asset.type}</p><b className={asset.fullFill ? "ready" : "watch"}>{asset.fullFill ? "FULL-FILL READY" : "WATCH-ONLY"}</b><i>View market →</i>
       </Link>)}
     </section>
     <section className="seo-risk"><strong>Stock Tokens are not shares.</strong><p>They may be restricted in your jurisdiction and do not provide shareholder rights. Oracle prices are references; every execution receives a fresh DEX quote before wallet confirmation.</p></section>

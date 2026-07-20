@@ -109,8 +109,11 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /Sell to USDG/);
   assert.match(page, /Compare live routes/);
   assert.match(page, /PROTECTED QUOTES/);
-  assert.match(page, /Price feed temporarily unavailable\. Trading is disabled until verification completes\./);
-  assert.match(page, /Release 0\.8\.0/);
+  assert.match(page, /Automatic retries are active/);
+  assert.match(page, /Release 0\.9\.0/);
+  assert.match(page, /DCA command center/);
+  assert.match(page, /TRACKED TRADE VOLUME/);
+  assert.match(page, /price-skeleton/);
   assert.match(page, /MY PORTFOLIO/);
   assert.match(page, /AssetRequestBoard/);
   assert.match(page, /HOODFLOW FEE/);
@@ -174,8 +177,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(priceLib, /0x7706ba52/);
   assert.match(priceLib, /pauseResult === false/);
   assert.match(priceRoute, /stale-while-revalidate/);
-  assert.match(priceRoute, /max-age=5, s-maxage=5/);
+  assert.match(priceRoute, /max-age=3, s-maxage=3/);
   assert.match(priceRoute, /PRICE_BATCH_SIZE = 8/);
+  assert.match(priceRoute, /MAX_RPC_ATTEMPTS = 3/);
   assert.match(priceRoute, /Price RPC returned no usable batches/);
   assert.match(historyRoute, /0x9a6fc8f5/);
   assert.match(historyRoute, /ROUND_COUNT = 32/);

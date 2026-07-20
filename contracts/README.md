@@ -19,14 +19,16 @@
 
 ## Verification evidence
 
-- 25 local engine, oracle and adapter scenarios pass.
+- 27 local engine, oracle and adapter scenarios pass.
 - All 25 canonical Robinhood stock/ETF tokens, USDG and 8 protocol contracts are checked by `npm run infra:verify:mainnet`.
-- The 13 full-input routes verified at the latest snapshot execute through the official V4 Universal Router on a local fork via `npm run infra:verify:fork`.
+- Fifteen direct Buy/Sell routes are enabled after full-input fork verification. Thirteen use the reviewed V4 adapter path and two use reviewed V3 routes.
 - A two-execution, 2 USDG full-engine canary verifies budget completion, replay protection, zero custody, and cleared allowances via `npm run infra:verify:canary`.
 - The fork verification performs no real-chain broadcast.
 
-## Mainnet blockers
+## Mainnet Beta status
 
-This code is a testnet candidate, not audited production software. Before mainnet it still needs an independent audit, a timelocked multisig owner, canonical production feed addresses, production-grade RPC and monitoring, incident drills and a capped canary launch.
+The interface and DCA engine are deployed on Robinhood Chain mainnet as an unaudited beta. The engine remains a high-risk component until an independent review is complete and the owner moves from a single externally owned wallet to a verified multisig plus timelock. Production RPC redundancy, monitoring, incident drills and a funded public bug bounty also remain open work.
+
+See [`AUDIT_SCOPE.md`](../AUDIT_SCOPE.md) for the review brief and current deployment boundaries.
 
 Never place a funded private key in this repository. Copy `.env.example` to an ignored `.env` only on the deployment or keeper host, and use a dedicated low-balance testnet wallet.
