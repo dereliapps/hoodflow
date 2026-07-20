@@ -98,8 +98,15 @@ const MAX_UINT128 = (1n << 128n) - 1n;
 const USDG_SETTLEMENT: Settlement = { address: USDG_ADDRESS, symbol: "USDG", decimals: USDG_DECIMALS };
 const WETH_SETTLEMENT: Settlement = { address: WETH_ADDRESS, symbol: "WETH", decimals: WETH_DECIMALS };
 const VIRTUAL_SETTLEMENT: Settlement = { address: ROBINHOOD_VIRTUAL_ADDRESS, symbol: "VIRTUAL", decimals: 18 };
-const MARKET_CATEGORIES = ["Crypto"] as const;
-const INITIAL_MARKET_LIMIT = 40;
+const INITIAL_MARKET_LIMIT = 20;
+const MARKET_SORT_OPTIONS: Array<{ value: MarketSort; label: string; description: string }> = [
+  { value: "trending", label: "Trending", description: "Momentum plus active volume" },
+  { value: "volume", label: "Most traded", description: "Highest 24-hour pool volume" },
+  { value: "gainers", label: "Gainers", description: "Largest positive 24-hour move" },
+  { value: "losers", label: "Losers", description: "Largest negative 24-hour move" },
+  { value: "liquidity", label: "Deep liquidity", description: "Largest available pool liquidity" },
+  { value: "new", label: "New", description: "Most recently created pools" },
+];
 
 function message(error: unknown) {
   return friendlyExecutionError(error);
@@ -232,7 +239,6 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
   const [marketsLoading, setMarketsLoading] = useState(true);
   const [marketsError, setMarketsError] = useState("");
   const [marketsUpdatedAt, setMarketsUpdatedAt] = useState<number | null>(null);
-  const [marketCategory, setMarketCategory] = useState<(typeof MARKET_CATEGORIES)[number]>("Crypto");
   const [marketSort, setMarketSort] = useState<MarketSort>("volume");
   const [marketSearch, setMarketSearch] = useState("");
   const [marketSearchResults, setMarketSearchResults] = useState<CommunityMarket[]>([]);
@@ -293,8 +299,6 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
     return () => { controller.abort(); window.clearTimeout(start); window.clearInterval(refresh); };
   }, []);
 
-  const categoryCounts = useMemo(() => ({ Crypto: markets.length }), [markets]);
-
   const filteredMarkets = useMemo(() => {
     const query = marketSearch.trim().toLowerCase();
     const candidates = [...markets, ...marketSearchResults].filter((market, index, all) => all.findIndex((item) => item.address === market.address) === index);
@@ -310,11 +314,12 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
   }, [marketSearch, marketSearchResults, marketSort, markets]);
 
   const visibleMarkets = useMemo(() => filteredMarkets.slice(0, marketLimit), [filteredMarkets, marketLimit]);
+  const activeSort = MARKET_SORT_OPTIONS.find((option) => option.value === marketSort) ?? MARKET_SORT_OPTIONS[0];
 
   useEffect(() => {
     const reset = window.setTimeout(() => setMarketLimit(INITIAL_MARKET_LIMIT), 0);
     return () => window.clearTimeout(reset);
-  }, [marketCategory, marketSearch, marketSort]);
+  }, [marketSearch, marketSort]);
 
   const marketStats = useMemo(() => ({
     volume: markets.reduce((total, market) => total + market.volume24h, 0),
@@ -649,31 +654,25 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
       <div><span>LIVE PRICES</span><strong>{marketsLoading ? "—" : `${pricedMarkets}/${markets.length}`}</strong><small>USD-valued now</small></div>
     </section>
 
-    <section className="category-deck">
-      <div className="market-section-title"><div><p className="eyebrow">CRYPTO</p><h2>All Robinhood Chain tokens.</h2></div><p>Live DEX pools and launchpad markets in one list.</p></div>
-      <div className="category-grid">{MARKET_CATEGORIES.map((category, index) => <button key={category} className={marketCategory === category ? "active" : ""} onClick={() => setMarketCategory(category)}><span>{String(index + 1).padStart(2, "0")}</span><strong>{category}</strong><small>{categoryCounts[category]} tokens</small></button>)}</div>
-    </section>
-
     <section className="market-board">
-      <div className="market-board-head"><div><p className="eyebrow">LIVE MARKETS</p><h2>Crypto</h2><span>{marketsUpdatedAt ? `Updated ${new Date(marketsUpdatedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}` : "Connecting to market feeds"}</span></div><label><span>Q</span><input value={marketSearch} onChange={(event) => setMarketSearch(event.target.value)} placeholder="Name, ticker or contract address" aria-label="Search crypto markets" /></label></div>
-      <div className="market-rank-tabs">{(["trending", "volume", "gainers", "losers", "liquidity", "new"] as MarketSort[]).map((sort) => <button key={sort} className={marketSort === sort ? "active" : ""} onClick={() => setMarketSort(sort)}>{sort === "trending" ? "Trending" : sort === "volume" ? "Top volume" : sort === "gainers" ? "Top gainers" : sort === "losers" ? "Top losers" : sort === "liquidity" ? "Liquidity" : "New pools"}</button>)}</div>
-      <div className="token-market-table">
-        <div className="token-market-header"><span className="header-token">TOKEN</span><span className="header-price">PRICE</span><span className="header-change">24H</span><span className="header-volume">VOLUME</span><span className="header-liquidity">LIQUIDITY</span><span className="header-cap">MARKET CAP</span><span className="header-market">MARKET</span><span className="header-action" /></div>
+      <div className="market-board-head"><div><p className="eyebrow">LIVE MARKETS</p><h2>Explore crypto</h2><span>{marketsUpdatedAt ? `${filteredMarkets.length} markets · Updated ${new Date(marketsUpdatedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}` : "Connecting to market feeds"}</span></div><label><span>Q</span><input value={marketSearch} onChange={(event) => setMarketSearch(event.target.value)} placeholder="Search name, ticker or CA" aria-label="Search crypto markets" /></label></div>
+      <div className="market-rank-tabs" aria-label="Sort crypto markets">{MARKET_SORT_OPTIONS.map((option) => <button key={option.value} className={marketSort === option.value ? "active" : ""} onClick={() => setMarketSort(option.value)}>{option.label}</button>)}</div>
+      <div className="market-list-meta"><p><strong>{activeSort.label}</strong><span>{activeSort.description}</span></p><b>{marketsLoading ? "Loading" : `${visibleMarkets.length} shown`}</b></div>
+      <div className="market-card-grid">
         {marketsLoading && <div className="market-loading"><i /><strong>Syncing Robinhood Chain pools…</strong><span>Top volume, trending, new pools and canonical RWA routes</span></div>}
         {!marketsLoading && marketsError && !markets.length && <div className="market-loading error"><strong>Market feed temporarily unavailable</strong><span>{marketsError}</span></div>}
-        {!marketsLoading && visibleMarkets.map((market, index) => <article className="token-market-row" key={market.address} role="button" tabIndex={0} aria-label={`Open ${market.symbol} market`} onClick={() => inspectMarket(market)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") inspectMarket(market); }}>
-          <div className="token-market-identity">{market.imageUrl ? <img src={market.imageUrl} alt="" width={40} height={40} loading="lazy" /> : <b>{market.symbol.slice(0, 2).toUpperCase()}</b>}<span>{String(index + 1).padStart(2, "0")}</span><p><strong>{market.symbol}</strong><small>{market.name}</small></p>{market.canonical && <em>CANONICAL</em>}{market.launchpad === "virtuals" && <em className="virtuals">VIRTUALS</em>}</div>
-          <div className="token-metric metric-price" data-label="PRICE"><strong>{compactMoney(market.priceUsd, true)}</strong><small>{compact(market.address)}</small></div>
-          <strong className={`market-change metric-change ${(market.priceChange24h ?? 0) >= 0 ? "up" : "down"}`}>{percent(market.priceChange24h)}</strong>
-          <div className="token-metric metric-volume" data-label="24H VOLUME"><strong>{compactMoney(market.volume24h)}</strong><small>{market.transactions24h ? `${market.transactions24h.toLocaleString("en-US")} trades` : "24 hours"}</small></div>
-          <div className="token-metric metric-liquidity" data-label="LIQUIDITY"><strong>{compactMoney(market.liquidityUsd)}</strong><small>Pool liquidity</small></div>
-          <div className="token-metric metric-cap" data-label="MARKET CAP / FDV"><strong>{compactMoney(market.marketCapUsd ?? market.fdvUsd)}</strong><small>{market.marketCapUsd !== null ? "Market cap" : market.fdvUsd !== null ? "FDV" : market.fdvInVirtual !== null ? `${market.fdvInVirtual.toLocaleString("en-US", { maximumFractionDigits: 0 })} VIRTUAL FDV` : "Not reported"}</small></div>
-          <div className="market-pair"><strong>{market.lifecycle === "bonding" ? "BONDING" : `${market.symbol}/${market.quoteSymbol}`}</strong><small>{market.dex} · {poolAge(market.poolCreatedAt)}</small></div>
-          <div className="market-row-actions"><a href={market.externalUrl || market.pairUrl} target="_blank" rel="noreferrer" aria-label={`Open ${market.symbol} source market`} onClick={(event) => event.stopPropagation()}>↗</a></div>
+        {!marketsLoading && visibleMarkets.map((market, index) => <article className="market-discovery-card" key={market.address}>
+          <button className="market-card-main" type="button" aria-label={`Open ${market.symbol} market`} onClick={() => inspectMarket(market)}>
+            <header><div className="market-card-identity">{market.imageUrl ? <img src={market.imageUrl} alt="" width={48} height={48} loading={index < 6 ? "eager" : "lazy"} /> : <b>{market.symbol.slice(0, 2).toUpperCase()}</b>}<p><span>#{String(index + 1).padStart(2, "0")}</span><strong>{market.symbol}</strong><small>{market.name}</small></p></div><strong className={`market-change metric-change ${(market.priceChange24h ?? 0) >= 0 ? "up" : "down"}`}>{percent(market.priceChange24h)}</strong></header>
+            <div className="market-card-price metric-price"><span>PRICE</span><strong>{compactMoney(market.priceUsd, true)}</strong><small>{compact(market.address)}</small></div>
+            <div className="market-card-metrics"><div className="metric-volume"><span>24H VOLUME</span><strong>{compactMoney(market.volume24h)}</strong><small>{market.transactions24h ? `${market.transactions24h.toLocaleString("en-US")} trades` : "24 hours"}</small></div><div className="metric-liquidity"><span>LIQUIDITY</span><strong>{compactMoney(market.liquidityUsd)}</strong><small>Pool depth</small></div><div className="metric-cap"><span>{market.marketCapUsd !== null ? "MARKET CAP" : "FDV"}</span><strong>{compactMoney(market.marketCapUsd ?? market.fdvUsd)}</strong><small>{market.marketCapUsd !== null ? "Reported cap" : market.fdvUsd !== null ? "Fully diluted" : "Not reported"}</small></div></div>
+            <div className="market-card-enter"><span><strong>{market.lifecycle === "bonding" ? "BONDING" : `${market.symbol}/${market.quoteSymbol}`}</strong><small>{market.dex} · {poolAge(market.poolCreatedAt)}</small></span><b>Open market →</b></div>
+          </button>
+          <footer><div>{market.canonical && <em>CANONICAL</em>}{market.launchpad === "virtuals" && <em className="virtuals">VIRTUALS</em>}{!market.canonical && market.launchpad !== "virtuals" && <span>COMMUNITY MARKET</span>}</div><a href={market.externalUrl || market.pairUrl} target="_blank" rel="noreferrer" aria-label={`Open ${market.symbol} source market`}>Source ↗</a></footer>
         </article>)}
         {!marketsLoading && !marketsError && !filteredMarkets.length && <div className="market-loading"><strong>No matching crypto market</strong><span>Try another ticker or paste the contract address.</span></div>}
       </div>
-      {!marketsLoading && filteredMarkets.length > visibleMarkets.length && <div className="market-load-more"><span>Showing {visibleMarkets.length} of {filteredMarkets.length} markets</span><button type="button" onClick={() => setMarketLimit((current) => current + INITIAL_MARKET_LIMIT)}>Load 40 more</button></div>}
+      {!marketsLoading && filteredMarkets.length > visibleMarkets.length && <div className="market-load-more"><span>Showing {visibleMarkets.length} of {filteredMarkets.length} markets</span><button type="button" onClick={() => setMarketLimit((current) => current + INITIAL_MARKET_LIMIT)}>Show 20 more</button></div>}
       <div className="market-data-note"><p><strong>Live, source-labeled data.</strong> Market cap appears only when a provider reports it; otherwise HoodFlow labels FDV or “not reported” instead of inventing a number.</p><span>{marketsError ? `Partial feed: ${marketsError}` : "Refreshes every 60 seconds"}</span></div>
     </section>
 

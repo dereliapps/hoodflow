@@ -233,12 +233,15 @@ function PriceCell({ point, loading }: { point?: PricePoint; loading: boolean })
   return <div className={`price-cell ${point.status}`}><strong>{formatPrice(point.price)}</strong><small><i />{detail}</small></div>;
 }
 
-function PriceHistoryChart({ points, loading }: { points: HistoryPoint[]; loading: boolean }) {
+function PriceHistoryChart({ points, loading, livePrice }: { points: HistoryPoint[]; loading: boolean; livePrice?: number | null }) {
   if (loading) {
-    return <div className="history-chart empty"><span>Loading verified Chainlink rounds…</span></div>;
+    return <div className="history-chart history-loading" aria-label="Loading verified Chainlink rounds"><div className="history-grid" /><div className="history-loading-line" /><i className="history-loading-dot" /><span>Loading verified rounds…</span></div>;
   }
   if (points.length < 2) {
-    return <div className="history-chart empty"><span>No historical rounds are available for this asset.</span></div>;
+    if (livePrice) {
+      return <div className="history-chart history-live-point" aria-label={`Current verified oracle price ${formatPrice(livePrice)}`}><div className="history-grid" /><div className="history-reference-line" /><i className="latest" /><span><strong>{formatPrice(livePrice)}</strong>Current verified oracle point</span></div>;
+    }
+    return <div className="history-chart empty"><span>Price history is reconnecting.</span></div>;
   }
   const prices = points.map((point) => point.price);
   const low = Math.min(...prices);
@@ -320,6 +323,7 @@ export default function Home() {
   const bootCompletedRef = useRef(false);
   const bootExitTimerRef = useRef<number | null>(null);
   const bootThumbDraggedRef = useRef(false);
+  const priceHistoryCacheRef = useRef<Record<string, { points: HistoryPoint[]; error: string }>>({});
   const [toast, setToast] = useState("");
   const [draftName, setDraftName] = useState("Monday Apple");
   const [draftAsset, setDraftAsset] = useState("AAPL");
@@ -637,41 +641,42 @@ export default function Home() {
   useEffect(() => {
     if (view !== "asset") return;
     const controller = new AbortController();
-    let retryTimer: number | undefined;
+    const cached = priceHistoryCacheRef.current[selectedAssetTicker];
     const start = window.setTimeout(async () => {
-      setHistoryLoading(true);
-      setHistoryError("");
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        try {
-          const response = await fetch(`/api/history?ticker=${encodeURIComponent(selectedAssetTicker)}`, {
-            headers: { accept: "application/json" },
-            cache: "no-store",
-            signal: controller.signal,
-          });
-          const payload = await response.json() as { points?: HistoryPoint[]; error?: string };
-          if (!response.ok && !payload.points) throw new Error(payload.error || "History request failed");
-          setPriceHistory(Array.isArray(payload.points) ? payload.points : []);
-          setHistoryError(payload.error ?? "");
-          if (!controller.signal.aborted) setHistoryLoading(false);
-          return;
-        } catch (error) {
-          if (error instanceof DOMException && error.name === "AbortError") return;
-          if (attempt < 2) {
-            await new Promise<void>((resolve) => {
-              retryTimer = window.setTimeout(resolve, 1_200 * (attempt + 1));
-            });
-          }
-        }
-      }
-      if (!controller.signal.aborted) {
-        setPriceHistory([]);
-        setHistoryError("Historical Chainlink rounds are temporarily unavailable.");
+      if (cached) {
+        setPriceHistory(cached.points);
+        setHistoryError(cached.error);
         setHistoryLoading(false);
+      } else {
+        setPriceHistory([]);
+        setHistoryError("");
+        setHistoryLoading(true);
+      }
+      try {
+        const response = await fetch(`/api/history?ticker=${encodeURIComponent(selectedAssetTicker)}`, {
+          headers: { accept: "application/json" },
+          cache: "default",
+          signal: controller.signal,
+        });
+        const payload = await response.json() as { points?: HistoryPoint[]; error?: string };
+        if (!response.ok && !Array.isArray(payload.points)) throw new Error(payload.error || "History request failed");
+        const points = Array.isArray(payload.points) ? payload.points : [];
+        const error = payload.error ?? "";
+        priceHistoryCacheRef.current[selectedAssetTicker] = { points, error };
+        setPriceHistory(points);
+        setHistoryError(error);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (!cached) {
+          setPriceHistory([]);
+          setHistoryError("Historical rounds are reconnecting. The current oracle price remains verified.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setHistoryLoading(false);
       }
     }, 0);
     return () => {
       window.clearTimeout(start);
-      if (retryTimer) window.clearTimeout(retryTimer);
       controller.abort();
     };
   }, [selectedAssetTicker, view]);
@@ -1108,6 +1113,10 @@ export default function Home() {
   function openAsset(ticker: string) {
     if (!assetByTicker[ticker]) return;
     track("asset_opened", { ticker });
+    const cached = priceHistoryCacheRef.current[ticker];
+    setPriceHistory(cached?.points ?? []);
+    setHistoryError(cached?.error ?? "");
+    setHistoryLoading(!cached);
     setSelectedAssetTicker(ticker);
     setView("asset");
     const url = new URL("/", window.location.origin);
@@ -1751,7 +1760,7 @@ export default function Home() {
           <div className="asset-detail-grid">
             <article className="asset-chart-card">
               <div className="asset-price-line"><div><span>ONCHAIN TOKEN PRICE</span><strong>{priceBook[selectedAsset.ticker]?.price ? formatPrice(priceBook[selectedAsset.ticker].price) : <span className="price-skeleton detail" aria-label="Live price loading" />}</strong><small>{priceBook[selectedAsset.ticker]?.status === "live" ? formatPriceAge(priceBook[selectedAsset.ticker].updatedAt) : priceState === "error" ? "Automatic verification retry active" : "Connecting to live onchain feed"}</small></div>{historyStats && <div className={historyStats.change >= 0 ? "positive" : "negative"}><span>ROUND RANGE</span><strong>{historyStats.change >= 0 ? "+" : ""}{historyStats.change.toFixed(2)}%</strong><small>{priceHistory.length} verified rounds</small></div>}</div>
-              <PriceHistoryChart points={priceHistory} loading={historyLoading} />
+              <PriceHistoryChart points={priceHistory} loading={historyLoading} livePrice={priceBook[selectedAsset.ticker]?.price} />
               <div className="asset-chart-foot"><div><span>RANGE LOW</span><strong>{historyStats ? formatPrice(historyStats.low) : "—"}</strong></div><div><span>RANGE HIGH</span><strong>{historyStats ? formatPrice(historyStats.high) : "—"}</strong></div><div><span>HEARTBEAT</span><strong>{Math.round((priceBook[selectedAsset.ticker]?.heartbeat ?? 86_400) / 3_600)}h</strong></div><div><span>ORACLE</span><strong>{priceBook[selectedAsset.ticker]?.oraclePaused === false ? "Active" : priceBook[selectedAsset.ticker]?.oraclePaused === true ? "Paused" : "Unavailable"}</strong></div></div>
               {historyError && <p className="history-error">{historyError}</p>}
             </article>
@@ -1843,7 +1852,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Independent interface · Release 0.10.0</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Independent interface · Release 0.10.1</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setComposerOpen(false); }}>

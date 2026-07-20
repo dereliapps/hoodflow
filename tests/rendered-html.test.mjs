@@ -112,7 +112,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /Compare live routes/);
   assert.match(page, /PROTECTED ROUTES/);
   assert.match(page, /Automatic retries are active/);
-  assert.match(page, /Release 0\.10\.0/);
+  assert.match(page, /Release 0\.10\.1/);
   assert.match(page, /DCA command center/);
   assert.match(page, /TRACKED TRADE VOLUME/);
   assert.match(page, /price-skeleton/);
@@ -133,8 +133,11 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(community, /metric-volume/);
   assert.match(community, /metric-liquidity/);
   assert.match(community, /metric-cap/);
-  assert.match(community, /Top gainers/);
-  assert.match(community, /MARKET_CATEGORIES/);
+  assert.match(community, /Most traded/);
+  assert.match(community, /Deep liquidity/);
+  assert.match(community, /MARKET_SORT_OPTIONS/);
+  assert.match(community, /market-discovery-card/);
+  assert.match(community, /Explore crypto/);
   assert.match(community, /V3_FEES = \[100, 500, 3_000, 10_000\]/);
   assert.match(community, /buildV2ExactInputCalldata/);
   assert.match(community, /settlement-trigger/);
@@ -190,9 +193,11 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /setEngineFeeBps\(Number\(protocolFeeBps\)\)/);
   assert.match(historyRoute, /0x9a6fc8f5/);
   assert.match(historyRoute, /ROUND_COUNT = 32/);
-  assert.match(historyRoute, /HISTORY_BATCH_SIZE = 8/);
-  assert.match(historyRoute, /History RPC returned no usable batches/);
-  assert.match(page, /attempt < 3/);
+  assert.match(historyRoute, /HISTORY_CACHE_TTL_MS/);
+  assert.match(historyRoute, /Promise\.any/);
+  assert.match(historyRoute, /History RPC returned fewer than two rounds/);
+  assert.match(page, /priceHistoryCacheRef/);
+  assert.match(page, /cache: "default"/);
   assert.match(historyRoute, /decodeLatestRoundData/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 
