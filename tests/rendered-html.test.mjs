@@ -110,7 +110,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /Compare live routes/);
   assert.match(page, /PROTECTED QUOTES/);
   assert.match(page, /Automatic retries are active/);
-  assert.match(page, /Release 0\.9\.0/);
+  assert.match(page, /Release 0\.9\.1/);
   assert.match(page, /DCA command center/);
   assert.match(page, /TRACKED TRADE VOLUME/);
   assert.match(page, /price-skeleton/);
@@ -180,7 +180,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(priceRoute, /max-age=3, s-maxage=3/);
   assert.match(priceRoute, /PRICE_BATCH_SIZE = 8/);
   assert.match(priceRoute, /MAX_RPC_ATTEMPTS = 3/);
+  assert.match(priceRoute, /for \(const batch of chunkRequests/);
   assert.match(priceRoute, /Price RPC returned no usable batches/);
+  assert.match(page, /candidate\.liveCount >= 15/);
   assert.match(historyRoute, /0x9a6fc8f5/);
   assert.match(historyRoute, /ROUND_COUNT = 32/);
   assert.match(historyRoute, /HISTORY_BATCH_SIZE = 8/);

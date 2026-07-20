@@ -363,7 +363,10 @@ export default function Home() {
         });
         if (response.ok) {
           const candidate = await response.json() as PriceResponse;
-          if (candidate.prices && typeof candidate.prices === "object") data = candidate;
+          // Edge RPC requests can be regionally throttled. An incomplete server
+          // response is never treated as verified; the browser retries the same
+          // read directly against Robinhood Chain before showing an error.
+          if (candidate.prices && typeof candidate.prices === "object" && candidate.liveCount >= 15) data = candidate;
         }
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") throw error;
@@ -739,8 +742,10 @@ export default function Home() {
   const refreshEngineStatus = useCallback(async () => {
     if (!contractConfigured) return;
     setEngineChecking(true);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5_000);
     try {
-      const response = await fetch("/api/engine-status", { cache: "no-store" });
+      const response = await fetch("/api/engine-status", { cache: "no-store", signal: controller.signal });
       const status = await response.json() as {
         blockNumber?: number;
         owner?: string;
@@ -765,8 +770,11 @@ export default function Home() {
         ? "Engine deployed · owner activation required"
         : status.configured ? "Engine live · verified onchain" : "Engine configuration needs review");
     } catch {
-      setContractStatus("Verification temporarily unavailable · retrying automatically");
+      setContractStatus((current) => current.startsWith("Engine live") || current.startsWith("Engine deployed")
+        ? current
+        : "Verification temporarily unavailable · retrying automatically");
     } finally {
+      window.clearTimeout(timeout);
       setEngineChecking(false);
     }
   }, []);
@@ -1500,7 +1508,7 @@ export default function Home() {
     { view: "assets", label: "Stock Tokens" },
     { view: "community", label: "Crypto" },
     { view: "portfolio", label: "Portfolio" },
-    { view: "marketplace", label: "DCA" },
+    { view: "strategies", label: "DCA" },
     { view: "rewards", label: "Rewards" },
     { view: "activity", label: "Activity" },
     { view: "controls", label: "Security" },
@@ -1745,7 +1753,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Independent interface · Release 0.9.0</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Independent interface · Release 0.9.1</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setComposerOpen(false); }}>

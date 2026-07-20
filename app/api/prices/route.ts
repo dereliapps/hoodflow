@@ -51,10 +51,15 @@ async function readPriceRpc(requests: PriceRpcRequest[]) {
   for (let attempt = 0; attempt < MAX_RPC_ATTEMPTS; attempt += 1) {
     const remaining = requests.filter((request) => !resultIsUsable(collected.get(request.id)));
     if (remaining.length === 0) break;
-    const responses = await Promise.all(chunkRequests(remaining, PRICE_BATCH_SIZE).map(requestBatch));
-    responses.flat().forEach((result) => {
-      if (result && typeof result.id === "string" && resultIsUsable(result)) collected.set(result.id, result);
-    });
+    // Robinhood's public RPC rate-limits concurrent requests from some edge regions.
+    // Sequential batches are slightly slower but avoid returning a single lucky batch.
+    for (const batch of chunkRequests(remaining, PRICE_BATCH_SIZE)) {
+      const response = await requestBatch(batch);
+      response.forEach((result) => {
+        if (result && typeof result.id === "string" && resultIsUsable(result)) collected.set(result.id, result);
+      });
+      if (collected.size < requests.length) await new Promise((resolve) => setTimeout(resolve, 80));
+    }
     if (attempt < MAX_RPC_ATTEMPTS - 1 && collected.size < requests.length) {
       await new Promise((resolve) => setTimeout(resolve, 140 * (attempt + 1)));
     }
