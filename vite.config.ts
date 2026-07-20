@@ -1,5 +1,6 @@
 import vinext from "vinext";
 import { defineConfig } from "vite";
+import { fileURLToPath } from "node:url";
 import hostingConfig from "./.openai/hosting.json";
 import { sites } from "./build/sites-vite-plugin";
 
@@ -9,6 +10,7 @@ const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
 const { d1, r2 } = hostingConfig;
 
 const usePolling = process.env.VITE_USE_POLLING === "true";
+const privyServerStub = fileURLToPath(new URL("./app/privy-server-stub.tsx", import.meta.url));
 
 const localBindingConfig = {
   main: "./worker/index.ts",
@@ -43,6 +45,10 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    environments: {
+      rsc: { resolve: { alias: { "@privy-io/react-auth": privyServerStub } } },
+      ssr: { resolve: { alias: { "@privy-io/react-auth": privyServerStub } } },
+    },
     server: usePolling
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,

@@ -2,6 +2,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   BrowserProvider,
   Contract,
@@ -52,9 +53,11 @@ import {
 import { ROBINHOOD_PRICE_FEEDS } from "@/config/robinhood-price-feeds";
 import { track } from "@/lib/analytics-client";
 import CommunityTokens from "./community-tokens";
-import PrivyWalletBridge, { type PrivyWalletController } from "./privy-wallet-bridge";
+import type { PrivyWalletController } from "./privy-wallet-bridge";
 import { PRIVY_CONFIGURED } from "./providers";
 import ReferralRewards from "./referral-rewards";
+
+const PrivyWalletBridge = dynamic(() => import("./privy-wallet-bridge"), { ssr: false });
 
 type View = "overview" | "strategies" | "assets" | "asset" | "community" | "rewards" | "marketplace" | "activity" | "controls";
 type StrategyKind = "Buy" | "Sell" | "DCA";
