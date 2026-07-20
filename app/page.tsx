@@ -694,6 +694,7 @@ export default function Home() {
   useEffect(() => {
     async function readNetwork() {
       try {
+        const startedAt = Date.now();
         const provider = new JsonRpcProvider(
           ROBINHOOD_MAINNET.rpcUrls[0],
           ROBINHOOD_MAINNET.chainIdNumber,
@@ -707,7 +708,7 @@ export default function Home() {
             setContractReady(false);
           } else {
             const engine = new Contract(CONTRACT_ADDRESS, HOODFLOW_ENGINE_ABI, provider);
-            const [owner, paused, settlementToken, swapAdapter, keeperCount, allowedTokenCount, maxTranche, maxBudget, inputConfig] = await Promise.all([
+            const [owner, paused, settlementToken, swapAdapter, keeperCount, allowedTokenCount, maxTranche, maxBudget, protocolFeeBps, inputConfig] = await Promise.all([
               engine.owner() as Promise<string>,
               engine.paused() as Promise<boolean>,
               engine.settlementToken() as Promise<string>,
@@ -716,10 +717,15 @@ export default function Home() {
               engine.allowedTokenCount() as Promise<bigint>,
               engine.maxTrancheAmount() as Promise<bigint>,
               engine.maxStrategyBudget() as Promise<bigint>,
+              engine.protocolFeeBps() as Promise<bigint>,
               engine.tokenConfigs(USDG_ADDRESS),
             ]);
             setEngineOwner(owner);
             setEnginePaused(paused);
+            setEngineFeeBps(Number(protocolFeeBps));
+            const ownerCode = await provider.getCode(owner);
+            setEngineOwnerType(ownerCode === "0x" ? "EOA" : "Contract");
+            setRpcHealth({ endpoint: "Browser fallback", configuredEndpoints: 1, latencyMs: Date.now() - startedAt });
             const configured = settlementToken.toLowerCase() === USDG_ADDRESS.toLowerCase()
               && swapAdapter !== "0x0000000000000000000000000000000000000000"
               && keeperCount > 0n
@@ -1753,7 +1759,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Independent interface · Release 0.9.1</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Independent interface · Release 0.9.2</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setComposerOpen(false); }}>
