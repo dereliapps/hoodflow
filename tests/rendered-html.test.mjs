@@ -113,7 +113,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /Sell to USDG/);
   assert.match(page, /Compare live routes/);
   assert.match(intro, /RobinHoodIntro/);
-  assert.match(intro, /hoodflow-robinhood-intro-v1/);
+  assert.match(intro, /hoodflow-robinhood-intro-v2/);
   assert.match(intro, /sessionStorage\.setItem/);
   assert.match(intro, /new URLSearchParams\(window\.location\.search\)\.get\("intro"\) === "1"/);
   assert.match(intro, /Math\.min\(window\.devicePixelRatio \|\| 1, 2\)/);

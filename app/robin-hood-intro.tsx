@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const INTRO_SESSION_KEY = "hoodflow-robinhood-intro-v1";
+const INTRO_SESSION_KEY = "hoodflow-robinhood-intro-v2";
 const LETTERS = "hoodflow".split("");
 
 type IntroStep = "idle" | "drawing" | "fired" | "hit" | "logo" | "open" | "leaving";
@@ -104,10 +104,10 @@ export default function RobinHoodIntro() {
     const mobile = rect.width <= 720;
     const originX = rect.width * (mobile ? 0.82 : 0.825);
     const originY = rect.height * (mobile ? 0.51 : 0.52);
-    const count = mobile ? 42 : 64;
+    const count = mobile ? 30 : 44;
     const sparks: Spark[] = Array.from({ length: count }, (_, index) => {
       const angle = Math.random() * Math.PI * 2;
-      const speed = 2.5 + Math.random() * 8;
+      const speed = 1.8 + Math.random() * 6.2;
       const bar = index % 3;
       const barHeights = [28, 42, 56];
       const barHeight = barHeights[bar];
@@ -116,8 +116,8 @@ export default function RobinHoodIntro() {
         y: originY,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed - 1.2,
-        size: 1.3 + Math.random() * 3.2,
-        color: index % 4 === 0 ? "#d8aa48" : "#37f08a",
+        size: 0.8 + Math.random() * 2.1,
+        color: index % 3 === 0 ? "#d8aa48" : "#37f08a",
         targetX: originX + (bar - 1) * 14 + (Math.random() - 0.5) * 5,
         targetY: originY + 27 - Math.random() * barHeight,
       };
@@ -143,7 +143,9 @@ export default function RobinHoodIntro() {
         context.fillStyle = spark.color;
         context.shadowBlur = 10;
         context.shadowColor = spark.color;
-        context.fillRect(spark.x - spark.size / 2, spark.y - spark.size / 2, spark.size, spark.size);
+        context.beginPath();
+        context.arc(spark.x, spark.y, spark.size, 0, Math.PI * 2);
+        context.fill();
       });
       context.globalAlpha = 1;
       context.shadowBlur = 0;
@@ -165,13 +167,13 @@ export default function RobinHoodIntro() {
     schedule(() => {
       setStep("hit");
       burst();
-    }, 790);
-    schedule(() => setStep("logo"), 1260);
-    schedule(() => setStep("open"), 1900);
+    }, 640);
+    schedule(() => setStep("logo"), 1110);
+    schedule(() => setStep("open"), 1660);
     schedule(() => {
       setStep("leaving");
       finish();
-    }, 2960);
+    }, 2800);
   }, [burst, finish, schedule]);
 
   const beginDraw = useCallback(() => {
@@ -267,12 +269,19 @@ export default function RobinHoodIntro() {
         {LETTERS.map((letter, index) => <span key={`${letter}-${index}`} className="rh-intro-letter" style={{ "--letter-index": index } as React.CSSProperties}>{letter}</span>)}
       </h1>
 
-      <svg className="rh-intro-arrow" viewBox="0 0 190 38" aria-hidden="true">
-        <path className="rh-intro-arrow-shadow" d="M8 20H170" />
-        <path className="rh-intro-arrow-shaft" d="M8 18H172" />
-        <path className="rh-intro-arrow-head" d="m171 18-19-11 6 11-6 11Z" />
-        <path className="rh-intro-arrow-feather" d="M24 18 7 7h16l14 11M24 18 7 29h16l14-11" />
-      </svg>
+      <div className="rh-intro-projectile" aria-hidden="true">
+        <span className="rh-intro-arrow-trail" />
+        <svg className="rh-intro-arrow" viewBox="0 0 220 30">
+          <g className="rh-intro-arrow-body">
+            <path className="rh-intro-arrow-shadow" d="M14 17H203" />
+            <path className="rh-intro-arrow-shaft" d="M14 15H203" />
+            <path className="rh-intro-arrow-nock" d="m14 10-8 5 8 5" />
+            <path className="rh-intro-arrow-feather" d="m38 15-20-10-8 2 17 8Zm0 0-20 10-8-2 17-8Z" />
+            <path className="rh-intro-arrow-binding" d="M31 9v12M35 11v8" />
+            <path className="rh-intro-arrow-head" d="m216 15-29-9 12 9-12 9Z" />
+          </g>
+        </svg>
+      </div>
 
       <div className="rh-intro-impact" aria-hidden="true"><i /><i /><i /></div>
       <canvas ref={canvasRef} className="rh-intro-particles" aria-hidden="true" />
