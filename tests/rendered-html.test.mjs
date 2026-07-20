@@ -24,10 +24,9 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(html, /Every live token\. One execution screen\./);
   assert.match(html, /Compare live routes/);
   assert.match(html, /Find the route/);
-  assert.match(html, /HoodFlow workspace loading/);
-  assert.match(html, /Preparing your/);
-  assert.match(html, /safe workspace\./);
-  assert.match(html, /Loading token registry/);
+  assert.match(html, /Slide to enter HoodFlow/);
+  assert.match(html, /Move the arrow\. Open the flow\./);
+  assert.match(html, /SLIDE TO ENTER/);
   assert.match(html, /Direct settlement/);
   assert.match(html, /Reviewed execution markets/);
   assert.match(html, /Protected minimum/);
@@ -65,7 +64,10 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /toggleStrategy/);
   assert.match(page, /applyTemplate/);
   assert.match(page, /exportActivity/);
-  assert.match(page, /hoodflow-mainnet-orders-v3/);
+  assert.match(page, /hoodflow-mainnet-orders-v4/);
+  assert.match(page, /orderStorageKey\(activeWallet\)/);
+  assert.match(page, /walletAddress: address\.toLowerCase\(\)/);
+  assert.match(page, /setStrategies\(\[\]\)/);
   assert.match(page, /window\.localStorage\.setItem/);
   assert.match(page, /Wallet keys and account data are never stored/);
   assert.match(page, /wallet_switchEthereumChain/);
@@ -108,9 +110,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /Sell now/);
   assert.match(page, /Sell to USDG/);
   assert.match(page, /Compare live routes/);
-  assert.match(page, /PROTECTED QUOTES/);
+  assert.match(page, /PROTECTED ROUTES/);
   assert.match(page, /Automatic retries are active/);
-  assert.match(page, /Release 0\.9\.2/);
+  assert.match(page, /Release 0\.10\.0/);
   assert.match(page, /DCA command center/);
   assert.match(page, /TRACKED TRADE VOLUME/);
   assert.match(page, /price-skeleton/);
@@ -166,7 +168,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(layout, /summary_large_image/);
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
   assert.match(css, /\.launch-screen/);
-  assert.match(css, /launch-fallback/);
+  assert.match(css, /\.launch-slider-shell/);
+  assert.match(css, /\.launch-flight-arrow/);
+  assert.doesNotMatch(css, /launch-fallback/);
   assert.match(css, /\.price-source-bar/);
   assert.match(css, /\.price-cell\.stale/);
   assert.match(css, /\.asset-detail-grid/);

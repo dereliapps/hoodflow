@@ -68,7 +68,7 @@ type StrategyStatus = "Prepared" | "Paused" | "Confirmed";
 type MarketplaceSort = "featured" | "cadence" | "risk";
 type ActivityFilter = "all" | "trades" | "dca";
 type InfoPanel = "docs" | "terms";
-type BootPhase = "loading" | "leaving" | "done";
+type BootPhase = "ready" | "leaving" | "done";
 type PriceState = "loading" | "live" | "degraded" | "error";
 type WalletConnectionKind = "browser" | "walletconnect" | "privy";
 type HoodFlowWalletProvider = Eip1193Provider & { disconnect?: () => Promise<void> };
@@ -93,6 +93,7 @@ type Strategy = {
   budget: string;
   expires: string;
   createdAt: number;
+  walletAddress: string;
   txHash?: string;
   chainStrategyId?: string;
   inputAmount?: number;
@@ -122,7 +123,7 @@ declare global {
 
 const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_HOODFLOW_CONTRACT_ADDRESS?.trim() || HOODFLOW_DCA_ADDRESS;
 const contractConfigured = /^0x[a-fA-F0-9]{40}$/.test(CONTRACT_ADDRESS);
-const ORDER_STORAGE_KEY = "hoodflow-mainnet-orders-v3";
+const ORDER_STORAGE_PREFIX = "hoodflow-mainnet-orders-v4";
 const PRICE_CACHE_KEY = "hoodflow-live-prices-v1";
 const MAX_UINT128 = (1n << 128n) - 1n;
 
@@ -280,12 +281,18 @@ function isStoredStrategy(value: unknown): value is Strategy {
     && ["Prepared", "Paused", "Confirmed"].includes(item.status ?? "")
     && typeof item.budget === "string"
     && typeof item.expires === "string"
-    && typeof item.createdAt === "number";
+    && typeof item.createdAt === "number"
+    && typeof item.walletAddress === "string"
+    && /^0x[a-fA-F0-9]{40}$/.test(item.walletAddress);
+}
+
+function orderStorageKey(walletAddress: string) {
+  return `${ORDER_STORAGE_PREFIX}:${walletAddress.toLowerCase()}`;
 }
 
 export default function Home() {
-  const [bootPhase, setBootPhase] = useState<BootPhase>("loading");
-  const [bootProgress, setBootProgress] = useState(12);
+  const [bootPhase, setBootPhase] = useState<BootPhase>("ready");
+  const [bootProgress, setBootProgress] = useState(0);
   const [view, setView] = useState<View>("overview");
   const [walletAddress, setWalletAddress] = useState("");
   const [walletBalance, setWalletBalance] = useState("");
@@ -309,6 +316,10 @@ export default function Home() {
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null);
   const [kind, setKind] = useState<StrategyKind>("DCA");
   const [strategies, setStrategies] = useState<Strategy[]>([]);
+  const hydratedWalletRef = useRef("");
+  const bootCompletedRef = useRef(false);
+  const bootExitTimerRef = useRef<number | null>(null);
+  const bootThumbDraggedRef = useRef(false);
   const [toast, setToast] = useState("");
   const [draftName, setDraftName] = useState("Monday Apple");
   const [draftAsset, setDraftAsset] = useState("AAPL");
@@ -324,7 +335,6 @@ export default function Home() {
   const [marketSort, setMarketSort] = useState<MarketplaceSort>("featured");
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [infoPanel, setInfoPanel] = useState<InfoPanel | null>(null);
-  const [draftsHydrated, setDraftsHydrated] = useState(false);
   const [priceBook, setPriceBook] = useState<Record<string, PricePoint>>({});
   const [priceState, setPriceState] = useState<PriceState>("loading");
   const [priceUpdatedAt, setPriceUpdatedAt] = useState<number | null>(null);
@@ -517,10 +527,25 @@ export default function Home() {
     unrealized: total.unrealized + (row.unrealizedPnl ?? 0),
     realized: total.realized + row.realizedPnl,
   }), { value: 0, unrealized: 0, realized: 0 }), [portfolioRows]);
-  const bootMessage = bootProgress < 32 ? "Loading token registry" : bootProgress < 60 ? "Verifying onchain prices" : bootProgress < 82 ? "Checking trade routes" : bootProgress < 100 ? "Preparing your workspace" : "Workspace ready";
+  const enterWorkspace = useCallback((progress = 100) => {
+    if (progress < 84) {
+      setBootProgress(0);
+      return;
+    }
+    if (bootCompletedRef.current) return;
+    bootCompletedRef.current = true;
+    setBootProgress(100);
+    setBootPhase("leaving");
+    try { window.sessionStorage.setItem("hoodflow-boot-seen-v2", "1"); } catch { /* Session storage is an optional convenience. */ }
+    bootExitTimerRef.current = window.setTimeout(() => {
+      setBootPhase("done");
+      document.body.classList.remove("boot-locked");
+    }, 620);
+  }, []);
 
   useEffect(() => {
-    const bootSeen = window.sessionStorage.getItem("hoodflow-boot-seen-v1") === "1";
+    let bootSeen = false;
+    try { bootSeen = window.sessionStorage.getItem("hoodflow-boot-seen-v2") === "1"; } catch { /* Show the gate when session storage is unavailable. */ }
     if (bootSeen) {
       const finish = window.setTimeout(() => {
         setBootProgress(100);
@@ -529,66 +554,59 @@ export default function Home() {
       }, 0);
       return () => window.clearTimeout(finish);
     }
-    window.sessionStorage.setItem("hoodflow-boot-seen-v1", "1");
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     document.body.classList.add("boot-locked");
-    if (reducedMotion) {
-      const finish = window.setTimeout(() => {
-        setBootProgress(100);
-        setBootPhase("done");
-        document.body.classList.remove("boot-locked");
-      }, 180);
-      return () => {
-        window.clearTimeout(finish);
-        document.body.classList.remove("boot-locked");
-      };
-    }
-
-    const timers = [
-      window.setTimeout(() => setBootProgress(34), 220),
-      window.setTimeout(() => setBootProgress(67), 560),
-      window.setTimeout(() => setBootProgress(88), 920),
-      window.setTimeout(() => setBootProgress(100), 1220),
-      window.setTimeout(() => setBootPhase("leaving"), 1370),
-      window.setTimeout(() => {
-        setBootPhase("done");
-        document.body.classList.remove("boot-locked");
-      }, 1740),
-    ];
     return () => {
-      timers.forEach((timer) => window.clearTimeout(timer));
+      if (bootExitTimerRef.current !== null) window.clearTimeout(bootExitTimerRef.current);
       document.body.classList.remove("boot-locked");
     };
   }, []);
 
   useEffect(() => {
+    const activeWallet = walletAddress.toLowerCase();
+    hydratedWalletRef.current = "";
     const hydrate = window.setTimeout(() => {
+      if (!activeWallet) {
+        setStrategies([]);
+        return;
+      }
       try {
-        const saved = window.localStorage.getItem(ORDER_STORAGE_KEY);
+        const saved = window.localStorage.getItem(orderStorageKey(activeWallet));
         if (saved) {
           const parsed = JSON.parse(saved) as unknown;
           if (Array.isArray(parsed)) {
-            const valid = parsed.filter(isStoredStrategy).slice(0, 50);
-            if (valid.length > 0) setStrategies(valid);
+            const valid = parsed
+              .filter(isStoredStrategy)
+              .filter((item) => item.walletAddress.toLowerCase() === activeWallet)
+              .slice(0, 50);
+            setStrategies(valid);
+          } else {
+            setStrategies([]);
           }
+        } else {
+          setStrategies([]);
         }
       } catch {
-        // Private browsing or a corrupted draft must never block the workspace.
+        setStrategies([]);
+        // Private browsing or a corrupted wallet index must never block the workspace.
       } finally {
-        setDraftsHydrated(true);
+        hydratedWalletRef.current = activeWallet;
       }
     }, 0);
     return () => window.clearTimeout(hydrate);
-  }, []);
+  }, [walletAddress]);
 
   useEffect(() => {
-    if (!draftsHydrated) return;
+    const activeWallet = walletAddress.toLowerCase();
+    if (!activeWallet || hydratedWalletRef.current !== activeWallet) return;
     try {
-      window.localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(strategies.slice(0, 50)));
+      const walletStrategies = strategies
+        .filter((item) => item.walletAddress.toLowerCase() === activeWallet)
+        .slice(0, 50);
+      window.localStorage.setItem(orderStorageKey(activeWallet), JSON.stringify(walletStrategies));
     } catch {
       // Device storage is optional; the in-memory workspace remains usable.
     }
-  }, [draftsHydrated, strategies]);
+  }, [strategies, walletAddress]);
 
   useEffect(() => {
     const syncAssetFromUrl = () => {
@@ -965,6 +983,8 @@ export default function Home() {
     }
     const address = accounts[0];
     if (!address) throw new Error("The wallet did not return an account.");
+    hydratedWalletRef.current = "";
+    setStrategies([]);
     setWalletProvider(provider);
     setWalletKind(kind);
     setWalletAddress(address);
@@ -1041,6 +1061,8 @@ export default function Home() {
     } catch {
       // The local session is still cleared if the remote wallet already disconnected.
     } finally {
+      hydratedWalletRef.current = "";
+      setStrategies([]);
       setWalletProvider(null);
       setWalletKind(null);
       setWalletAddress("");
@@ -1259,6 +1281,7 @@ export default function Home() {
       id: Date.now(), name: draftName, kind: "Buy", asset: draftAsset,
       rule: `Buy once with ${draftAmount} USDG`, detail: `${Number(formatUnits(received, STOCK_TOKEN_DECIMALS)).toFixed(6)} ${draftAsset} received`, status: "Confirmed",
       budget: `${Number(draftAmount).toFixed(2)} USDG`, expires: "Completed", createdAt: Date.now(), txHash: receipt.hash,
+      walletAddress: address.toLowerCase(),
       inputAmount: Number(draftAmount), outputAmount: Number(formatUnits(received, STOCK_TOKEN_DECIMALS)),
     }, ...current]);
     await refreshWalletBalances(address, provider);
@@ -1354,6 +1377,7 @@ export default function Home() {
       id: Date.now(), name: draftName, kind: "Sell", asset: draftAsset,
       rule: `Sell ${draftAmount} ${draftAsset}`, detail: `${Number(formatUnits(received, USDG_DECIMALS)).toFixed(2)} USDG received`, status: "Confirmed",
       budget: `${draftAmount} ${draftAsset}`, expires: "Completed", createdAt: Date.now(), txHash: receipt.hash,
+      walletAddress: address.toLowerCase(),
       inputAmount: Number(draftAmount), outputAmount: Number(formatUnits(received, USDG_DECIMALS)),
     }, ...current]);
     await refreshWalletBalances(address, provider);
@@ -1435,6 +1459,7 @@ export default function Home() {
       id: Date.now(), name: draftName, kind: "DCA", asset: draftAsset,
       rule: `${draftAmount} USDG · ${draftFrequency.toLowerCase()} · ${executions} buys`, detail: "Keeper awaiting first execution", status: "Prepared",
       budget: `${formatUnits(totalBudget, USDG_DECIMALS)} USDG`, expires: new Date(expiresAt * 1_000).toLocaleDateString("en-GB"), createdAt: Date.now(), txHash: receipt.hash, chainStrategyId,
+      walletAddress: address.toLowerCase(),
     }, ...current]);
     await refreshWalletBalances(address, provider);
     setComposerOpen(false);
@@ -1478,7 +1503,7 @@ export default function Home() {
   }
 
   function exportActivity() {
-    if (activityRows.length === 0) {
+    if (!connected || activityRows.length === 0) {
       notify("No mainnet activity to export yet.");
       return;
     }
@@ -1523,17 +1548,75 @@ export default function Home() {
   return (
     <main className="app-shell">
       {PRIVY_CONFIGURED && <PrivyWalletBridge onController={(controller) => { privyControllerRef.current = controller; }} onWallet={activatePrivyWallet} onError={notify} />}
-      {bootPhase !== "done" && <div className={`launch-screen ${bootPhase === "leaving" ? "is-leaving" : ""}`} role="status" aria-live="polite" aria-label="HoodFlow workspace loading">
+      {bootPhase !== "done" && <div className={`launch-screen ${bootPhase === "leaving" ? "is-leaving" : ""}`} role="dialog" aria-modal="true" aria-labelledby="launch-title">
         <div className="launch-grid" aria-hidden="true" />
-        <div className="launch-top"><div className="launch-brand"><span className="brand-mark"><i /><i /><i /></span><strong>hoodflow</strong></div><span>SECURE AUTOMATION LAYER / 08</span></div>
-        <div className="launch-center">
-          <div className="launch-orbit" aria-hidden="true"><div className="launch-core"><span className="brand-mark"><i /><i /><i /></span></div>{["AAPL", "NVDA", "TSLA", "GOOGL", "MSFT"].map((ticker, index) => <span className={`launch-logo launch-logo-${index + 1}`} key={ticker}><Mark ticker={ticker} /></span>)}</div>
-          <p>ROBINHOOD CHAIN / MAINNET</p>
-          <h1>Preparing your<br /><span>safe workspace.</span></h1>
-          <div className="launch-progress"><i style={{ "--progress": `${bootProgress}%` } as React.CSSProperties} /></div>
-          <div className="launch-status"><span><i />{bootMessage}</span><strong>{bootProgress.toString().padStart(3, "0")}%</strong></div>
+        <div className="launch-glow" aria-hidden="true" />
+        <div className="launch-top"><div className="launch-brand"><span className="brand-mark"><i /><i /><i /></span><strong>hoodflow</strong></div><span>INDEPENDENT INTERFACE · ROBINHOOD CHAIN</span></div>
+        <div className="launch-center" style={{ "--slide": `${bootProgress}%` } as React.CSSProperties}>
+          <p>ROBINHOOD CHAIN · MAINNET</p>
+          <div className="launch-wordstage">
+            <span className="launch-flight-arrow" aria-hidden="true">➜</span>
+            <h1 id="launch-title">hoodflow</h1>
+            <span className="launch-word-reveal" aria-hidden="true">hoodflow</span>
+          </div>
+          <p className="launch-instruction">Move the arrow. Open the flow.</p>
+          <div className="launch-slider-shell">
+            <div className="launch-slider-fill" aria-hidden="true" />
+            <span className="launch-slider-copy" aria-hidden="true">SLIDE TO ENTER</span>
+            <button
+              className="launch-slider-thumb"
+              type="button"
+              aria-label="Open HoodFlow"
+              onPointerDown={(event) => {
+                bootThumbDraggedRef.current = false;
+                event.currentTarget.setPointerCapture(event.pointerId);
+              }}
+              onPointerMove={(event) => {
+                if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+                const track = event.currentTarget.parentElement?.getBoundingClientRect();
+                if (!track) return;
+                const next = Math.max(0, Math.min(100, ((event.clientX - track.left) / track.width) * 100));
+                if (Math.abs(next - bootProgress) > 2) bootThumbDraggedRef.current = true;
+                setBootProgress(next);
+              }}
+              onPointerUp={(event) => {
+                const track = event.currentTarget.parentElement?.getBoundingClientRect();
+                const next = track ? Math.max(0, Math.min(100, ((event.clientX - track.left) / track.width) * 100)) : bootProgress;
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+                enterWorkspace(next);
+              }}
+              onClick={() => {
+                if (!bootThumbDraggedRef.current) enterWorkspace();
+                bootThumbDraggedRef.current = false;
+              }}
+            >→</button>
+            <input
+              className="launch-slider-input"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={bootProgress}
+              aria-label="Slide to enter HoodFlow"
+              aria-valuetext={`${bootProgress}% toward opening HoodFlow`}
+              onChange={(event) => {
+                const next = Number(event.currentTarget.value);
+                setBootProgress(next);
+                if (next >= 98) enterWorkspace(next);
+              }}
+              onPointerUp={(event) => enterWorkspace(Number(event.currentTarget.value))}
+              onPointerCancel={() => setBootProgress(0)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  enterWorkspace();
+                }
+              }}
+            />
+          </div>
+          <div className="launch-status"><span><i />SELF-CUSTODY READY</span><strong>{bootProgress >= 84 ? "RELEASE TO OPEN" : "DRAG →"}</strong></div>
         </div>
-        <div className="launch-bottom"><span>NON-CUSTODIAL</span><span>PROTECTED QUOTES</span><span>25 INDEXED TOKENS</span></div>
+        <div className="launch-bottom"><span>NON-CUSTODIAL</span><span>PROTECTED ROUTES</span><span>25 INDEXED TOKENS</span></div>
       </div>}
       <header className="topbar">
         <button className="brand" onClick={() => navigate("overview")} aria-label="HoodFlow home">
@@ -1727,16 +1810,17 @@ export default function Home() {
 
       {view === "activity" && (
         <section className="page inner-page activity-page">
-          <div className="inner-heading"><div><p className="eyebrow">MAINNET RECEIPTS</p><h1>Activity</h1><p>A readable timeline of confirmed trades and DCA creation transactions saved by this browser.</p></div><div className="activity-head-actions"><button className="secondary-action" onClick={exportActivity} disabled={activityRows.length === 0}>Export CSV</button><button className="primary-action" onClick={() => openComposer("Buy")}>New trade</button></div></div>
+          <div className="inner-heading"><div><p className="eyebrow">MAINNET RECEIPTS</p><h1>Activity</h1><p>A wallet-specific timeline of confirmed trades and DCA creation transactions saved on this device.</p></div><div className="activity-head-actions"><button className="secondary-action" onClick={exportActivity} disabled={!connected || activityRows.length === 0}>Export CSV</button><button className="primary-action" onClick={() => openComposer("Buy")}>New trade</button></div></div>
           <div className="activity-overview"><article><span>CONFIRMED RECEIPTS</span><strong>{activityRows.length}</strong><small>Explorer-linked mainnet transactions</small></article><article><span>TRACKED TRADE VOLUME</span><strong>{trackedTradeVolume.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDG</strong><small>Buys spent plus sell proceeds</small></article><article><span>DCA CREATED</span><strong>{activityRows.filter((item) => item.kind === "DCA").length}</strong><small>Onchain automation receipts</small></article><article><span>LAST ACTIVITY</span><strong>{activityRows[0] ? new Date(activityRows[0].createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "None yet"}</strong><small>{activityRows[0] ? new Date(activityRows[0].createdAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "Your first receipt will appear here"}</small></article></div>
-          <div className="activity-toolbar"><div>{(["all", "trades", "dca"] as ActivityFilter[]).map((filter) => <button key={filter} className={activityFilter === filter ? "selected" : ""} onClick={() => setActivityFilter(filter)}>{filter === "all" ? `All ${activityRows.length}` : filter === "trades" ? "Buy & Sell" : "DCA"}</button>)}</div><span><i /> Confirmed on Robinhood Chain</span></div>
+          <div className="activity-toolbar"><div>{(["all", "trades", "dca"] as ActivityFilter[]).map((filter) => <button key={filter} className={activityFilter === filter ? "selected" : ""} onClick={() => setActivityFilter(filter)}>{filter === "all" ? `All ${activityRows.length}` : filter === "trades" ? "Buy & Sell" : "DCA"}</button>)}</div><span><i /> {connected ? `${compactAddress(walletAddress)} · Robinhood Chain` : "Connect wallet to load receipts"}</span></div>
           <div className="activity-card">
-            {visibleActivityRows.map((item) => <div className="activity-row upgraded" key={item.id}><Mark ticker={item.asset} /><div><span className={`activity-kind ${item.kind.toLowerCase()}`}>{item.kind}</span><strong>{item.kind === "Buy" ? `Bought ${item.asset}` : item.kind === "Sell" ? `Sold ${item.asset}` : `${item.asset} DCA created`}</strong><small>{item.name}</small></div><p><strong>{item.detail}</strong><small>{item.rule}</small></p><time>{new Date(item.createdAt).toLocaleString()}</time><a className="activity-status" href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${item.txHash}`} target="_blank" rel="noreferrer">View receipt ↗</a></div>)}
-            {activityRows.length === 0 && <div className="empty-state order-empty activity-empty"><strong>No confirmed mainnet activity yet</strong><span>Start with a live quote. Once the wallet confirms, HoodFlow stores the transaction reference here and links the block explorer receipt.</span><div><button onClick={() => openComposer("Buy")}>Buy a Stock Token</button><button onClick={() => openComposer("DCA")}>Create a DCA</button></div></div>}
+            {connected && visibleActivityRows.map((item) => <div className="activity-row upgraded" key={item.id}><Mark ticker={item.asset} /><div><span className={`activity-kind ${item.kind.toLowerCase()}`}>{item.kind}</span><strong>{item.kind === "Buy" ? `Bought ${item.asset}` : item.kind === "Sell" ? `Sold ${item.asset}` : `${item.asset} DCA created`}</strong><small>{item.name}</small></div><p><strong>{item.detail}</strong><small>{item.rule}</small></p><time>{new Date(item.createdAt).toLocaleString()}</time><a className="activity-status" href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${item.txHash}`} target="_blank" rel="noreferrer">View receipt ↗</a></div>)}
+            {!connected && <div className="empty-state order-empty activity-empty wallet-locked-empty"><span className="activity-lock" aria-hidden="true">↳</span><strong>Connect a wallet to view activity</strong><span>Receipts are isolated by wallet address. Disconnecting immediately hides every local transaction label.</span><div><button onClick={handleWalletButton}>Connect wallet</button></div></div>}
+            {connected && activityRows.length === 0 && <div className="empty-state order-empty activity-empty"><strong>No confirmed mainnet activity yet</strong><span>Start with a live quote. Once the wallet confirms, HoodFlow stores the transaction reference under this wallet only and links the block explorer receipt.</span><div><button onClick={() => openComposer("Buy")}>Buy a Stock Token</button><button onClick={() => openComposer("DCA")}>Create a DCA</button></div></div>}
             {activityRows.length > 0 && visibleActivityRows.length === 0 && <div className="empty-state"><strong>No receipts in this filter</strong><span>Your other confirmed activity remains available under All.</span></div>}
           </div>
           <div className="activity-proof"><article><span>01</span><p><strong>Wallet confirmed</strong><small>Prepared quotes never appear as completed activity.</small></p></article><article><span>02</span><p><strong>Explorer linked</strong><small>Every row opens the public transaction receipt.</small></p></article><article><span>03</span><p><strong>Exportable</strong><small>Download the same local receipt history as CSV.</small></p></article></div>
-          <p className="activity-local-note">This is a device-local activity index, not a complete wallet tax record. Clearing browser storage removes these labels but never changes onchain transactions.</p>
+          <p className="activity-local-note">This device-local index is separated by wallet address and is not a complete tax record. Disconnecting hides it immediately; clearing browser storage removes the labels but never changes onchain transactions.</p>
         </section>
       )}
 
@@ -1759,7 +1843,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Independent interface · Release 0.9.2</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Independent interface · Release 0.10.0</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setComposerOpen(false); }}>
