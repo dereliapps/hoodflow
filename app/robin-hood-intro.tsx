@@ -2,8 +2,79 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const INTRO_SESSION_KEY = "hoodflow-robinhood-intro-v2";
+const INTRO_SESSION_KEY = "hoodflow-robinhood-intro-v3";
 const LETTERS = "hoodflow".split("");
+
+const SCENE_WIDTH = 1672;
+const SCENE_HEIGHT = 941;
+
+type SceneGeometry = {
+  launchX: number;
+  launchY: number;
+  arrowWidth: number;
+  impactX: number;
+  impactY: number;
+  logoX: number;
+  logoY: number;
+  flightX: number;
+  flightY: number;
+  flightAngle: number;
+};
+
+function getSceneGeometry(width: number, height: number): SceneGeometry {
+  if (width <= 720) {
+    const arrowWidth = width * 0.24;
+    const launchX = width * 0.264;
+    const launchY = height * 0.42;
+    const impactX = width * 0.84;
+    const impactY = height * 0.445;
+    const flightX = impactX - (launchX + arrowWidth * (216 / 220));
+    const flightY = impactY - launchY;
+    return {
+      launchX,
+      launchY,
+      arrowWidth,
+      impactX,
+      impactY,
+      logoX: width * 0.84,
+      logoY: height * 0.535,
+      flightX,
+      flightY,
+      flightAngle: Math.atan2(flightY, flightX) * (180 / Math.PI),
+    };
+  }
+
+  const scale = Math.max(width / SCENE_WIDTH, height / SCENE_HEIGHT);
+  const offsetX = (width - SCENE_WIDTH * scale) / 2;
+  const offsetY = (height - SCENE_HEIGHT * scale) / 2;
+  const mapX = (x: number) => offsetX + x * scale;
+  const mapY = (y: number) => offsetY + y * scale;
+  const arrowWidth = 223 * scale;
+  const launchX = mapX(331);
+  const launchY = mapY(395);
+  const impactX = mapX(1405);
+  const impactY = mapY(420);
+  const flightX = impactX - (launchX + arrowWidth * (216 / 220));
+  const flightY = impactY - launchY;
+
+  return {
+    launchX,
+    launchY,
+    arrowWidth,
+    impactX,
+    impactY,
+    logoX: mapX(1442),
+    logoY: mapY(505),
+    flightX,
+    flightY,
+    flightAngle: Math.atan2(flightY, flightX) * (180 / Math.PI),
+  };
+}
+
+function smoothstep(edgeA: number, edgeB: number, value: number) {
+  const progress = Math.min(1, Math.max(0, (value - edgeA) / (edgeB - edgeA)));
+  return progress * progress * (3 - 2 * progress);
+}
 
 type IntroStep = "idle" | "drawing" | "fired" | "hit" | "logo" | "open" | "leaving";
 
@@ -93,6 +164,24 @@ export default function RobinHoodIntro() {
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
     canvas.getContext("2d")?.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const geometry = getSceneGeometry(rect.width, rect.height);
+    const style = root.style;
+    style.setProperty("--rh-launch-x", `${geometry.launchX}px`);
+    style.setProperty("--rh-launch-y", `${geometry.launchY}px`);
+    style.setProperty("--rh-arrow-width", `${geometry.arrowWidth}px`);
+    style.setProperty("--rh-impact-x", `${geometry.impactX}px`);
+    style.setProperty("--rh-impact-y", `${geometry.impactY}px`);
+    style.setProperty("--rh-logo-x", `${geometry.logoX}px`);
+    style.setProperty("--rh-logo-y", `${geometry.logoY}px`);
+    style.setProperty("--rh-flight-x", `${geometry.flightX}px`);
+    style.setProperty("--rh-flight-y", `${geometry.flightY}px`);
+    style.setProperty("--rh-flight-x-18", `${geometry.flightX * 0.18}px`);
+    style.setProperty("--rh-flight-y-18", `${geometry.flightY * 0.18 - 4}px`);
+    style.setProperty("--rh-flight-x-62", `${geometry.flightX * 0.62}px`);
+    style.setProperty("--rh-flight-y-62", `${geometry.flightY * 0.62 - 9}px`);
+    style.setProperty("--rh-flight-x-86", `${geometry.flightX * 0.86}px`);
+    style.setProperty("--rh-flight-y-86", `${geometry.flightY * 0.86 - 4}px`);
+    style.setProperty("--rh-flight-angle", `${geometry.flightAngle}deg`);
   }, []);
 
   const burst = useCallback(() => {
@@ -102,8 +191,9 @@ export default function RobinHoodIntro() {
     if (!canvas || !root || !context) return;
     const rect = root.getBoundingClientRect();
     const mobile = rect.width <= 720;
-    const originX = rect.width * (mobile ? 0.82 : 0.825);
-    const originY = rect.height * (mobile ? 0.51 : 0.52);
+    const geometry = getSceneGeometry(rect.width, rect.height);
+    const originX = geometry.impactX;
+    const originY = geometry.impactY;
     const count = mobile ? 30 : 44;
     const sparks: Spark[] = Array.from({ length: count }, (_, index) => {
       const angle = Math.random() * Math.PI * 2;
@@ -118,8 +208,8 @@ export default function RobinHoodIntro() {
         vy: Math.sin(angle) * speed - 1.2,
         size: 0.8 + Math.random() * 2.1,
         color: index % 3 === 0 ? "#d8aa48" : "#37f08a",
-        targetX: originX + (bar - 1) * 14 + (Math.random() - 0.5) * 5,
-        targetY: originY + 27 - Math.random() * barHeight,
+        targetX: geometry.logoX + (bar - 1) * 14 + (Math.random() - 0.5) * 5,
+        targetY: geometry.logoY + 27 - Math.random() * barHeight,
       };
     });
     const startedAt = performance.now();
@@ -167,13 +257,13 @@ export default function RobinHoodIntro() {
     schedule(() => {
       setStep("hit");
       burst();
-    }, 640);
-    schedule(() => setStep("logo"), 1110);
-    schedule(() => setStep("open"), 1660);
+    }, 430);
+    schedule(() => setStep("logo"), 840);
+    schedule(() => setStep("open"), 1450);
     schedule(() => {
       setStep("leaving");
       finish();
-    }, 2800);
+    }, 2600);
   }, [burst, finish, schedule]);
 
   const beginDraw = useCallback(() => {
@@ -189,6 +279,15 @@ export default function RobinHoodIntro() {
       chargeFrameRef.current = requestAnimationFrame(update);
     };
     chargeFrameRef.current = requestAnimationFrame(update);
+  }, []);
+
+  const cancelDraw = useCallback(() => {
+    if (!drawingRef.current || firedRef.current) return;
+    drawingRef.current = false;
+    if (chargeFrameRef.current !== null) cancelAnimationFrame(chargeFrameRef.current);
+    chargeFrameRef.current = null;
+    setCharge(0);
+    setStep("idle");
   }, []);
 
   const skip = useCallback(() => {
@@ -243,6 +342,15 @@ export default function RobinHoodIntro() {
   if (!mounted) return null;
 
   const rank = STEP_ORDER[step];
+  const drawProgress = charge / 100;
+  const readyOpacity = 1 - smoothstep(0.26, 0.48, drawProgress);
+  const halfOpacity = smoothstep(0.26, 0.48, drawProgress) * (1 - smoothstep(0.72, 0.96, drawProgress));
+  const introStyle = {
+    "--rh-ready-opacity": readyOpacity,
+    "--rh-half-opacity": halfOpacity,
+    "--rh-actor-shift": `${drawProgress * -4}px`,
+    "--rh-actor-tilt": `${drawProgress * -0.28}deg`,
+  } as React.CSSProperties;
   const stageClass = [
     "rh-intro",
     step === "drawing" ? "is-drawing" : "",
@@ -254,9 +362,17 @@ export default function RobinHoodIntro() {
   ].filter(Boolean).join(" ");
 
   return (
-    <section ref={rootRef} className={stageClass} role="dialog" aria-modal="true" aria-labelledby="rh-intro-title">
-      <div className="rh-intro-door rh-intro-door-left" aria-hidden="true"><div className="rh-intro-scene" /></div>
-      <div className="rh-intro-door rh-intro-door-right" aria-hidden="true"><div className="rh-intro-scene" /></div>
+    <section ref={rootRef} style={introStyle} className={stageClass} role="dialog" aria-modal="true" aria-labelledby="rh-intro-title">
+      <div className="rh-intro-door rh-intro-door-left" aria-hidden="true">
+        <div className="rh-intro-scene rh-intro-scene-base" />
+        <div className="rh-intro-scene rh-intro-scene-half" />
+        <div className="rh-intro-scene rh-intro-scene-ready" />
+        <div className="rh-intro-scene rh-intro-scene-release" />
+      </div>
+      <div className="rh-intro-door rh-intro-door-right" aria-hidden="true">
+        <div className="rh-intro-scene rh-intro-scene-base" />
+        <div className="rh-intro-scene rh-intro-scene-bag" />
+      </div>
       <div className="rh-intro-vignette" aria-hidden="true" />
       <div className="rh-intro-grain" aria-hidden="true" />
 
@@ -302,7 +418,7 @@ export default function RobinHoodIntro() {
           if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
           fire();
         }}
-        onPointerCancel={fire}
+        onPointerCancel={cancelDraw}
         onKeyDown={(event) => {
           if ((event.key === " " || event.key === "Enter") && !event.repeat) {
             event.preventDefault();
