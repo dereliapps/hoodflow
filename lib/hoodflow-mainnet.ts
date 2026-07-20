@@ -287,8 +287,8 @@ export function buildV3ExactInputCalldata(args: {
     [getAddress(args.tokenIn), args.fee, getAddress(args.tokenOut)],
   );
   const swapInput = coder.encode(
-    ["address", "uint256", "uint256", "bytes", "bool", "uint256[]"],
-    [getAddress(args.recipient), args.amountIn, args.minAmountOut, path, true, []],
+    ["address", "uint256", "uint256", "bytes", "bool"],
+    [getAddress(args.recipient), args.amountIn, args.minAmountOut, path, true],
   );
   const permitInput = coder.encode(
     ["tuple(tuple(address token,uint160 amount,uint48 expiration,uint48 nonce) details,address spender,uint256 sigDeadline)", "bytes"],
@@ -317,14 +317,13 @@ export function buildV2ExactInputCalldata(args: {
     throw new Error("The V2 route path does not match the selected input and output tokens.");
   }
   const swapInput = coder.encode(
-    ["address", "uint256", "uint256", "address[]", "bool", "uint256[]"],
+    ["address", "uint256", "uint256", "address[]", "bool"],
     [
       getAddress(args.recipient),
       args.amountIn,
       args.minAmountOut,
       path,
       true,
-      [],
     ],
   );
   const permitInput = coder.encode(

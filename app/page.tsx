@@ -63,6 +63,13 @@ type BootPhase = "loading" | "leaving" | "done";
 type PriceState = "loading" | "live" | "degraded" | "error";
 type WalletConnectionKind = "browser" | "walletconnect";
 type HoodFlowWalletProvider = Eip1193Provider & { disconnect?: () => Promise<void> };
+type InjectedWalletProvider = HoodFlowWalletProvider & {
+  providers?: InjectedWalletProvider[];
+  isMetaMask?: boolean;
+  isOkxWallet?: boolean;
+  isOKExWallet?: boolean;
+};
+type InjectedWalletPreference = "metamask" | "okx" | "browser";
 type WalletConnectConfig = { enabled: boolean; projectId: string | null };
 
 type Strategy = {
@@ -88,7 +95,8 @@ type HistoryPoint = {
 
 declare global {
   interface Window {
-    ethereum?: Eip1193Provider;
+    ethereum?: InjectedWalletProvider;
+    okxwallet?: InjectedWalletProvider;
   }
 }
 
@@ -690,14 +698,30 @@ export default function Home() {
     notify(kind === "walletconnect" ? "WalletConnect session ready on Robinhood Chain" : "Browser wallet connected to Robinhood Chain");
   }
 
-  async function connectBrowserWallet() {
-    if (!window.ethereum) {
+  function selectInjectedWallet(preference: InjectedWalletPreference) {
+    if (preference === "okx" && window.okxwallet) return window.okxwallet;
+    const root = window.ethereum;
+    if (!root) return null;
+    const providers = root.providers?.length ? root.providers : [root];
+    if (preference === "metamask") return providers.find((provider) => provider.isMetaMask && !provider.isOkxWallet && !provider.isOKExWallet) ?? null;
+    if (preference === "okx") return providers.find((provider) => provider.isOkxWallet || provider.isOKExWallet) ?? null;
+    return root;
+  }
+
+  async function connectBrowserWallet(preference: InjectedWalletPreference = "browser") {
+    const provider = selectInjectedWallet(preference);
+    if (!provider) {
+      const walletName = preference === "metamask" ? "MetaMask" : preference === "okx" ? "OKX Wallet" : "browser wallet";
+      notify(`${walletName} was not found. Install it or use WalletConnect.`);
+      return;
+    }
+    if (!window.ethereum && !window.okxwallet) {
       notify("No browser wallet found. Use WalletConnect or install Robinhood Wallet / MetaMask.");
       return;
     }
     setWalletConnecting(true);
     try {
-      await activateWallet(window.ethereum, "browser");
+      await activateWallet(provider, "browser");
     } catch (error) {
       notify(errorMessage(error));
     } finally {
@@ -1425,7 +1449,20 @@ export default function Home() {
 
       {selectedStrategy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedStrategy(null); }}><section className="detail-drawer" role="dialog" aria-modal="true" aria-label={`${selectedStrategy.name} details`}><div className="composer-head"><div><p className="eyebrow">MAINNET ORDER</p><h2>{selectedStrategy.name}</h2></div><button onClick={() => setSelectedStrategy(null)}>x</button></div><div className="order-status-hero"><Mark ticker={selectedStrategy.asset} /><div><strong>{selectedStrategy.status}</strong><span>{selectedStrategy.detail}</span></div></div><div className="health-checks"><div><span>Network</span><strong>Robinhood Chain <b>4663</b></strong></div><div><span>Order type</span><strong>{selectedStrategy.kind} <b>ONCHAIN</b></strong></div><div><span>Asset</span><strong>{selectedStrategy.asset} <b>ONLY</b></strong></div><div><span>Created</span><strong>{new Date(selectedStrategy.createdAt).toLocaleString()}</strong></div></div><div className="permission-summary"><p><span>Rule</span><strong>{selectedStrategy.rule}</strong></p><p><span>Spending cap</span><strong>{selectedStrategy.budget}</strong></p><p><span>Permission expires</span><strong>{selectedStrategy.expires}</strong></p></div>{selectedStrategy.txHash ? <a className="drawer-action receipt-link" href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${selectedStrategy.txHash}`} target="_blank" rel="noreferrer">View mainnet receipt ↗</a> : null}</section></div>}
 
-      {walletModalOpen && !connected && <div className="confirm-backdrop wallet-connect-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !walletConnecting) setWalletModalOpen(false); }}><section className="wallet-connect-card" role="dialog" aria-modal="true" aria-labelledby="wallet-connect-title"><div className="composer-head"><div><p className="eyebrow">NON-CUSTODIAL CONNECTION</p><h2 id="wallet-connect-title">Choose your wallet.</h2></div><button aria-label="Close wallet options" onClick={() => setWalletModalOpen(false)} disabled={walletConnecting}>x</button></div><p className="wallet-connect-intro">HoodFlow never receives your private key. Your wallet signs every mainnet permission and transaction.</p><div className="wallet-connect-options"><button type="button" className="wallet-option wallet-option-wc" onClick={() => void connectWalletConnect()} disabled={walletConnecting || walletConnectReady !== true}><span className="wallet-option-icon">W</span><span><strong>WalletConnect</strong><small>{walletConnectReady === null ? "Checking availability…" : walletConnectReady ? "QR code · mobile deep link · 500+ wallets" : "Activation pending"}</small></span><b>{walletConnectReady ? "RECOMMENDED" : "NEEDS ID"}</b></button><button type="button" className="wallet-option" onClick={() => void connectBrowserWallet()} disabled={walletConnecting}><span className="wallet-option-icon browser">↗</span><span><strong>Browser wallet</strong><small>Robinhood Wallet · MetaMask · injected wallets</small></span><b>DESKTOP</b></button></div><div className="wallet-connect-foot"><span><i /> Robinhood Chain</span><strong>CHAIN ID 4663</strong></div></section></div>}
+      {walletModalOpen && !connected && <div className="confirm-backdrop wallet-connect-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !walletConnecting) setWalletModalOpen(false); }}><section className="wallet-connect-card" role="dialog" aria-modal="true" aria-labelledby="wallet-connect-title">
+        <button className="wallet-connect-close" type="button" aria-label="Close wallet options" onClick={() => setWalletModalOpen(false)} disabled={walletConnecting}>×</button>
+        <div className="wallet-connect-heading"><p>CONNECT YOUR WALLET</p><h2 id="wallet-connect-title">Log in to HoodFlow</h2></div>
+        <div className="wallet-brand-orb" aria-hidden="true"><img src="/favicon.svg" alt="" width={58} height={58} /></div>
+        <p className="wallet-connect-intro">Choose a wallet to trade on Robinhood Chain. HoodFlow never sees your seed phrase or private key.</p>
+        <div className="wallet-connect-options">
+          <button type="button" className="wallet-option" onClick={() => void connectBrowserWallet("metamask")} disabled={walletConnecting}><span className="wallet-option-icon metamask">M</span><span><strong>MetaMask</strong><small>Browser extension and mobile app</small></span><b>4663</b></button>
+          <button type="button" className="wallet-option" onClick={() => void connectBrowserWallet("okx")} disabled={walletConnecting}><span className="wallet-option-icon okx">OKX</span><span><strong>OKX Wallet</strong><small>Connect the installed OKX extension</small></span><b>4663</b></button>
+          <button type="button" className="wallet-option wallet-option-wc" onClick={() => void connectWalletConnect()} disabled={walletConnecting || walletConnectReady !== true}><span className="wallet-option-icon walletconnect">W</span><span><strong>More wallets</strong><small>{walletConnectReady === null ? "Checking WalletConnect…" : walletConnectReady ? "Scan QR or open your mobile wallet" : "WalletConnect is temporarily unavailable"}</small></span><b>{walletConnectReady ? "QR" : "OFFLINE"}</b></button>
+          <button type="button" className="wallet-option wallet-option-browser" onClick={() => void connectBrowserWallet("browser")} disabled={walletConnecting}><span className="wallet-option-icon browser">↗</span><span><strong>Other browser wallet</strong><small>Robinhood Wallet and compatible extensions</small></span><b>WEB3</b></button>
+        </div>
+        <p className="wallet-connect-terms">By connecting, you confirm that you understand the product risks and jurisdiction restrictions.</p>
+        <div className="wallet-connect-foot"><span><i /> Robinhood Chain mainnet</span><strong>CHAIN ID 4663</strong></div>
+      </section></div>}
 
       {infoPanel && <div className="confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setInfoPanel(null); }}><section className="info-card" role="dialog" aria-modal="true" aria-labelledby="info-title"><div className="composer-head"><div><p className="eyebrow">{infoPanel === "docs" ? "QUICK GUIDE" : "PRODUCT RISKS"}</p><h2 id="info-title">{infoPanel === "docs" ? "Know every status." : "Understand before you trade."}</h2></div><button aria-label="Close information" onClick={() => setInfoPanel(null)}>x</button></div>{infoPanel === "docs" ? <div className="info-list"><article><span>01</span><p><strong>Buy or sell</strong><small>HoodFlow compares reviewed liquidity routes and returns a protected quote.</small></p></article><article><span>02</span><p><strong>Exact order permission</strong><small>Permit2 signs only the selected token amount for ten minutes.</small></p></article><article><span>03</span><p><strong>Full-fill ready</strong><small>The complete input passed a router fork test. A fresh quote is still required.</small></p></article><article><span>04</span><p><strong>Watch-only</strong><small>The token remains visible, but HoodFlow blocks trading until a route is verified.</small></p></article><article><span>05</span><p><strong>Recurring DCA</strong><small>A separate optional automation layer; direct Buy and Sell remain the primary product.</small></p></article></div> : <div className="info-copy"><p><strong>Stock Tokens are not shares.</strong> Robinhood describes them as derivative contracts that track an underlying security without granting shareholder rights.</p><p>Stock Tokens carry a high level of risk, may not be appropriate for every investor, and eligibility or jurisdictional restrictions can apply.</p><p>HoodFlow is an independent interface built on Robinhood Chain. It is not affiliated with or endorsed by Robinhood Markets, Inc.</p><p>Verify the token amount, minimum output and router address in your wallet before signing. Network gas is paid in ETH.</p><p><a href="https://robinhood.com/eu/en/support/articles/about-stock-tokens/" target="_blank" rel="noreferrer">Review Robinhood&apos;s Stock Token explanation and risks ↗</a></p></div>}<button className="drawer-action" onClick={() => setInfoPanel(null)}>Got it</button></section></div>}
 

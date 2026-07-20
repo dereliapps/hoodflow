@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element -- token artwork is supplied by live market-data providers. */
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BrowserProvider,
   Contract,
@@ -140,6 +140,10 @@ function poolAge(value: string | null) {
   return `${Math.floor(hours / 24)}d`;
 }
 
+function currentTimestamp() {
+  return Date.now();
+}
+
 class RouteUnavailableError extends Error {}
 
 function routeName(route: Route) {
@@ -210,6 +214,9 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
   const [amount, setAmount] = useState("20");
   const [slippage, setSlippage] = useState("1");
   const [quote, setQuote] = useState<Route | null>(null);
+  const [quoteBusy, setQuoteBusy] = useState(false);
+  const [quoteUpdatedAt, setQuoteUpdatedAt] = useState<number | null>(null);
+  const quoteRequestId = useRef(0);
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState("");
   const [routeError, setRouteError] = useState("");
@@ -400,13 +407,20 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
     return { address: getAddress(market.quoteAddress), symbol: market.quoteSymbol.slice(0, 16), decimals: market.quoteDecimals };
   }
 
+  function invalidateQuote() {
+    quoteRequestId.current += 1;
+    setQuote(null);
+    setQuoteUpdatedAt(null);
+    setRouteError("");
+  }
+
   async function discover(event?: FormEvent, requestedAddress?: string, requestedMarket?: CommunityMarket) {
     event?.preventDefault();
     const rawAddress = requestedAddress || contractAddress;
     if (requestedAddress) setContractAddress(requestedAddress);
     setBusy(true);
     setStep("Reading contract bytecode and ERC-20 metadata…");
-    setQuote(null);
+    invalidateQuote();
     setRouteError("");
     setRouteUnavailable(false);
     try {
@@ -448,8 +462,9 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
       } else try {
         const discovered = await bestRoute(provider, nextSettlement.address, address, parseUnits(defaultAmount, nextSettlement.decimals));
         setQuote(discovered);
+        setQuoteUpdatedAt(currentTimestamp());
         routeLabel = routeName(discovered);
-        setStep(`${nextSettlement.symbol} live quote ready. It will be verified again before signing.`);
+        setStep(`${nextSettlement.symbol} live quote ready. Auto-refresh is active and the route will be verified again before signing.`);
       } catch (error) {
         if (!(error instanceof RouteUnavailableError)) setRouteError(message(error));
         setRouteUnavailable(true);
@@ -465,9 +480,10 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
     } finally { setBusy(false); }
   }
 
-  async function refreshQuote() {
-    if (!token) return;
-    setBusy(true);
+  const refreshQuote = useCallback(async () => {
+    if (!token || busy || activeMarket?.executionVenue === "virtuals-bonding") return;
+    const requestId = ++quoteRequestId.current;
+    setQuoteBusy(true);
     setRouteError("");
     setRouteUnavailable(false);
     setStep(`Checking ${settlement.symbol} routes…`);
@@ -476,13 +492,17 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
       if (amountIn <= 0n || amountIn > MAX_UINT128) throw new Error("Enter a valid amount.");
       const provider = new JsonRpcProvider(ROBINHOOD_MAINNET.rpcUrls[0], ROBINHOOD_MAINNET.chainIdNumber, { staticNetwork: true });
       const result = await bestRoute(provider, side === "buy" ? settlement.address : token.address, side === "buy" ? token.address : settlement.address, amountIn, marketSettlement.address);
+      if (requestId !== quoteRequestId.current) return;
       setQuote(result);
+      setQuoteUpdatedAt(currentTimestamp());
       setStep(result.protocol === "V2" && result.path.length > 2
-        ? `${settlement.symbol} routes through ${marketSettlement.symbol} in one transaction. Quote will be checked again before signing.`
-        : "Live quote ready. It will be checked again before signing.");
+        ? `${settlement.symbol} routes through ${marketSettlement.symbol} in one transaction. Auto-refresh is active.`
+        : "Live quote ready. Auto-refresh is active and the route will be checked again before signing.");
       track("quote_received", { ticker: token.symbol, side, protocol: result.protocol });
     } catch (error) {
+      if (requestId !== quoteRequestId.current) return;
       setQuote(null);
+      setQuoteUpdatedAt(null);
       if (error instanceof RouteUnavailableError) {
         setRouteUnavailable(true);
         setStep("No embedded route is currently executable. Open the live pool to continue at the source.");
@@ -490,8 +510,22 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
         setRouteError(message(error));
         setStep("");
       }
-    } finally { setBusy(false); }
-  }
+    } finally {
+      if (requestId === quoteRequestId.current) setQuoteBusy(false);
+    }
+  }, [activeMarket?.executionVenue, amount, busy, marketSettlement.address, marketSettlement.symbol, settlement, side, token]);
+
+  useEffect(() => {
+    if (!token || busy || activeMarket?.executionVenue === "virtuals-bonding") return;
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) return;
+    const debounce = window.setTimeout(() => void refreshQuote(), 450);
+    const interval = window.setInterval(() => void refreshQuote(), 12_000);
+    return () => {
+      window.clearTimeout(debounce);
+      window.clearInterval(interval);
+    };
+  }, [activeMarket?.executionVenue, amount, busy, refreshQuote, settlement.address, side, token]);
 
   async function trade() {
     if (!walletAddress || !walletProvider) return onWallet();
@@ -567,11 +601,11 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
   function chooseSettlement(option: Settlement) {
     setSettlement(option);
     setSettlementMenu(false);
-    setQuote(null);
+    invalidateQuote();
     if (side === "buy") setAmount(option.symbol === "WETH" ? "0.01" : option.symbol === "USDG" ? "20" : "10");
     setRouteUnavailable(false);
     setRouteError("");
-    setStep(`${option.symbol} selected. Refresh the quote to check the best live route.`);
+    setStep(`${option.symbol} selected. HoodFlow is checking the best live route automatically.`);
     track("settlement_selected", { symbol: option.symbol });
   }
 
@@ -637,13 +671,13 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
           <p className="terminal-risk">Community tokens are unreviewed. Confirm the contract and pool before signing.</p>
         </section>
         <section className="community-trade-panel">
-          <div className="community-tabs"><button className={side === "buy" ? "active" : ""} onClick={() => { setSide("buy"); setAmount(settlement.symbol === "WETH" ? "0.01" : settlement.symbol === "USDG" ? "20" : "10"); setQuote(null); }} type="button">Buy</button><button className={side === "sell" ? "active" : ""} onClick={() => { setSide("sell"); setAmount("1"); setQuote(null); }} type="button">Sell</button></div>
-          <div className="terminal-amount"><span>YOU PAY {side === "buy" && settlementBalance ? <em>Balance {settlementBalance}</em> : null}</span><div><input aria-label="Trade amount" type="number" min="0" step="any" value={amount} onChange={(event) => { setAmount(event.target.value); setQuote(null); }} />{side === "buy" ? <span className="settlement-picker"><button type="button" className="settlement-trigger" aria-expanded={settlementMenu} onClick={() => setSettlementMenu((open) => !open)}>{settlement.symbol}<i>⌄</i></button>{settlementMenu && <span className="settlement-menu" role="menu">{settlementOptions.map((option) => <button type="button" role="menuitem" className={option.address === settlement.address ? "selected" : ""} key={option.address} onClick={() => chooseSettlement(option)}><b>{option.symbol.slice(0, 2)}</b><span><strong>{option.symbol}</strong><small>{option.address === marketSettlement.address ? "Native market route" : "Pay from wallet"}</small></span>{option.address === settlement.address && <i>✓</i>}</button>)}</span>}</span> : <b>{token.symbol}</b>}</div></div>
+          <div className="community-tabs"><button className={side === "buy" ? "active" : ""} onClick={() => { setSide("buy"); setAmount(settlement.symbol === "WETH" ? "0.01" : settlement.symbol === "USDG" ? "20" : "10"); invalidateQuote(); }} type="button">Buy</button><button className={side === "sell" ? "active" : ""} onClick={() => { setSide("sell"); setAmount("1"); invalidateQuote(); }} type="button">Sell</button></div>
+          <div className="terminal-amount"><span>YOU PAY {side === "buy" && settlementBalance ? <em>Balance {settlementBalance}</em> : null}</span><div><input aria-label="Trade amount" type="number" min="0" step="any" value={amount} onChange={(event) => { setAmount(event.target.value); invalidateQuote(); }} />{side === "buy" ? <span className="settlement-picker"><button type="button" className="settlement-trigger" aria-expanded={settlementMenu} onClick={() => setSettlementMenu((open) => !open)}>{settlement.symbol}<i>⌄</i></button>{settlementMenu && <span className="settlement-menu" role="menu">{settlementOptions.map((option) => <button type="button" role="menuitem" className={option.address === settlement.address ? "selected" : ""} key={option.address} onClick={() => chooseSettlement(option)}><b>{option.symbol.slice(0, 2)}</b><span><strong>{option.symbol}</strong><small>{option.address === marketSettlement.address ? "Native market route" : "Pay from wallet"}</small></span>{option.address === settlement.address && <i>✓</i>}</button>)}</span>}</span> : <b>{token.symbol}</b>}</div></div>
           <div className="terminal-swap-arrow">↓</div>
           <div className="terminal-receive"><div><span>YOU RECEIVE · ESTIMATED</span><strong>{outputLabel}</strong></div>{side === "sell" && <span className="settlement-picker"><button type="button" className="settlement-trigger" aria-expanded={settlementMenu} onClick={() => setSettlementMenu((open) => !open)}>{settlement.symbol}<i>⌄</i></button>{settlementMenu && <span className="settlement-menu receive-menu" role="menu">{settlementOptions.map((option) => <button type="button" role="menuitem" className={option.address === settlement.address ? "selected" : ""} key={option.address} onClick={() => chooseSettlement(option)}><b>{option.symbol.slice(0, 2)}</b><span><strong>{option.symbol}</strong><small>{option.address === marketSettlement.address ? "Native market route" : "Receive in wallet"}</small></span>{option.address === settlement.address && <i>✓</i>}</button>)}</span>}</span>}</div>
           <div className="terminal-route-line"><div><span>EXECUTION</span><strong>{quote ? routeName(quote) : activeMarket?.lifecycle === "bonding" ? "Virtuals bonding market" : routeUnavailable ? "External pool" : "Finding best pool…"}</strong></div><label>SLIPPAGE <span><input type="number" min="0.1" max="5" step="0.1" value={slippage} onChange={(event) => setSlippage(event.target.value)} />%</span></label></div>
           {step && <p className={`community-step ${routeUnavailable ? "notice" : ""}`}><i />{step}</p>}{routeError && <p className="community-error">{routeError}</p>}
-          <div className="community-actions"><button type="button" onClick={() => void refreshQuote()} disabled={busy || !amount || activeMarket?.executionVenue === "virtuals-bonding"}>{busy ? "Checking route…" : activeMarket?.executionVenue === "virtuals-bonding" ? "Bonding route detected" : "Refresh quote"}</button>{routeUnavailable && (activeMarket?.externalUrl || activeMarket?.pairUrl) ? <a href={activeMarket.externalUrl || activeMarket.pairUrl} target="_blank" rel="noreferrer">{activeMarket?.lifecycle === "bonding" ? "Trade on Virtuals ↗" : "Open live pool ↗"}</a> : <button type="button" onClick={() => void trade()} disabled={busy || !quote}>{!walletAddress ? "Connect wallet" : quote ? `${side === "buy" ? "Buy" : "Sell"} ${token.symbol}` : "Quote first"}</button>}</div>
+          <div className="community-actions"><div className={`quote-auto-state ${quote ? "live" : routeUnavailable ? "unavailable" : ""}`}><i /><span><strong>{activeMarket?.executionVenue === "virtuals-bonding" ? "Bonding route" : quoteBusy ? "Updating quote…" : quote ? "Live quote" : "Waiting for route"}</strong><small>{quoteUpdatedAt ? `Updated ${new Date(quoteUpdatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · every 12s` : "Automatic · no refresh needed"}</small></span></div>{routeUnavailable && (activeMarket?.externalUrl || activeMarket?.pairUrl) ? <a href={activeMarket.externalUrl || activeMarket.pairUrl} target="_blank" rel="noreferrer">{activeMarket?.lifecycle === "bonding" ? "Trade on Virtuals ↗" : "Open live pool ↗"}</a> : <button type="button" onClick={() => void trade()} disabled={busy || quoteBusy || !quote}>{!walletAddress ? "Connect wallet" : quote ? `${side === "buy" ? "Buy" : "Sell"} ${token.symbol}` : quoteBusy ? "Finding best route…" : "Route unavailable"}</button>}</div>
         </section>
       </div>
     </div>}
