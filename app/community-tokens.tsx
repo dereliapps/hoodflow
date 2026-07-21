@@ -644,7 +644,7 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
 
   return <section className="page inner-page community-page">
     <div className="community-hero">
-      <div><p className="eyebrow">CRYPTO · ROBINHOOD CHAIN</p><h1>Every live token.<br /><span>One execution screen.</span></h1><p>Discover active pools, compare real liquidity and trade from your wallet. Meme coins, Virtuals launches and crypto markets appear in one clean live feed.</p></div>
+      <div><p className="eyebrow">CRYPTO · ROBINHOOD CHAIN</p><h1>Indexed live markets.<br /><span>One execution screen.</span></h1><p>Discover active pools from supported market feeds, compare real liquidity and trade from your wallet. Meme coins, Virtuals launches and crypto markets appear in one clean live feed.</p></div>
       <div className="community-hero-badge"><strong>24/7</strong><span>WHEN ONCHAIN<br />LIQUIDITY EXISTS</span></div>
     </div>
     <section className="market-pulse" aria-label="Robinhood Chain token market summary">

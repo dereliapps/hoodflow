@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 type Candle = [number, number, number, number, number, number];
+const CHART_TIMEOUT_MS = 5_000;
 
 const RANGE = {
   "1D": { timeframe: "minute", aggregate: "15", limit: "96" },
@@ -30,19 +31,36 @@ export async function GET(request: Request) {
   url.searchParams.set("include_empty_intervals", "true");
 
   try {
-    const response = await fetch(url, { headers: { accept: "application/json;version=20230203" } });
+    const response = await fetch(url, {
+      headers: { accept: "application/json;version=20230203" },
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(CHART_TIMEOUT_MS)]),
+    });
     if (!response.ok) throw new Error(`Market chart ${response.status}`);
     const payload = await response.json() as { data?: { attributes?: { ohlcv_list?: Candle[] } } };
-    const points = (payload.data?.attributes?.ohlcv_list ?? [])
+    const candles = payload.data?.attributes?.ohlcv_list ?? [];
+    const points = candles
       .filter((item) => Array.isArray(item) && item.length >= 6 && item.every(Number.isFinite))
       .map(([time, open, high, low, close, volume]) => ({ time, open, high, low, close, volume }))
       .sort((left, right) => left.time - right.time);
-    return NextResponse.json({ points, range, updatedAt: Date.now() }, {
+    return NextResponse.json({
+      points,
+      range,
+      updatedAt: Date.now(),
+      partial: points.length !== candles.length,
+      ...(points.length ? {} : { error: "No valid chart history is available for this pool yet." }),
+    }, {
       headers: { "cache-control": "public, max-age=20, s-maxage=60, stale-while-revalidate=300" },
     });
   } catch (error) {
-    return NextResponse.json({ points: [], error: error instanceof Error ? error.message : "Chart unavailable." }, {
-      status: 502,
+    const errorName = error instanceof Error ? error.name : "";
+    const timedOut = errorName === "TimeoutError";
+    const aborted = errorName === "AbortError";
+    return NextResponse.json({
+      points: [],
+      partial: true,
+      error: timedOut ? "Chart provider timed out. Try again shortly." : aborted ? "Chart request was cancelled." : error instanceof Error ? error.message : "Chart unavailable.",
+    }, {
+      status: timedOut ? 504 : aborted ? 499 : 502,
       headers: { "cache-control": "no-store" },
     });
   }

@@ -53,25 +53,34 @@ import {
 } from "@/lib/robinhood-prices";
 import { ROBINHOOD_PRICE_FEEDS } from "@/config/robinhood-price-feeds";
 import { track } from "@/lib/analytics-client";
-import CommunityTokens from "./community-tokens";
-import AssetRequestBoard from "./asset-request-board";
 import MarketStatus from "./market-status";
 import type { PrivyWalletController } from "./privy-wallet-bridge";
-import { PRIVY_CONFIGURED } from "./providers";
-import ReferralRewards from "./referral-rewards";
+import { PRIVY_CONFIGURED } from "./privy-config";
 import RobinHoodIntro from "./robin-hood-intro";
 
-const PrivyWalletBridge = dynamic(() => import("./privy-wallet-bridge"), { ssr: false });
+function WorkspaceLoader({ label }: { label: string }) {
+  return <section className="workspace-loader" role="status" aria-live="polite"><i /><strong>{label}</strong><span>Preparing the latest onchain view.</span></section>;
+}
+
+const CommunityTokens = dynamic(() => import("./community-tokens"), { ssr: false, loading: () => <WorkspaceLoader label="Loading crypto markets" /> });
+const AssetRequestBoard = dynamic(() => import("./asset-request-board"), { ssr: false, loading: () => <WorkspaceLoader label="Loading asset requests" /> });
+const ReferralRewards = dynamic(() => import("./referral-rewards"), { ssr: false, loading: () => <WorkspaceLoader label="Loading rewards" /> });
+const PrivyWalletRuntime = dynamic(() => import("./privy-wallet-runtime"), { ssr: false });
 
 type View = "overview" | "strategies" | "assets" | "asset" | "community" | "portfolio" | "rewards" | "marketplace" | "activity" | "controls";
 type StrategyKind = "Buy" | "Sell" | "DCA";
-type StrategyStatus = "Prepared" | "Paused" | "Confirmed";
+type StrategyStatus = "Prepared" | "Paused" | "Confirmed" | "Cancelled";
 type MarketplaceSort = "featured" | "cadence" | "risk";
 type ActivityFilter = "all" | "trades" | "dca";
 type InfoPanel = "docs" | "terms";
 type PriceState = "loading" | "live" | "degraded" | "error";
 type WalletConnectionKind = "browser" | "walletconnect" | "privy";
-type HoodFlowWalletProvider = Eip1193Provider & { disconnect?: () => Promise<void> };
+type WalletProviderEventHandler = (...args: unknown[]) => void;
+type HoodFlowWalletProvider = Eip1193Provider & {
+  disconnect?: () => Promise<void>;
+  on?: (event: "accountsChanged" | "chainChanged" | "disconnect", listener: WalletProviderEventHandler) => void;
+  removeListener?: (event: "accountsChanged" | "chainChanged" | "disconnect", listener: WalletProviderEventHandler) => void;
+};
 type InjectedWalletProvider = HoodFlowWalletProvider & {
   providers?: InjectedWalletProvider[];
   isMetaMask?: boolean;
@@ -116,7 +125,6 @@ type HistoryPoint = {
 
 declare global {
   interface Window {
-    ethereum?: InjectedWalletProvider;
     okxwallet?: InjectedWalletProvider;
   }
 }
@@ -179,6 +187,15 @@ function compactAddress(address: string) {
 
 function errorMessage(error: unknown) {
   return friendlyExecutionError(error);
+}
+
+async function getVerifiedSigner(provider: BrowserProvider, expectedAddress: string) {
+  const signer = await provider.getSigner();
+  const signerAddress = await signer.getAddress();
+  if (signerAddress.toLowerCase() !== expectedAddress.toLowerCase()) {
+    throw new Error("The active wallet account changed. Reconnect before signing this order.");
+  }
+  return signer;
 }
 
 async function getBestV4Quote(provider: BrowserProvider | JsonRpcProvider, tokenIn: string, tokenOut: string, amountIn: bigint) {
@@ -299,7 +316,7 @@ function isStoredStrategy(value: unknown): value is Strategy {
     && typeof item.asset === "string"
     && typeof item.rule === "string"
     && typeof item.detail === "string"
-    && ["Prepared", "Paused", "Confirmed"].includes(item.status ?? "")
+    && ["Prepared", "Paused", "Confirmed", "Cancelled"].includes(item.status ?? "")
     && typeof item.budget === "string"
     && typeof item.expires === "string"
     && typeof item.createdAt === "number"
@@ -318,8 +335,11 @@ export default function Home() {
   const [walletUsdgBalance, setWalletUsdgBalance] = useState("");
   const [walletProvider, setWalletProvider] = useState<HoodFlowWalletProvider | null>(null);
   const [walletKind, setWalletKind] = useState<WalletConnectionKind | null>(null);
+  const [walletChainId, setWalletChainId] = useState<number | null>(null);
   const privyControllerRef = useRef<PrivyWalletController | null>(null);
   const [walletModalOpen, setWalletModalOpen] = useState(false);
+  const [privyRuntimeEnabled, setPrivyRuntimeEnabled] = useState(false);
+  const [privyRuntimeReady, setPrivyRuntimeReady] = useState(false);
   const [walletConnecting, setWalletConnecting] = useState(false);
   const [walletConnectReady, setWalletConnectReady] = useState<boolean | null>(null);
   const [networkBlock, setNetworkBlock] = useState("Checking");
@@ -366,8 +386,63 @@ export default function Home() {
   const [composerQuote, setComposerQuote] = useState<DirectQuotePreview | null>(null);
   const [composerQuoteBusy, setComposerQuoteBusy] = useState(false);
   const [composerQuoteError, setComposerQuoteError] = useState("");
+  const composerQuoteRequestRef = useRef(0);
+  const composerQuoteKeyRef = useRef("");
+  const walletBalanceRequestRef = useRef(0);
+  const toastTimerRef = useRef<number | null>(null);
+
+  const notify = useCallback((message: string) => {
+    setToast(message);
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast("");
+      toastTimerRef.current = null;
+    }, 3200);
+  }, []);
+
+  const openWalletModal = useCallback(() => {
+    if (PRIVY_CONFIGURED) setPrivyRuntimeEnabled(true);
+    setWalletModalOpen(true);
+  }, []);
+
+  const clearWalletScopedState = useCallback(() => {
+    hydratedWalletRef.current = "";
+    walletBalanceRequestRef.current += 1;
+    composerQuoteRequestRef.current += 1;
+    composerQuoteKeyRef.current = "";
+    setStrategies([]);
+    setWalletBalance("");
+    setWalletUsdgBalance("");
+    setPortfolioBalances({});
+    setPortfolioLoading(false);
+    setSelectedStrategy(null);
+    setComposerQuote(null);
+    setComposerQuoteBusy(false);
+    setComposerQuoteError("");
+    setTransactionStep("");
+  }, []);
+
+  const clearWalletConnection = useCallback(() => {
+    clearWalletScopedState();
+    setWalletProvider(null);
+    setWalletKind(null);
+    setWalletChainId(null);
+    setWalletAddress("");
+    setWalletModalOpen(false);
+  }, [clearWalletScopedState]);
+
+  const handlePrivyController = useCallback((controller: PrivyWalletController | null) => {
+    privyControllerRef.current = controller;
+    setPrivyRuntimeReady(Boolean(controller));
+  }, []);
 
   const connected = Boolean(walletAddress);
+  useEffect(() => () => {
+    composerQuoteRequestRef.current += 1;
+    walletBalanceRequestRef.current += 1;
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+  }, []);
+
   const draftTotalBudget = useMemo(() => {
     const amount = Number(draftAmount || 0);
     if (!Number.isFinite(amount) || amount <= 0) return 0;
@@ -393,7 +468,7 @@ export default function Home() {
           // Edge RPC requests can be regionally throttled. An incomplete server
           // response is never treated as verified; the browser retries the same
           // read directly against Robinhood Chain before showing an error.
-          if (candidate.prices && typeof candidate.prices === "object" && candidate.liveCount >= 15) data = candidate;
+          if (candidate.prices && typeof candidate.prices === "object" && candidate.liveCount > 0) data = candidate;
         }
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") throw error;
@@ -797,9 +872,27 @@ export default function Home() {
   }, [refreshEngineStatus]);
 
   const refreshComposerQuote = useCallback(async () => {
+    const requestId = ++composerQuoteRequestRef.current;
+    const requestKey = `${kind}:${draftAsset}:${draftAmount}:${draftSlippage}`;
     if (!composerOpen || (kind !== "Buy" && kind !== "Sell") || !isRoutedAsset(draftAsset)) {
+      composerQuoteKeyRef.current = "";
       setComposerQuote(null);
+      setComposerQuoteBusy(false);
       setComposerQuoteError("");
+      return;
+    }
+    if (priceBook[draftAsset]?.status !== "live") {
+      composerQuoteKeyRef.current = "";
+      setComposerQuote(null);
+      setComposerQuoteBusy(false);
+      setComposerQuoteError(`${draftAsset} oracle is not live. HoodFlow will retry automatically.`);
+      return;
+    }
+    if (connected && walletChainId !== ROBINHOOD_MAINNET.chainIdNumber) {
+      composerQuoteKeyRef.current = "";
+      setComposerQuote(null);
+      setComposerQuoteBusy(false);
+      setComposerQuoteError("Switch the connected wallet back to Robinhood Chain mainnet.");
       return;
     }
     let amountIn: bigint;
@@ -807,9 +900,15 @@ export default function Home() {
       amountIn = parseUnits(draftAmount || "0", kind === "Buy" ? USDG_DECIMALS : STOCK_TOKEN_DECIMALS);
       if (amountIn <= 0n) throw new Error("Enter an amount to request a quote.");
     } catch {
+      composerQuoteKeyRef.current = "";
       setComposerQuote(null);
+      setComposerQuoteBusy(false);
       setComposerQuoteError("Enter a valid amount.");
       return;
+    }
+    if (composerQuoteKeyRef.current !== requestKey) {
+      composerQuoteKeyRef.current = "";
+      setComposerQuote(null);
     }
     setComposerQuoteBusy(true);
     try {
@@ -829,6 +928,8 @@ export default function Home() {
       const slippageBps = Math.max(10, Math.min(500, Math.round(Number(draftSlippage || 0.5) * 100)));
       const minimum = route.amountOut * BigInt(10_000 - slippageBps) / 10_000n;
       const decimals = kind === "Buy" ? STOCK_TOKEN_DECIMALS : USDG_DECIMALS;
+      if (requestId !== composerQuoteRequestRef.current) return;
+      composerQuoteKeyRef.current = requestKey;
       setComposerQuote({
         protocol: route.protocol,
         feeBps: route.feeBps,
@@ -838,12 +939,13 @@ export default function Home() {
       });
       setComposerQuoteError("");
     } catch (error) {
-      setComposerQuote(null);
+      if (requestId !== composerQuoteRequestRef.current) return;
+      setComposerQuote((current) => composerQuoteKeyRef.current === requestKey ? current : null);
       setComposerQuoteError(errorMessage(error));
     } finally {
-      setComposerQuoteBusy(false);
+      if (requestId === composerQuoteRequestRef.current) setComposerQuoteBusy(false);
     }
-  }, [composerOpen, draftAmount, draftAsset, draftSlippage, kind]);
+  }, [composerOpen, connected, draftAmount, draftAsset, draftSlippage, kind, priceBook, walletChainId]);
 
   useEffect(() => {
     if (!composerOpen || (kind !== "Buy" && kind !== "Sell")) return;
@@ -854,13 +956,9 @@ export default function Home() {
     return () => {
       window.clearTimeout(start);
       window.clearInterval(interval);
+      composerQuoteRequestRef.current += 1;
     };
   }, [composerOpen, kind, refreshComposerQuote]);
-
-  function notify(message: string) {
-    setToast(message);
-    window.setTimeout(() => setToast(""), 3200);
-  }
 
   function qualifyReferral(txHash: string, wallet = walletAddress) {
     if (!wallet || !txHash) return;
@@ -883,7 +981,7 @@ export default function Home() {
 
   async function activateDcaEngine() {
     if (!walletProvider || !connected) {
-      setWalletModalOpen(true);
+      openWalletModal();
       throw new Error("Connect the engine owner wallet to activate recurring DCA.");
     }
     if (!engineOwner || walletAddress.toLowerCase() !== engineOwner.toLowerCase()) {
@@ -892,7 +990,7 @@ export default function Home() {
     const provider = new BrowserProvider(walletProvider, "any");
     const network = await provider.getNetwork();
     if (network.chainId !== BigInt(ROBINHOOD_MAINNET.chainIdNumber)) await switchToRobinhoodChain(walletProvider);
-    const engine = new Contract(CONTRACT_ADDRESS, HOODFLOW_ENGINE_ABI, await provider.getSigner());
+    const engine = new Contract(CONTRACT_ADDRESS, HOODFLOW_ENGINE_ABI, await getVerifiedSigner(provider, walletAddress));
     const liveOwner = String(await engine.owner());
     if (liveOwner.toLowerCase() !== walletAddress.toLowerCase()) throw new Error("The connected wallet is not the live engine owner.");
     setTransactionStep("Confirm DCA engine activation in your wallet…");
@@ -906,7 +1004,8 @@ export default function Home() {
     notify("DCA engine is live on Robinhood mainnet");
   }
 
-  async function refreshWalletBalances(address: string, provider: BrowserProvider) {
+  const refreshWalletBalances = useCallback(async (address: string, provider: BrowserProvider) => {
+    const requestId = ++walletBalanceRequestRef.current;
     setPortfolioLoading(true);
     const usdG = new Contract(USDG_ADDRESS, ERC20_ABI, provider);
     try {
@@ -927,13 +1026,77 @@ export default function Home() {
         usdG.balanceOf(address) as Promise<bigint>,
         loadTokenBalances(),
       ]);
+      if (requestId !== walletBalanceRequestRef.current) return;
       setWalletBalance(Number(formatEther(nativeBalance)).toFixed(4));
       setWalletUsdgBalance(Number(formatUnits(usdGBalance, USDG_DECIMALS)).toFixed(2));
       setPortfolioBalances(Object.fromEntries(tokenBalances));
     } finally {
-      setPortfolioLoading(false);
+      if (requestId === walletBalanceRequestRef.current) setPortfolioLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    if (!walletProvider) return;
+
+    const handleAccountsChanged: WalletProviderEventHandler = (...args) => {
+      const value = args[0];
+      const accounts = Array.isArray(value) ? value.filter((account): account is string => typeof account === "string") : [];
+      const nextAddress = accounts[0];
+      if (!nextAddress) {
+        clearWalletConnection();
+        notify("The wallet session ended. Connect again to continue.");
+        return;
+      }
+      if (nextAddress.toLowerCase() !== walletAddress.toLowerCase()) {
+        clearWalletScopedState();
+        setWalletAddress(nextAddress);
+        notify(`Active account changed to ${compactAddress(nextAddress)}`);
+      }
+      const provider = new BrowserProvider(walletProvider, "any");
+      void refreshWalletBalances(nextAddress, provider).catch(() => {
+        if (nextAddress.toLowerCase() === walletAddress.toLowerCase()) notify("Wallet balances are temporarily unavailable.");
+      });
+    };
+
+    const handleChainChanged: WalletProviderEventHandler = (...args) => {
+      const value = args[0];
+      const chainId = typeof value === "string"
+        ? Number.parseInt(value, value.startsWith("0x") ? 16 : 10)
+        : typeof value === "number" ? value : Number.NaN;
+      setWalletChainId(Number.isFinite(chainId) ? chainId : null);
+      composerQuoteRequestRef.current += 1;
+      composerQuoteKeyRef.current = "";
+      setComposerQuote(null);
+      setComposerQuoteBusy(false);
+      setComposerQuoteError("");
+      if (chainId !== ROBINHOOD_MAINNET.chainIdNumber) {
+        walletBalanceRequestRef.current += 1;
+        setWalletBalance("");
+        setWalletUsdgBalance("");
+        setPortfolioBalances({});
+        setPortfolioLoading(false);
+        notify("Wallet network changed. Switch back to Robinhood Chain mainnet to trade.");
+        return;
+      }
+      void walletProvider.request({ method: "eth_accounts" })
+        .then((accounts) => handleAccountsChanged(accounts))
+        .catch(() => notify("Robinhood Chain is selected, but the wallet account could not be refreshed."));
+    };
+
+    const handleDisconnect: WalletProviderEventHandler = () => {
+      clearWalletConnection();
+      notify("The wallet disconnected from HoodFlow.");
+    };
+
+    walletProvider.on?.("accountsChanged", handleAccountsChanged);
+    walletProvider.on?.("chainChanged", handleChainChanged);
+    walletProvider.on?.("disconnect", handleDisconnect);
+    return () => {
+      walletProvider.removeListener?.("accountsChanged", handleAccountsChanged);
+      walletProvider.removeListener?.("chainChanged", handleChainChanged);
+      walletProvider.removeListener?.("disconnect", handleDisconnect);
+    };
+  }, [clearWalletConnection, clearWalletScopedState, notify, refreshWalletBalances, walletAddress, walletProvider]);
 
   async function switchToRobinhoodChain(provider: HoodFlowWalletProvider) {
     try {
@@ -960,10 +1123,10 @@ export default function Home() {
     }
     const address = accounts[0];
     if (!address) throw new Error("The wallet did not return an account.");
-    hydratedWalletRef.current = "";
-    setStrategies([]);
+    clearWalletScopedState();
     setWalletProvider(provider);
     setWalletKind(kind);
+    setWalletChainId(Number(network.chainId));
     setWalletAddress(address);
     await refreshWalletBalances(address, browserProvider);
     setWalletModalOpen(false);
@@ -973,7 +1136,7 @@ export default function Home() {
 
   function selectInjectedWallet(preference: InjectedWalletPreference) {
     if (preference === "okx" && window.okxwallet) return window.okxwallet;
-    const root = window.ethereum;
+    const root = window.ethereum as InjectedWalletProvider | undefined;
     if (!root) return null;
     const providers = root.providers?.length ? root.providers : [root];
     if (preference === "rabby") return providers.find((provider) => provider.isRabby) ?? null;
@@ -1038,14 +1201,7 @@ export default function Home() {
     } catch {
       // The local session is still cleared if the remote wallet already disconnected.
     } finally {
-      hydratedWalletRef.current = "";
-      setStrategies([]);
-      setWalletProvider(null);
-      setWalletKind(null);
-      setWalletAddress("");
-      setWalletBalance("");
-      setWalletUsdgBalance("");
-      setPortfolioBalances({});
+      clearWalletConnection();
       notify("Wallet disconnected from HoodFlow");
     }
   }
@@ -1058,7 +1214,7 @@ export default function Home() {
         privyControllerRef.current.open();
         return;
       }
-      setWalletModalOpen(true);
+      openWalletModal();
     }
   }
 
@@ -1121,6 +1277,8 @@ export default function Home() {
     setDraftExecutions("12");
     setDraftSlippage("0.5");
     setTransactionStep("");
+    composerQuoteRequestRef.current += 1;
+    composerQuoteKeyRef.current = "";
     setComposerQuote(null);
     setComposerQuoteError("");
     setComposerOpen(true);
@@ -1128,7 +1286,7 @@ export default function Home() {
 
   async function toggleStrategy(id: number) {
     const strategy = strategies.find((item) => item.id === id);
-    if (!strategy || strategy.status === "Confirmed") return;
+    if (!strategy || strategy.status === "Confirmed" || strategy.status === "Cancelled") return;
     if (strategy.chainStrategyId) {
       if (!walletProvider || !connected || !contractConfigured) {
         notify("Connect the strategy owner wallet to change this onchain strategy.");
@@ -1138,7 +1296,7 @@ export default function Home() {
         const provider = new BrowserProvider(walletProvider, "any");
         const network = await provider.getNetwork();
         if (network.chainId !== BigInt(ROBINHOOD_MAINNET.chainIdNumber)) throw new Error("Switch your wallet to Robinhood Chain mainnet.");
-        const engine = new Contract(CONTRACT_ADDRESS, HOODFLOW_ENGINE_ABI, await provider.getSigner());
+        const engine = new Contract(CONTRACT_ADDRESS, HOODFLOW_ENGINE_ABI, await getVerifiedSigner(provider, walletAddress));
         const transaction = strategy.status === "Prepared"
           ? await engine.pauseStrategy(strategy.chainStrategyId)
           : await engine.resumeStrategy(strategy.chainStrategyId);
@@ -1155,9 +1313,39 @@ export default function Home() {
     notify("Only onchain recurring strategies can be paused or resumed.");
   }
 
+  async function cancelOnchainStrategy(id: number) {
+    const strategy = strategies.find((item) => item.id === id);
+    if (!strategy || strategy.kind !== "DCA" || !strategy.chainStrategyId || strategy.status === "Cancelled") return;
+    if (!walletProvider || !connected || !contractConfigured) {
+      openWalletModal();
+      notify("Connect the strategy owner wallet to cancel this DCA.");
+      return;
+    }
+    setOnchainBusy(true);
+    try {
+      const provider = new BrowserProvider(walletProvider, "any");
+      const network = await provider.getNetwork();
+      if (network.chainId !== BigInt(ROBINHOOD_MAINNET.chainIdNumber)) throw new Error("Switch your wallet to Robinhood Chain mainnet.");
+      const signer = await getVerifiedSigner(provider, walletAddress);
+      const engine = new Contract(CONTRACT_ADDRESS, HOODFLOW_ENGINE_ABI, signer);
+      notify("Confirm DCA cancellation in your wallet");
+      const transaction = await engine.cancelStrategy(strategy.chainStrategyId);
+      const receipt = await transaction.wait();
+      if (!receipt || receipt.status !== 1) throw new Error("Strategy cancellation was not confirmed.");
+      setStrategies((current) => current.map((item) => item.id === id
+        ? { ...item, status: "Cancelled", detail: "Strategy cancelled onchain" }
+        : item));
+      setSelectedStrategy(null);
+      notify("Onchain DCA cancelled");
+    } catch (error) {
+      notify(errorMessage(error));
+    } finally {
+      setOnchainBusy(false);
+    }
+  }
+
   async function executeDirectBuy(provider: BrowserProvider, address: string) {
     if (!isRoutedAsset(draftAsset)) throw new Error(`${draftAsset} is watch-only until a full-fill route passes.`);
-    if (priceState !== "live") throw new Error("A fresh full-market price verification is required before buying.");
     if (priceBook[draftAsset]?.status !== "live") throw new Error(`${draftAsset} oracle is not live. The buy is blocked.`);
     const amountIn = parseUnits(draftAmount, USDG_DECIMALS);
     if (amountIn <= 0n || amountIn > MAX_UINT128) throw new Error("Enter a valid USDG amount.");
@@ -1166,7 +1354,7 @@ export default function Home() {
       throw new Error("Slippage must be between 0.10% and 5.00%.");
     }
 
-    const signer = await provider.getSigner();
+    const signer = await getVerifiedSigner(provider, address);
     const usdG = new Contract(USDG_ADDRESS, ERC20_ABI, signer);
     const tokenOutAddress = ROBINHOOD_TOKENS[draftAsset];
     const outputToken = new Contract(tokenOutAddress, ERC20_ABI, provider);
@@ -1273,14 +1461,13 @@ export default function Home() {
 
   async function executeDirectSell(provider: BrowserProvider, address: string) {
     if (!isRoutedAsset(draftAsset)) throw new Error(`${draftAsset} is watch-only until a full-fill route passes.`);
-    if (priceState !== "live") throw new Error("A fresh full-market price verification is required before selling.");
     if (priceBook[draftAsset]?.status !== "live") throw new Error(`${draftAsset} oracle is not live. The sell is blocked.`);
     const amountIn = parseUnits(draftAmount, STOCK_TOKEN_DECIMALS);
     if (amountIn <= 0n || amountIn > MAX_UINT128) throw new Error(`Enter a valid ${draftAsset} amount.`);
     const slippageBps = Math.round(Number(draftSlippage) * 100);
     if (!Number.isInteger(slippageBps) || slippageBps < 10 || slippageBps > 500) throw new Error("Slippage must be between 0.10% and 5.00%.");
 
-    const signer = await provider.getSigner();
+    const signer = await getVerifiedSigner(provider, address);
     const tokenInAddress = ROBINHOOD_TOKENS[draftAsset];
     const inputToken = new Contract(tokenInAddress, ERC20_ABI, signer);
     const usdG = new Contract(USDG_ADDRESS, ERC20_ABI, provider);
@@ -1371,7 +1558,6 @@ export default function Home() {
     if (!contractConfigured || !contractReady) throw new Error(`Recurring engine is not live yet (${contractStatus}).`);
     if (!isRoutedAsset(draftAsset)) throw new Error(`${draftAsset} is not enabled for recurring execution.`);
     if (isV3RoutedAsset(draftAsset)) throw new Error(`${draftAsset} is enabled for Buy Now, but not for recurring V4 execution.`);
-    if (priceState !== "live") throw new Error("A fresh full-market price verification is required before creating DCA.");
     if (priceBook[draftAsset]?.status !== "live") throw new Error(`${draftAsset} oracle is not live. The strategy is blocked.`);
     const executions = Number.parseInt(draftExecutions, 10);
     if (!Number.isInteger(executions) || executions < 2 || executions > 52) throw new Error("Choose between 2 and 52 executions.");
@@ -1383,7 +1569,7 @@ export default function Home() {
     const interval = draftFrequency === "Daily" ? 86_400 : draftFrequency === "Monthly" ? 2_592_000 : 604_800;
     if (interval * executions > 365 * 86_400) throw new Error("This schedule exceeds the one-year strategy limit.");
 
-    const signer = await provider.getSigner();
+    const signer = await getVerifiedSigner(provider, address);
     const engine = new Contract(CONTRACT_ADDRESS, HOODFLOW_ENGINE_ABI, signer);
     const usdG = new Contract(USDG_ADDRESS, ERC20_ABI, signer);
     const [paused, settlementToken, maxTranche, maxBudget, inputConfig, outputConfig, balance] = await Promise.all([
@@ -1452,7 +1638,7 @@ export default function Home() {
     event.preventDefault();
     if (!draftName.trim()) return;
     if (!walletProvider || !connected) {
-      if (kind === "DCA" && enginePaused) setWalletModalOpen(true);
+      openWalletModal();
       notify(kind === "DCA" && enginePaused ? "Connect the engine owner wallet to activate DCA." : "Connect a Robinhood Chain mainnet wallet first.");
       return;
     }
@@ -1529,7 +1715,7 @@ export default function Home() {
   return (
     <main className="app-shell">
       <RobinHoodIntro />
-      {PRIVY_CONFIGURED && <PrivyWalletBridge onController={(controller) => { privyControllerRef.current = controller; }} onWallet={activatePrivyWallet} onError={notify} />}
+      {PRIVY_CONFIGURED && privyRuntimeEnabled && <PrivyWalletRuntime onController={handlePrivyController} onWallet={activatePrivyWallet} onError={notify} />}
       <header className="topbar">
         <button className="brand" onClick={() => navigate("overview")} aria-label="HoodFlow home">
           <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">MAINNET BETA</b>
@@ -1618,8 +1804,8 @@ export default function Home() {
           <div className="device-save-note"><span><i /> RECEIPTS SAVED ON THIS DEVICE</span><p>Confirmed transaction references and onchain strategy IDs are kept locally. Wallet keys and account data are never stored.</p></div>
           <div className="table-card">
             <div className="table-head upgraded"><span>ORDER / AUTOMATION</span><span>RULE</span><span>RESULT / NEXT ACTION</span><span>CHAIN</span><span>STATUS</span><span /></div>
-            {strategies.map((item) => <StrategyRow key={item.id} item={item} detailed onToggle={() => toggleStrategy(item.id)} onInspect={() => setSelectedStrategy(item)} />)}
-            {strategies.length === 0 && <div className="empty-state order-empty dca-empty"><strong>Your first DCA takes about a minute to configure</strong><span>Start with a template, edit every limit, and review the exact onchain cap before your wallet signs.</span><button onClick={() => openComposer("DCA")}>Create first DCA</button></div>}
+            {dcaRows.map((item) => <StrategyRow key={item.id} item={item} detailed onToggle={() => toggleStrategy(item.id)} onInspect={() => setSelectedStrategy(item)} />)}
+            {dcaRows.length === 0 && <div className="empty-state order-empty dca-empty"><strong>Your first DCA takes about a minute to configure</strong><span>Start with a template, edit every limit, and review the exact onchain cap before your wallet signs.</span><button onClick={() => openComposer("DCA")}>Create first DCA</button></div>}
           </div>
           <p className="dca-risk-note">Automation does not guarantee execution or returns. A stale oracle, paused token, insufficient allowance, low liquidity or slippage breach stops the scheduled buy.</p>
         </section>
@@ -1748,7 +1934,7 @@ export default function Home() {
           </div>
           <div className="permissions-card">
             <div className="permissions-head"><div><p className="eyebrow">ONCHAIN ORDERS</p><h2>Strategy permissions</h2></div><span>{strategies.length} records</span></div>
-            {strategies.map((item) => <div className="permission-row" key={item.id}><div className="permission-name"><Mark ticker={item.asset} /><p><strong>{item.name}</strong><small>{item.asset} only</small></p></div><div><span>SPENDING CAP</span><strong>{item.budget}</strong></div><div><span>EXPIRES</span><strong>{item.expires}</strong></div><div><span>CHAIN</span><strong>Mainnet</strong></div><button onClick={() => toggleStrategy(item.id)} disabled={item.status === "Confirmed"}>{item.status === "Confirmed" ? "Settled" : item.status === "Prepared" ? "Pause" : "Resume"}</button></div>)}
+            {strategies.map((item) => <div className="permission-row" key={item.id}><div className="permission-name"><Mark ticker={item.asset} /><p><strong>{item.name}</strong><small>{item.asset} only</small></p></div><div><span>SPENDING CAP</span><strong>{item.budget}</strong></div><div><span>EXPIRES</span><strong>{item.expires}</strong></div><div><span>CHAIN</span><strong>Mainnet</strong></div><button onClick={() => toggleStrategy(item.id)} disabled={item.status === "Confirmed" || item.status === "Cancelled"}>{item.status === "Confirmed" ? "Settled" : item.status === "Cancelled" ? "Cancelled" : item.status === "Prepared" ? "Pause" : "Resume"}</button></div>)}
             {strategies.length === 0 && <div className="empty-state"><strong>No active permissions</strong><span>No HoodFlow strategy currently has a saved onchain permission.</span></div>}
           </div>
           <div className="safety-notes"><article><span>01</span><div><strong>Asset allowlist</strong><p>A strategy cannot swap into a token that was not approved when it was created.</p></div></article><article><span>02</span><div><strong>Hard budget caps</strong><p>Keepers cannot execute above the per-trade or lifetime spending limit.</p></div></article><article><span>03</span><div><strong>Automatic circuit breaker</strong><p>Stale prices, excess slippage or low liquidity stop execution before a swap.</p></div></article></div>
@@ -1774,17 +1960,26 @@ export default function Home() {
               {kind === "DCA" && <div className="form-pair"><label>SCHEDULE<select name="frequency" value={draftFrequency} onChange={(event) => setDraftFrequency(event.target.value)} disabled={onchainBusy}><option>Daily</option><option>Weekly</option><option>Monthly</option></select></label><label>NUMBER OF BUYS<span className="input-unit"><input name="executions" type="number" min="2" max={draftFrequency === "Daily" ? "52" : draftFrequency === "Weekly" ? "52" : "12"} value={draftExecutions} onChange={(event) => setDraftExecutions(event.target.value)} disabled={onchainBusy} /><b>×</b></span></label></div>}
               <div className="live-order-banner"><i /><span><strong>{kind === "Buy" ? "Buy stock tokens with USDG" : kind === "Sell" ? `Sell ${draftAsset} back to USDG` : contractReady ? "Mainnet recurring strategy" : enginePaused ? "DCA engine awaits owner activation" : "Checking recurring engine"}</strong><small>{kind === "Buy" ? "Your wallet confirms a protected mainnet buy." : kind === "Sell" ? "Your wallet confirms an exact-token sell; USDG returns directly to you." : contractReady ? "The onchain engine enforces your schedule and lifetime cap." : enginePaused ? "Connect the owner wallet and confirm one activation transaction." : "Buy and Sell remain available while the engine check completes."}</small></span><b>{kind !== "DCA" || contractReady ? "LIVE" : enginePaused ? "READY" : "CHECKING"}</b></div>
               <div className="execution-preview"><div className="preview-head"><span>ORDER REVIEW</span><b>{kind === "DCA" ? contractReady ? "MAINNET DCA" : enginePaused ? "OWNER ACTIVATION REQUIRED" : "ENGINE CHECK" : composerQuoteBusy ? "UPDATING QUOTE" : composerQuote ? `LIVE ${composerQuote.protocol} QUOTE` : "WAITING FOR ROUTE"}</b></div><div className="preview-grid"><p><span>Estimated receive</span><strong>{kind === "DCA" ? `${estimatedUnits} ${draftAsset} each` : composerQuote ? `${Number(composerQuote.amountOut).toLocaleString("en-US", { maximumFractionDigits: 8 })} ${kind === "Sell" ? "USDG" : draftAsset}` : "—"}</strong></p><p><span>{kind === "Sell" ? "Sell amount" : "Total USDG cap"}</span><strong>{kind === "Sell" ? `${draftAmount || "0"} ${draftAsset}` : `${draftTotalBudget.toFixed(2)} USDG`}</strong></p><p><span>Minimum received</span><strong>{kind === "DCA" ? `${draftSlippage}% max · engine cap` : composerQuote ? `${Number(composerQuote.minimumOut).toLocaleString("en-US", { maximumFractionDigits: 8 })} ${kind === "Sell" ? "USDG" : draftAsset}` : "Waiting for route"}</strong></p><p><span>Oracle status</span><strong>{priceBook[draftAsset]?.status === "live" ? formatPriceAge(priceBook[draftAsset].updatedAt) : priceBook[draftAsset]?.status ?? "Syncing"}</strong></p></div></div>
-              <div className="fee-review"><div><span>POOL FEE</span><strong>{kind === "DCA" ? "Selected at execution" : composerQuote ? `${(composerQuote.feeBps / 100).toFixed(2)}%` : "—"}</strong></div><div><span>HOODFLOW FEE</span><strong>{kind === "DCA" ? engineFeeBps === null ? "Checking" : `${(engineFeeBps / 100).toFixed(2)}%` : "0.00%"}</strong></div><div><span>NETWORK GAS</span><strong>Shown in wallet</strong></div><div><span>QUOTE REFRESH</span><strong>{kind === "DCA" ? "At execution" : composerQuote ? `${Math.max(0, Math.floor((Date.now() - composerQuote.updatedAt) / 1_000))}s ago · auto` : composerQuoteBusy ? "Updating" : "Unavailable"}</strong></div></div>
+              <div className="fee-review"><div><span>POOL FEE</span><strong>{kind === "DCA" ? "Selected at execution" : composerQuote ? `${(composerQuote.feeBps / 100).toFixed(2)}%` : "—"}</strong></div><div><span>HOODFLOW FEE</span><strong>{kind === "DCA" ? engineFeeBps === null ? "Checking" : `${(engineFeeBps / 100).toFixed(2)}%` : "0.00%"}</strong></div><div><span>NETWORK GAS</span><strong>Shown in wallet</strong></div><div><span>QUOTE REFRESH</span><strong>{kind === "DCA" ? "At execution" : composerQuote ? composerQuoteBusy ? "Refreshing · last quote kept" : "Fresh · auto" : composerQuoteBusy ? "Updating" : "Unavailable"}</strong></div></div>
               {composerQuoteError && kind !== "DCA" && <div className="quote-inline-error"><strong>Route unavailable for this amount.</strong><span>{composerQuoteError}</span><button type="button" onClick={() => void refreshComposerQuote()}>Try again</button></div>}
               <div className="limit-note"><span>✓</span><p><strong>{kind === "DCA" ? "Spending limits stay enforced onchain." : "The order permission is exact and short-lived."}</strong><small>{kind === "Buy" ? "HoodFlow signs only this USDG amount for the router." : kind === "Sell" ? `HoodFlow signs only the selected ${draftAsset} amount; sale proceeds return as USDG.` : "The recurring engine cannot execute outside the selected asset, total budget, schedule and expiry."}</small></p></div>
               {transactionStep && <div className="transaction-step"><i /><span>{transactionStep}</span></div>}
-              <div className="composer-actions"><button type="button" onClick={() => setComposerOpen(false)} disabled={onchainBusy}>Cancel</button><button type="submit" className="primary-action" disabled={onchainBusy || ((kind === "Buy" || kind === "Sell") && (!composerQuote || composerQuoteBusy)) || (kind === "DCA" && !contractReady && !enginePaused)}>{onchainBusy ? "Working…" : kind === "Buy" ? connected ? `Buy ${draftAsset} with USDG` : "Connect wallet first" : kind === "Sell" ? connected ? `Sell ${draftAsset} for USDG` : "Connect wallet first" : contractReady ? "Create onchain DCA" : enginePaused ? connected ? "Activate DCA engine" : "Connect owner wallet to activate" : "Checking engine"} <span>&rarr;</span></button></div>
+              <div className="composer-actions"><button type="button" onClick={() => setComposerOpen(false)} disabled={onchainBusy}>Cancel</button><button type="submit" className="primary-action" disabled={onchainBusy || (connected && (kind === "Buy" || kind === "Sell") && !composerQuote) || (connected && kind === "DCA" && !contractReady && !enginePaused)}>{onchainBusy ? "Working…" : kind === "Buy" ? connected ? `Buy ${draftAsset} with USDG` : "Connect wallet first" : kind === "Sell" ? connected ? `Sell ${draftAsset} for USDG` : "Connect wallet first" : contractReady ? connected ? "Create onchain DCA" : "Connect wallet first" : enginePaused ? connected ? "Activate DCA engine" : "Connect owner wallet to activate" : connected ? "Checking engine" : "Connect wallet first"} <span>&rarr;</span></button></div>
             </form>
           </section>
         </div>
       )}
 
-      {selectedStrategy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedStrategy(null); }}><section className="detail-drawer" role="dialog" aria-modal="true" aria-label={`${selectedStrategy.name} details`}><div className="composer-head"><div><p className="eyebrow">MAINNET ORDER</p><h2>{selectedStrategy.name}</h2></div><button onClick={() => setSelectedStrategy(null)}>x</button></div><div className="order-status-hero"><Mark ticker={selectedStrategy.asset} /><div><strong>{selectedStrategy.status}</strong><span>{selectedStrategy.detail}</span></div></div><div className="health-checks"><div><span>Network</span><strong>Robinhood Chain <b>4663</b></strong></div><div><span>Order type</span><strong>{selectedStrategy.kind} <b>ONCHAIN</b></strong></div><div><span>Asset</span><strong>{selectedStrategy.asset} <b>ONLY</b></strong></div><div><span>Created</span><strong>{new Date(selectedStrategy.createdAt).toLocaleString()}</strong></div></div><div className="permission-summary"><p><span>Rule</span><strong>{selectedStrategy.rule}</strong></p><p><span>Spending cap</span><strong>{selectedStrategy.budget}</strong></p><p><span>Permission expires</span><strong>{selectedStrategy.expires}</strong></p></div>{selectedStrategy.txHash ? <a className="drawer-action receipt-link" href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${selectedStrategy.txHash}`} target="_blank" rel="noreferrer">View mainnet receipt ↗</a> : null}</section></div>}
+      {selectedStrategy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !onchainBusy) setSelectedStrategy(null); }}>
+        <section className="detail-drawer" role="dialog" aria-modal="true" aria-label={`${selectedStrategy.name} details`}>
+          <div className="composer-head"><div><p className="eyebrow">MAINNET ORDER</p><h2>{selectedStrategy.name}</h2></div><button onClick={() => setSelectedStrategy(null)} disabled={onchainBusy}>x</button></div>
+          <div className="order-status-hero"><Mark ticker={selectedStrategy.asset} /><div><strong>{selectedStrategy.status}</strong><span>{selectedStrategy.detail}</span></div></div>
+          <div className="health-checks"><div><span>Network</span><strong>Robinhood Chain <b>4663</b></strong></div><div><span>Order type</span><strong>{selectedStrategy.kind} <b>ONCHAIN</b></strong></div><div><span>Asset</span><strong>{selectedStrategy.asset} <b>ONLY</b></strong></div><div><span>Created</span><strong>{new Date(selectedStrategy.createdAt).toLocaleString()}</strong></div></div>
+          <div className="permission-summary"><p><span>Rule</span><strong>{selectedStrategy.rule}</strong></p><p><span>Spending cap</span><strong>{selectedStrategy.budget}</strong></p><p><span>Permission expires</span><strong>{selectedStrategy.expires}</strong></p></div>
+          {selectedStrategy.txHash ? <a className="drawer-action receipt-link" href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${selectedStrategy.txHash}`} target="_blank" rel="noreferrer">View mainnet receipt ↗</a> : null}
+          {selectedStrategy.kind === "DCA" && selectedStrategy.chainStrategyId && selectedStrategy.status !== "Cancelled" && <button type="button" className="drawer-action" onClick={() => void cancelOnchainStrategy(selectedStrategy.id)} disabled={onchainBusy}>{onchainBusy ? "Cancelling…" : "Cancel strategy onchain"}</button>}
+        </section>
+      </div>}
 
       {walletModalOpen && !connected && <div className="confirm-backdrop wallet-connect-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !walletConnecting) setWalletModalOpen(false); }}><section className="wallet-connect-card" role="dialog" aria-modal="true" aria-labelledby="wallet-connect-title">
         <button className="wallet-connect-close" type="button" aria-label="Close wallet options" onClick={() => setWalletModalOpen(false)} disabled={walletConnecting}>×</button>
@@ -1792,7 +1987,7 @@ export default function Home() {
         <div className="wallet-connect-heading"><h2 id="wallet-connect-title">Log in or sign up</h2><p>Connect to HoodFlow</p></div>
         <p className="wallet-connect-intro">Use a self-custody wallet to trade on Robinhood Chain. HoodFlow never sees your seed phrase or private key.</p>
         <div className="wallet-connect-options">
-          {PRIVY_CONFIGURED && <button type="button" className="wallet-option wallet-option-privy" onClick={openPrivy} disabled={walletConnecting}><span className="wallet-option-icon privy">P</span><span><strong>Continue with Privy</strong><small>Email, Google, X, passkey or wallet</small></span><b>SECURE</b></button>}
+          {PRIVY_CONFIGURED && <button type="button" className="wallet-option wallet-option-privy" onClick={openPrivy} disabled={walletConnecting || !privyRuntimeReady}><span className="wallet-option-icon privy">P</span><span><strong>{privyRuntimeReady ? "Continue with Privy" : "Loading secure sign-in…"}</strong><small>{privyRuntimeReady ? "Email, Google, X, passkey or wallet" : "Privy loads only when you open this panel"}</small></span><b>{privyRuntimeReady ? "SECURE" : "…"}</b></button>}
           <button type="button" className="wallet-option" onClick={() => void connectBrowserWallet("rabby")} disabled={walletConnecting}><span className="wallet-option-icon rabby">R</span><span><strong>Rabby Wallet</strong><small>Best detected EVM wallet experience</small></span><b>4663</b></button>
           <button type="button" className="wallet-option" onClick={() => void connectBrowserWallet("metamask")} disabled={walletConnecting}><span className="wallet-option-icon metamask">M</span><span><strong>MetaMask</strong><small>Browser extension and mobile app</small></span><b>4663</b></button>
           <button type="button" className="wallet-option" onClick={() => void connectBrowserWallet("okx")} disabled={walletConnecting}><span className="wallet-option-icon okx">OKX</span><span><strong>OKX Wallet</strong><small>Connect the installed OKX extension</small></span><b>4663</b></button>
@@ -1811,5 +2006,6 @@ export default function Home() {
 }
 
 function StrategyRow({ item, detailed = false, onToggle, onInspect }: { item: Strategy; detailed?: boolean; onToggle: () => void; onInspect: () => void }) {
-  return <article className={`strategy-row ${detailed ? "detailed upgraded" : ""}`}><div className="strategy-name"><Mark ticker={item.asset} /><p><strong>{item.name}</strong><small>{item.kind} · {item.asset}</small></p></div><div className="rule-cell"><span>{detailed ? "" : "RULE"}</span><strong>{item.rule}</strong></div><div className="next-cell"><span>{detailed ? "" : "RESULT"}</span><strong>{item.detail}</strong></div>{detailed && <div className="health-cell"><strong>4663</strong><span>MAINNET</span></div>}<button className={`status-button ${item.status.toLowerCase()}`} onClick={onToggle} disabled={item.status === "Confirmed"}><i />{item.status}</button><button className="row-more" onClick={onInspect} aria-label={`Inspect ${item.name}`}>DETAILS</button></article>;
+  const terminal = item.status === "Confirmed" || item.status === "Cancelled";
+  return <article className={`strategy-row ${detailed ? "detailed upgraded" : ""}`}><div className="strategy-name"><Mark ticker={item.asset} /><p><strong>{item.name}</strong><small>{item.kind} · {item.asset}</small></p></div><div className="rule-cell"><span>{detailed ? "" : "RULE"}</span><strong>{item.rule}</strong></div><div className="next-cell"><span>{detailed ? "" : "RESULT"}</span><strong>{item.detail}</strong></div>{detailed && <div className="health-cell"><strong>4663</strong><span>MAINNET</span></div>}<button className={`status-button ${item.status.toLowerCase()}`} onClick={onToggle} disabled={terminal}><i />{item.status}</button><button className="row-more" onClick={onInspect} aria-label={`Inspect ${item.name}`}>DETAILS</button></article>;
 }

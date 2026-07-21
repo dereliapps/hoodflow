@@ -24,6 +24,8 @@ const multicallInterface = new Interface([
 
 type RpcResult = { id: string; result?: string };
 type MulticallResult = { success: boolean; returnData: string };
+type FeedEntry = [RobinhoodPriceTicker, { feed: string; heartbeat: number }];
+type HistoryPoint = { roundId: string; price: number; updatedAt: number };
 
 function rpcCall(id: string, to: string, data: string) {
   return {
@@ -67,8 +69,11 @@ function chunk<T>(items: T[], size: number) {
 }
 
 async function main() {
-  const entries = Object.entries(ROBINHOOD_PRICE_FEEDS)
-    .filter((entry): entry is [RobinhoodPriceTicker, { feed: string; heartbeat: number }] => Boolean(entry[1].feed));
+  const entries: FeedEntry[] = [];
+  for (const ticker of Object.keys(ROBINHOOD_PRICE_FEEDS) as RobinhoodPriceTicker[]) {
+    const config = ROBINHOOD_PRICE_FEEDS[ticker];
+    if (config.feed) entries.push([ticker, { feed: config.feed, heartbeat: config.heartbeat }]);
+  }
   const latestResults = await multicall("latest-rounds", entries.map(([, config]) => ({
     target: config.feed,
     callData: LATEST_ROUND_DATA,
@@ -79,11 +84,11 @@ async function main() {
     return round ? [[ticker, round] as const] : [];
   }));
 
-  const assets: Record<string, { feed: string; points: Array<{ roundId: string; price: number; updatedAt: number }> }> = {};
+  const assets: Record<string, { feed: string; points: HistoryPoint[] }> = {};
   for (const group of chunk(entries, PARALLEL_REQUESTS)) {
-    const payloads = await Promise.all(group.map(async ([ticker, config]) => {
+    const payloads = await Promise.all(group.map(async ([ticker, config]): Promise<[RobinhoodPriceTicker, string, HistoryPoint[]]> => {
       const latest = latestByTicker.get(ticker);
-      if (!latest) return [ticker, config.feed, []] as const;
+      if (!latest) return [ticker, config.feed, []];
       const requests = Array.from({ length: ROUND_COUNT }, (_, index) => {
         const roundId = latest.roundId - BigInt(index);
         return {
@@ -98,7 +103,7 @@ async function main() {
         if (!round || !price || round.updatedAt <= 0) return [];
         return [{ roundId: round.roundId.toString(), price, updatedAt: round.updatedAt }];
       }).sort((left, right) => left.updatedAt - right.updatedAt);
-      return [ticker, config.feed, points] as const;
+      return [ticker, config.feed, points];
     }));
     payloads.forEach(([ticker, feed, points]) => {
       if (points.length >= 2) assets[ticker] = { feed, points };

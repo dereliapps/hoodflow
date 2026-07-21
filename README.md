@@ -23,7 +23,7 @@ HoodFlow indexes the official Virtuals Robinhood Chain launch feed and keeps bon
 - Community market discovery from GeckoTerminal and DEX Screener.
 - Official Virtuals Robinhood Chain discovery with explicit `bonding` and `graduated` lifecycle states.
 - Contract-address lookup, native quote-asset detection, minimum output, bounded slippage, and self-custody settlement.
-- Durable referral profiles, verified first-trade points, shareable links, and a public leaderboard.
+- Durable referral profiles, verified first-trade points, and shareable links. Public Season 0 rankings are marked **Coming Soon** until the leaderboard opens.
 - Selectable USDG, VIRTUAL, and WETH settlement with atomic V2 routing through a market's native quote token when needed.
 
 ## Why the launchpad adapter exists

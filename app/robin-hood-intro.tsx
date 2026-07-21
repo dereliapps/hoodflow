@@ -23,12 +23,16 @@ type SceneGeometry = {
 
 function getSceneGeometry(width: number, height: number): SceneGeometry {
   if (width <= 720) {
-    const arrowWidth = width * 0.24;
-    const launchX = width * 0.264;
-    const launchY = height * 0.42;
+    const actorWidth = width;
+    const actorScale = actorWidth / (SCENE_WIDTH / 4);
+    const actorLeft = width * -0.22;
+    const actorTop = height * 0.24;
+    const arrowWidth = 198 * actorScale;
+    const launchX = actorLeft + 140 * actorScale;
+    const launchY = actorTop + 160 * actorScale;
     const impactX = width * 0.84;
-    const impactY = height * 0.445;
-    const flightX = impactX - (launchX + arrowWidth * (216 / 220));
+    const impactY = height * 0.42;
+    const flightX = impactX - (launchX + arrowWidth * (236 / 240));
     const flightY = impactY - launchY;
     return {
       launchX,
@@ -49,12 +53,16 @@ function getSceneGeometry(width: number, height: number): SceneGeometry {
   const offsetY = (height - SCENE_HEIGHT * scale) / 2;
   const mapX = (x: number) => offsetX + x * scale;
   const mapY = (y: number) => offsetY + y * scale;
-  const arrowWidth = 223 * scale;
-  const launchX = mapX(331);
-  const launchY = mapY(395);
+  const actorWidth = (SCENE_WIDTH / 2) * 0.8 * scale;
+  const actorScale = actorWidth / (SCENE_WIDTH / 4);
+  const actorLeft = offsetX - 20 * scale;
+  const actorTop = offsetY + 70 * scale;
+  const arrowWidth = 198 * actorScale;
+  const launchX = actorLeft + 140 * actorScale;
+  const launchY = actorTop + 160 * actorScale;
   const impactX = mapX(1405);
   const impactY = mapY(420);
-  const flightX = impactX - (launchX + arrowWidth * (216 / 220));
+  const flightX = impactX - (launchX + arrowWidth * (236 / 240));
   const flightY = impactY - launchY;
 
   return {
@@ -69,11 +77,6 @@ function getSceneGeometry(width: number, height: number): SceneGeometry {
     flightY,
     flightAngle: Math.atan2(flightY, flightX) * (180 / Math.PI),
   };
-}
-
-function smoothstep(edgeA: number, edgeB: number, value: number) {
-  const progress = Math.min(1, Math.max(0, (value - edgeA) / (edgeB - edgeA)));
-  return progress * progress * (3 - 2 * progress);
 }
 
 type IntroStep = "idle" | "drawing" | "fired" | "hit" | "logo" | "open" | "leaving";
@@ -105,6 +108,7 @@ export default function RobinHoodIntro() {
   const [charge, setCharge] = useState(0);
   const rootRef = useRef<HTMLElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const skipRef = useRef<HTMLButtonElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
   const firedRef = useRef(false);
@@ -115,6 +119,17 @@ export default function RobinHoodIntro() {
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const previousOverflowRef = useRef("");
   const showIntroRef = useRef(false);
+  const shieldedSiblingsRef = useRef<Array<{ element: HTMLElement; inert: string | null; ariaHidden: string | null }>>([]);
+
+  const restorePageAccess = useCallback(() => {
+    shieldedSiblingsRef.current.forEach(({ element, inert, ariaHidden }) => {
+      if (inert === null) element.removeAttribute("inert");
+      else element.setAttribute("inert", inert);
+      if (ariaHidden === null) element.removeAttribute("aria-hidden");
+      else element.setAttribute("aria-hidden", ariaHidden);
+    });
+    shieldedSiblingsRef.current = [];
+  }, []);
 
   const clearRuntime = useCallback(() => {
     timersRef.current.forEach((timer) => window.clearTimeout(timer));
@@ -125,7 +140,8 @@ export default function RobinHoodIntro() {
     particleFrameRef.current = null;
     resizeObserverRef.current?.disconnect();
     resizeObserverRef.current = null;
-  }, []);
+    restorePageAccess();
+  }, [restorePageAccess]);
 
   const rememberVisit = useCallback(() => {
     if (process.env.NODE_ENV !== "production") return;
@@ -166,6 +182,15 @@ export default function RobinHoodIntro() {
     canvas.getContext("2d")?.setTransform(dpr, 0, 0, dpr, 0, 0);
     const geometry = getSceneGeometry(rect.width, rect.height);
     const style = root.style;
+    const desktopSceneScale = Math.max(rect.width / SCENE_WIDTH, rect.height / SCENE_HEIGHT);
+    const actorWidth = rect.width <= 720 ? rect.width : (SCENE_WIDTH / 2) * 0.8 * desktopSceneScale;
+    const actorHeight = actorWidth * (SCENE_HEIGHT / (SCENE_WIDTH / 2));
+    const actorLeft = rect.width <= 720 ? rect.width * -0.22 : (rect.width - SCENE_WIDTH * desktopSceneScale) / 2 - 20 * desktopSceneScale;
+    const actorTop = rect.width <= 720 ? rect.height * 0.24 : (rect.height - SCENE_HEIGHT * desktopSceneScale) / 2 + 70 * desktopSceneScale;
+    style.setProperty("--rh-actor-left", `${actorLeft}px`);
+    style.setProperty("--rh-actor-top", `${actorTop}px`);
+    style.setProperty("--rh-actor-width", `${actorWidth}px`);
+    style.setProperty("--rh-actor-height", `${actorHeight}px`);
     style.setProperty("--rh-launch-x", `${geometry.launchX}px`);
     style.setProperty("--rh-launch-y", `${geometry.launchY}px`);
     style.setProperty("--rh-arrow-width", `${geometry.arrowWidth}px`);
@@ -175,6 +200,8 @@ export default function RobinHoodIntro() {
     style.setProperty("--rh-logo-y", `${geometry.logoY}px`);
     style.setProperty("--rh-flight-x", `${geometry.flightX}px`);
     style.setProperty("--rh-flight-y", `${geometry.flightY}px`);
+    style.setProperty("--rh-flight-x-04", `${geometry.flightX * 0.04}px`);
+    style.setProperty("--rh-flight-y-04", `${geometry.flightY * 0.04 - 1}px`);
     style.setProperty("--rh-flight-x-18", `${geometry.flightX * 0.18}px`);
     style.setProperty("--rh-flight-y-18", `${geometry.flightY * 0.18 - 4}px`);
     style.setProperty("--rh-flight-x-62", `${geometry.flightX * 0.62}px`);
@@ -257,13 +284,11 @@ export default function RobinHoodIntro() {
     schedule(() => {
       setStep("hit");
       burst();
-    }, 430);
-    schedule(() => setStep("logo"), 840);
-    schedule(() => setStep("open"), 1450);
-    schedule(() => {
-      setStep("leaving");
-      finish();
-    }, 2600);
+    }, 390);
+    schedule(() => setStep("logo"), 820);
+    schedule(() => setStep("open"), 1510);
+    schedule(() => setStep("leaving"), 2640);
+    schedule(finish, 2850);
   }, [burst, finish, schedule]);
 
   const beginDraw = useCallback(() => {
@@ -274,7 +299,7 @@ export default function RobinHoodIntro() {
 
     const update = (now: number) => {
       if (!drawingRef.current) return;
-      const nextCharge = Math.min(100, (now - drawStartedAtRef.current) / 8.5);
+      const nextCharge = Math.min(100, (now - drawStartedAtRef.current) / 9.6);
       setCharge(nextCharge);
       chargeFrameRef.current = requestAnimationFrame(update);
     };
@@ -315,6 +340,21 @@ export default function RobinHoodIntro() {
     showIntroRef.current = true;
     previousOverflowRef.current = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    const introRoot = rootRef.current;
+    const parent = introRoot?.parentElement;
+    if (introRoot && parent) {
+      shieldedSiblingsRef.current = Array.from(parent.children)
+        .filter((child): child is HTMLElement => child instanceof HTMLElement && child !== introRoot)
+        .map((element) => ({
+          element,
+          inert: element.getAttribute("inert"),
+          ariaHidden: element.getAttribute("aria-hidden"),
+        }));
+      shieldedSiblingsRef.current.forEach(({ element }) => {
+        element.setAttribute("inert", "");
+        element.setAttribute("aria-hidden", "true");
+      });
+    }
     sizeCanvas();
     resizeObserverRef.current = new ResizeObserver(sizeCanvas);
     if (rootRef.current) resizeObserverRef.current.observe(rootRef.current);
@@ -343,13 +383,15 @@ export default function RobinHoodIntro() {
 
   const rank = STEP_ORDER[step];
   const drawProgress = charge / 100;
-  const readyOpacity = 1 - smoothstep(0.26, 0.48, drawProgress);
-  const halfOpacity = smoothstep(0.26, 0.48, drawProgress) * (1 - smoothstep(0.72, 0.96, drawProgress));
+  const drawFrame = step === "idle" ? 0 : Math.min(4, Math.floor(drawProgress * 5));
+  const drawFrameColumn = drawFrame % 4;
+  const drawFrameRow = Math.floor(drawFrame / 4);
   const introStyle = {
-    "--rh-ready-opacity": readyOpacity,
-    "--rh-half-opacity": halfOpacity,
-    "--rh-actor-shift": `${drawProgress * -4}px`,
-    "--rh-actor-tilt": `${drawProgress * -0.28}deg`,
+    "--rh-actor-frame-x": `${drawFrameColumn * (100 / 3)}%`,
+    "--rh-actor-frame-y": `${drawFrameRow * 100}%`,
+    "--rh-actor-shift-x": `${drawProgress * -7}px`,
+    "--rh-actor-shift-y": `${Math.sin(drawProgress * Math.PI) * -2.5}px`,
+    "--rh-actor-tilt": `${drawProgress * -0.48}deg`,
   } as React.CSSProperties;
   const stageClass = [
     "rh-intro",
@@ -358,20 +400,46 @@ export default function RobinHoodIntro() {
     rank >= STEP_ORDER.hit ? "is-hit" : "",
     rank >= STEP_ORDER.logo ? "is-logo" : "",
     rank >= STEP_ORDER.open ? "is-open" : "",
+    step === "drawing" && charge >= 96 ? "is-locked" : "",
     step === "leaving" ? "is-leaving" : "",
   ].filter(Boolean).join(" ");
 
   return (
-    <section ref={rootRef} style={introStyle} className={stageClass} role="dialog" aria-modal="true" aria-labelledby="rh-intro-title">
+    <section
+      ref={rootRef}
+      style={introStyle}
+      className={stageClass}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="rh-intro-title"
+      onKeyDownCapture={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          skip();
+          return;
+        }
+        if (event.key !== "Tab") return;
+        const first = triggerRef.current;
+        const last = skipRef.current;
+        if (!first || !last) return;
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }}
+    >
       <div className="rh-intro-door rh-intro-door-left" aria-hidden="true">
         <div className="rh-intro-scene rh-intro-scene-base" />
-        <div className="rh-intro-scene rh-intro-scene-half" />
-        <div className="rh-intro-scene rh-intro-scene-ready" />
-        <div className="rh-intro-scene rh-intro-scene-release" />
       </div>
       <div className="rh-intro-door rh-intro-door-right" aria-hidden="true">
         <div className="rh-intro-scene rh-intro-scene-base" />
         <div className="rh-intro-scene rh-intro-scene-bag" />
+      </div>
+      <div className="rh-intro-actor-panel" aria-hidden="true">
+        <div className="rh-intro-actor-sprite" />
       </div>
       <div className="rh-intro-vignette" aria-hidden="true" />
       <div className="rh-intro-grain" aria-hidden="true" />
@@ -387,14 +455,14 @@ export default function RobinHoodIntro() {
 
       <div className="rh-intro-projectile" aria-hidden="true">
         <span className="rh-intro-arrow-trail" />
-        <svg className="rh-intro-arrow" viewBox="0 0 220 30">
+        <svg className="rh-intro-arrow" viewBox="0 0 240 18">
           <g className="rh-intro-arrow-body">
-            <path className="rh-intro-arrow-shadow" d="M14 17H203" />
-            <path className="rh-intro-arrow-shaft" d="M14 15H203" />
-            <path className="rh-intro-arrow-nock" d="m14 10-8 5 8 5" />
-            <path className="rh-intro-arrow-feather" d="m38 15-20-10-8 2 17 8Zm0 0-20 10-8-2 17-8Z" />
-            <path className="rh-intro-arrow-binding" d="M31 9v12M35 11v8" />
-            <path className="rh-intro-arrow-head" d="m216 15-29-9 12 9-12 9Z" />
+            <path className="rh-intro-arrow-shadow" d="M9 10.2H228" />
+            <path className="rh-intro-arrow-shaft" d="M9 9H228" />
+            <path className="rh-intro-arrow-nock" d="m10 5-6 4 6 4" />
+            <path className="rh-intro-arrow-feather" d="M35 8 15 3 9 5l16 4L9 13l6 2 20-5Z" />
+            <path className="rh-intro-arrow-binding" d="M29 5.5v7M33 6.5v5" />
+            <path className="rh-intro-arrow-head" d="m238 9-16-5 6 5-6 5Z" />
           </g>
         </svg>
       </div>
@@ -433,13 +501,17 @@ export default function RobinHoodIntro() {
         }}
       />
 
-      <div className="rh-intro-controls" aria-live="polite">
+      <div className="rh-intro-controls" aria-hidden="true">
         <p>{step === "drawing" ? (charge >= 100 ? "Bow locked — release" : `Drawing bow · ${Math.round(charge)}%`) : step === "idle" ? "Hold to draw. Release to enter." : "Arrow released"}</p>
         <div className="rh-intro-power"><i style={{ width: `${charge}%` }} /></div>
         <span>Hold anywhere · Space / Enter</span>
       </div>
 
-      <button type="button" className="rh-intro-skip" onClick={skip}>Skip</button>
+      <span className="rh-intro-status" aria-live="polite">
+        {step === "idle" ? "Ready to draw" : step === "drawing" ? (charge >= 96 ? "Bow fully drawn. Release to enter." : "Drawing bow") : "Arrow released"}
+      </span>
+
+      <button ref={skipRef} type="button" className="rh-intro-skip" onClick={skip}>Skip</button>
     </section>
   );
 }

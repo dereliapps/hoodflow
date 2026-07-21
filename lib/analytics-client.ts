@@ -10,6 +10,7 @@ export type HoodFlowEvent =
   | "transaction_failed"
   | "community_token_imported"
   | "community_market_opened"
+  | "settlement_selected"
   | "referral_registered"
   | "referral_shared"
   | "referral_qualified";

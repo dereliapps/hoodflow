@@ -21,7 +21,7 @@ test("server-renders the HoodFlow product shell", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>HoodFlow \| Crypto &amp; Stock Token Markets on Robinhood Chain<\/title>/i);
-  assert.match(html, /Every live token\. One execution screen\./);
+  assert.match(html, /Indexed crypto markets\. One execution screen\./);
   assert.match(html, /Compare live routes/);
   assert.match(html, /Find the route/);
   assert.match(html, /Hold to draw\. Release to enter\./);
@@ -44,7 +44,7 @@ test("server-renders the HoodFlow product shell", async () => {
 });
 
 test("ships a bounded, interactive Robinhood mainnet experience", async () => {
-  const [page, intro, layout, css, packageJson, priceRoute, priceLib, historyRoute, stockHistory, docs, community, rewards, referralRoute, communityMarketRoute] = await Promise.all([
+  const [page, intro, layout, css, packageJson, priceRoute, priceLib, historyRoute, stockHistory, docs, community, rewards, referralRoute, communityMarketRoute, communityChartRoute, analyticsClient] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/robin-hood-intro.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -59,6 +59,8 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
     readFile(new URL("../app/referral-rewards.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/referrals/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/community-markets/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/community-markets/chart/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/analytics-client.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /"use client"/);
@@ -112,11 +114,15 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /Sell now/);
   assert.match(page, /Sell to USDG/);
   assert.match(page, /Compare live routes/);
+  assert.match(layout, /export const metadata/);
+  assert.match(layout, /NEXT_PUBLIC_SITE_URL/);
+  assert.doesNotMatch(layout, /next[/]headers|headers\(\)/);
   assert.match(intro, /RobinHoodIntro/);
   assert.match(intro, /hoodflow-robinhood-intro-v3/);
-  assert.match(intro, /rh-intro-scene-ready/);
-  assert.match(intro, /rh-intro-scene-half/);
-  assert.match(intro, /rh-intro-scene-release/);
+  assert.match(intro, /rh-intro-scene-base/);
+  assert.match(intro, /rh-intro-scene-bag/);
+  assert.match(intro, /rh-intro-actor-sprite/);
+  assert.match(intro, /shieldedSiblingsRef/);
   assert.match(intro, /getSceneGeometry/);
   assert.match(intro, /sessionStorage\.setItem/);
   assert.match(intro, /new URLSearchParams\(window\.location\.search\)\.get\("intro"\) === "1"/);
@@ -142,7 +148,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(docs, /Reference price versus execution quote/);
   assert.match(docs, /Common messages/);
   assert.match(docs, /Discover tokens by contract address/);
-  assert.match(community, /Every live token/);
+  assert.match(community, /Indexed live markets/);
   assert.match(community, /metric-price/);
   assert.match(community, /metric-volume/);
   assert.match(community, /metric-liquidity/);
@@ -173,6 +179,14 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(communityMarketRoute, /new_pools/);
   assert.match(communityMarketRoute, /GeckoTerminal/);
   assert.match(communityMarketRoute, /DEX Screener/);
+  assert.match(communityMarketRoute, /AbortSignal\.timeout/);
+  assert.match(communityMarketRoute, /partial:/);
+  assert.match(communityChartRoute, /CHART_TIMEOUT_MS = 5_000/);
+  assert.match(communityChartRoute, /AbortSignal\.any\(\[request\.signal, AbortSignal\.timeout\(CHART_TIMEOUT_MS\)\]\)/);
+  assert.match(communityChartRoute, /partial: points\.length !== candles\.length/);
+  assert.match(communityChartRoute, /item\.every\(Number\.isFinite\)/);
+  assert.match(communityChartRoute, /status: timedOut \? 504/);
+  assert.match(analyticsClient, /\| "settlement_selected"/);
   assert.match(communityMarketRoute, /Virtuals official/);
   assert.match(communityMarketRoute, /virtuals-bonding/);
   assert.match(css, /Authoritative responsive layout for the crypto workspace/);
@@ -204,7 +218,8 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(priceRoute, /MAX_RPC_ATTEMPTS = 3/);
   assert.match(priceRoute, /for \(const batch of chunkRequests/);
   assert.match(priceRoute, /Price RPC returned no usable batches/);
-  assert.match(page, /candidate\.liveCount >= 15/);
+  assert.doesNotMatch(page, /candidate\.liveCount >= 15/);
+  assert.match(page, /priceBook\[draftAsset\]\?\.status !== "live"/);
   assert.match(page, /setEngineFeeBps\(Number\(protocolFeeBps\)\)/);
   assert.match(historyRoute, /0x9a6fc8f5/);
   assert.match(historyRoute, /ROUND_COUNT = 32/);
@@ -222,7 +237,8 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 
   await access(new URL("../public/og.png", import.meta.url));
-  await access(new URL("../public/assets/hoodflow-sherwood.webp", import.meta.url));
+  await access(new URL("../public/assets/hoodflow-sherwood-clean.webp", import.meta.url));
+  await access(new URL("../public/assets/hoodflow-archer-sprite.webp", import.meta.url));
   await Promise.all([
     "AAPL", "AMD", "AMZN", "BABA", "BE", "COIN", "CRCL", "CRWV", "GOOGL", "INTC",
     "META", "MSFT", "MU", "NVDA", "ORCL", "PLTR", "SNDK", "SPCX", "TSLA", "USAR",

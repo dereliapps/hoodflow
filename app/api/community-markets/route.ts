@@ -83,6 +83,7 @@ type Market = {
 };
 
 const GECKO_ROOT = "https://api.geckoterminal.com/api/v2";
+const UPSTREAM_TIMEOUT_MS = 6_500;
 const SETTLEMENT_SYMBOLS = new Set(["WETH", "ETH", "USDG", "USDC", "USDT", "VIRTUAL"]);
 const canonicalRwa = new Map(
   Object.entries(ROBINHOOD_TOKENS)
@@ -104,6 +105,15 @@ function nullableNumber(value: unknown) {
 function positiveNumber(value: unknown) {
   const parsed = nullableNumber(value);
   return parsed !== null && parsed > 0 ? parsed : null;
+}
+
+function upstreamSignal(parent?: AbortSignal | null, timeoutMs = UPSTREAM_TIMEOUT_MS) {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return parent ? AbortSignal.any([parent, timeout]) : timeout;
+}
+
+async function upstreamFetch(input: string | URL, init: RequestInit = {}, parent?: AbortSignal | null) {
+  return fetch(input, { ...init, signal: upstreamSignal(parent ?? init.signal) });
 }
 
 function classify(address: string, name: string, symbol: string) {
@@ -343,42 +353,51 @@ function mergeMarkets(rows: Market[]) {
   return [...merged.values()];
 }
 
-async function fetchGecko(path: string) {
-  const response = await fetch(`${GECKO_ROOT}${path}`, { headers: { accept: "application/json;version=20230203" } });
+async function fetchGecko(path: string, signal?: AbortSignal | null) {
+  const response = await upstreamFetch(`${GECKO_ROOT}${path}`, { headers: { accept: "application/json;version=20230203" } }, signal);
   if (!response.ok) throw new Error(`GeckoTerminal ${response.status}`);
   return response.json() as Promise<GeckoResponse>;
 }
 
-async function fetchVirtuals(url: string) {
-  const response = await fetch(url, { headers: { accept: "application/json" } });
+async function fetchVirtuals(url: string, signal?: AbortSignal | null) {
+  const response = await upstreamFetch(url, { headers: { accept: "application/json" } }, signal);
   if (!response.ok) throw new Error(`Virtuals ${response.status}`);
   const payload = await response.json() as { data?: VirtualsToken[] };
   return Array.isArray(payload.data) ? payload.data : [];
 }
 
-async function fetchDexDiscovery() {
+async function fetchDexDiscovery(signal?: AbortSignal | null) {
   const discoveryUrls = [
     "https://api.dexscreener.com/token-profiles/latest/v1",
     "https://api.dexscreener.com/token-boosts/top/v1",
     "https://api.dexscreener.com/token-boosts/latest/v1",
   ];
   const discoveries = await Promise.allSettled(discoveryUrls.map(async (url) => {
-    const response = await fetch(url, { headers: { accept: "application/json" } });
+    const response = await upstreamFetch(url, { headers: { accept: "application/json" } }, signal);
     if (!response.ok) throw new Error(`DEX Screener discovery ${response.status}`);
     return response.json() as Promise<Array<{ chainId?: string; tokenAddress?: string }>>;
   }));
+  if (discoveries.every((result) => result.status === "rejected")) {
+    throw new Error("DEX Screener discovery is temporarily unavailable");
+  }
   const addresses = Array.from(new Set(discoveries.flatMap((result) => result.status === "fulfilled"
     ? result.value.filter((item) => item.chainId === "robinhood" && /^0x[a-fA-F0-9]{40}$/.test(item.tokenAddress ?? "")).map((item) => item.tokenAddress!.toLowerCase())
     : [])));
-  if (!addresses.length) return [];
+  if (!addresses.length) return { markets: [], partial: discoveries.some((result) => result.status === "rejected") };
   const chunks = Array.from({ length: Math.ceil(addresses.length / 30) }, (_, index) => addresses.slice(index * 30, index * 30 + 30));
   const pairResults = await Promise.allSettled(chunks.map(async (chunk) => {
-    const response = await fetch(`https://api.dexscreener.com/tokens/v1/robinhood/${chunk.join(",")}`, { headers: { accept: "application/json" } });
+    const response = await upstreamFetch(`https://api.dexscreener.com/tokens/v1/robinhood/${chunk.join(",")}`, { headers: { accept: "application/json" } }, signal);
     if (!response.ok) throw new Error(`DEX Screener tokens ${response.status}`);
     return response.json() as Promise<DexPair[]>;
   }));
+  if (pairResults.length && pairResults.every((result) => result.status === "rejected")) {
+    throw new Error("DEX Screener token markets are temporarily unavailable");
+  }
   const pairs = pairResults.flatMap((result) => result.status === "fulfilled" ? result.value : []);
-  return addresses.flatMap((target) => parseTargetPairs(pairs, target));
+  return {
+    markets: addresses.flatMap((target) => parseTargetPairs(pairs, target)),
+    partial: discoveries.some((result) => result.status === "rejected") || pairResults.some((result) => result.status === "rejected"),
+  };
 }
 
 export async function GET(request?: Request) {
@@ -386,7 +405,7 @@ export async function GET(request?: Request) {
   const lookupAddress = searchParams?.get("token")?.toLowerCase() ?? null;
   const search = searchParams?.get("search")?.trim().slice(0, 80) ?? "";
   if (search.length >= 2) {
-    const virtuals = await fetchVirtuals(virtualsQuery({
+    const virtualsResult = await Promise.allSettled([fetchVirtuals(virtualsQuery({
       "filters[$or][0][name][$contains]": search,
       "filters[$or][1][symbol][$contains]": search,
       "filters[$or][2][preToken][$contains]": search,
@@ -395,18 +414,21 @@ export async function GET(request?: Request) {
       "sort[1]": "createdAt:desc",
       "pagination[page]": "1",
       "pagination[pageSize]": "50",
-    })).catch(() => []);
+    }), request?.signal)]);
+    const virtuals = virtualsResult[0].status === "fulfilled" ? virtualsResult[0].value : [];
     return NextResponse.json({
       markets: mergeMarkets(parseVirtuals(virtuals, "Virtuals search")),
       updatedAt: Date.now(),
-      sources: { virtuals: true },
+      partial: virtualsResult[0].status === "rejected",
+      sources: { virtuals: virtualsResult[0].status === "fulfilled" },
+      ...(virtualsResult[0].status === "rejected" ? { error: "Virtuals search is temporarily unavailable." } : {}),
     }, { headers: { "cache-control": "public, max-age=10, s-maxage=20, stale-while-revalidate=60" } });
   }
   if (lookupAddress) {
     if (!/^0x[a-f0-9]{40}$/.test(lookupAddress)) return NextResponse.json({ markets: [], error: "Invalid token address." }, { status: 400 });
     const [gecko, dex, virtuals] = await Promise.allSettled([
-      fetchGecko(`/networks/robinhood/tokens/${lookupAddress}/pools?page=1&include=base_token%2Cquote_token`),
-      fetch(`https://api.dexscreener.com/token-pairs/v1/robinhood/${lookupAddress}`, { headers: { accept: "application/json" } }).then(async (response) => {
+      fetchGecko(`/networks/robinhood/tokens/${lookupAddress}/pools?page=1&include=base_token%2Cquote_token`, request?.signal),
+      upstreamFetch(`https://api.dexscreener.com/token-pairs/v1/robinhood/${lookupAddress}`, { headers: { accept: "application/json" } }, request?.signal).then(async (response) => {
         if (!response.ok) throw new Error(`DEX Screener ${response.status}`);
         return response.json() as Promise<DexPair[]>;
       }),
@@ -415,28 +437,37 @@ export async function GET(request?: Request) {
         "filters[$or][1][tokenAddress][$contains]": lookupAddress,
         "pagination[page]": "1",
         "pagination[pageSize]": "10",
-      })),
+      }), request?.signal),
     ]);
     const markets = mergeMarkets([
       ...(gecko.status === "fulfilled" ? parseGecko(gecko.value, "Contract lookup").filter((market) => market.address === lookupAddress) : []),
       ...(dex.status === "fulfilled" ? parseTargetPairs(dex.value, lookupAddress) : []),
       ...(virtuals.status === "fulfilled" ? parseVirtuals(virtuals.value, "Virtuals official").filter((market) => market.address === lookupAddress) : []),
     ]).sort((left, right) => right.volume24h - left.volume24h);
-    return NextResponse.json({ markets, updatedAt: Date.now() }, { headers: { "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=120" } });
+    return NextResponse.json({
+      markets,
+      updatedAt: Date.now(),
+      partial: [gecko, dex, virtuals].some((result) => result.status === "rejected"),
+      sources: {
+        geckoTerminal: gecko.status === "fulfilled",
+        dexScreener: dex.status === "fulfilled",
+        virtuals: virtuals.status === "fulfilled",
+      },
+    }, { headers: { "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=120" } });
   }
   const canonicalAddresses = [...canonicalRwa.keys()].join(",");
   const requests = await Promise.allSettled([
-    fetchGecko("/networks/robinhood/pools?page=1&include=base_token%2Cquote_token&order=h24_volume_usd_desc"),
-    fetchGecko("/networks/robinhood/trending_pools?page=1&include=base_token%2Cquote_token"),
-    fetchGecko("/networks/robinhood/new_pools?page=1&include=base_token%2Cquote_token"),
-    fetch(`https://api.dexscreener.com/tokens/v1/robinhood/${canonicalAddresses}`, { headers: { accept: "application/json" } }).then(async (response) => {
+    fetchGecko("/networks/robinhood/pools?page=1&include=base_token%2Cquote_token&order=h24_volume_usd_desc", request?.signal),
+    fetchGecko("/networks/robinhood/trending_pools?page=1&include=base_token%2Cquote_token", request?.signal),
+    fetchGecko("/networks/robinhood/new_pools?page=1&include=base_token%2Cquote_token", request?.signal),
+    upstreamFetch(`https://api.dexscreener.com/tokens/v1/robinhood/${canonicalAddresses}`, { headers: { accept: "application/json" } }, request?.signal).then(async (response) => {
       if (!response.ok) throw new Error(`DEX Screener ${response.status}`);
       return response.json() as Promise<DexPair[]>;
     }),
-    fetchVirtuals(virtualsQuery({ "sort[0]": "volume24h:desc", "sort[1]": "createdAt:desc", "pagination[page]": "1", "pagination[pageSize]": "60" })),
-    fetchVirtuals(virtualsQuery({ "sort[0]": "priceChangePercent24h:desc", "sort[1]": "volume24h:desc", "pagination[page]": "1", "pagination[pageSize]": "40" })),
-    fetchVirtuals(virtualsQuery({ "sort[0]": "createdAt:desc", "pagination[page]": "1", "pagination[pageSize]": "60" })),
-    fetchDexDiscovery(),
+    fetchVirtuals(virtualsQuery({ "sort[0]": "volume24h:desc", "sort[1]": "createdAt:desc", "pagination[page]": "1", "pagination[pageSize]": "60" }), request?.signal),
+    fetchVirtuals(virtualsQuery({ "sort[0]": "priceChangePercent24h:desc", "sort[1]": "volume24h:desc", "pagination[page]": "1", "pagination[pageSize]": "40" }), request?.signal),
+    fetchVirtuals(virtualsQuery({ "sort[0]": "createdAt:desc", "pagination[page]": "1", "pagination[pageSize]": "60" }), request?.signal),
+    fetchDexDiscovery(request?.signal),
   ]);
   const [top, trending, newest, canonical, virtualsVolume, virtualsGainers, virtualsNewest, dexDiscovery] = requests;
   const rows = [
@@ -447,18 +478,20 @@ export async function GET(request?: Request) {
     ...(virtualsVolume.status === "fulfilled" ? parseVirtuals(virtualsVolume.value, "Virtuals volume") : []),
     ...(virtualsGainers.status === "fulfilled" ? parseVirtuals(virtualsGainers.value, "Virtuals trending", true) : []),
     ...(virtualsNewest.status === "fulfilled" ? parseVirtuals(virtualsNewest.value, "Virtuals new") : []),
-    ...(dexDiscovery.status === "fulfilled" ? dexDiscovery.value : []),
+    ...(dexDiscovery.status === "fulfilled" ? dexDiscovery.value.markets : []),
   ];
   const markets = mergeMarkets(rows);
-  if (!markets.length) return NextResponse.json({ markets: [], error: "Market feeds are temporarily unavailable." }, { status: 503, headers: { "cache-control": "no-store" } });
+  const sources = {
+    geckoTerminal: top.status === "fulfilled" || trending.status === "fulfilled" || newest.status === "fulfilled",
+    dexScreener: canonical.status === "fulfilled",
+    virtuals: virtualsVolume.status === "fulfilled" || virtualsGainers.status === "fulfilled" || virtualsNewest.status === "fulfilled",
+    dexDiscovery: dexDiscovery.status === "fulfilled",
+  };
+  if (!markets.length) return NextResponse.json({ markets: [], partial: true, sources, error: "Market feeds are temporarily unavailable." }, { status: 503, headers: { "cache-control": "no-store" } });
   return NextResponse.json({
     markets,
     updatedAt: Date.now(),
-    sources: {
-      geckoTerminal: top.status === "fulfilled" || trending.status === "fulfilled" || newest.status === "fulfilled",
-      dexScreener: canonical.status === "fulfilled",
-      virtuals: virtualsVolume.status === "fulfilled" || virtualsGainers.status === "fulfilled" || virtualsNewest.status === "fulfilled",
-      dexDiscovery: dexDiscovery.status === "fulfilled",
-    },
+    partial: requests.some((result) => result.status === "rejected") || (dexDiscovery.status === "fulfilled" && dexDiscovery.value.partial),
+    sources,
   }, { headers: { "cache-control": "public, max-age=20, s-maxage=60, stale-while-revalidate=300" } });
 }

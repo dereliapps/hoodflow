@@ -1,5 +1,5 @@
 import vinext from "vinext";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin, type UserConfig } from "vite";
 import { fileURLToPath } from "node:url";
 import hostingConfig from "./.openai/hosting.json";
 import { sites } from "./build/sites-vite-plugin";
@@ -11,6 +11,16 @@ const { d1, r2 } = hostingConfig;
 
 const usePolling = process.env.VITE_USE_POLLING === "true";
 const privyServerStub = fileURLToPath(new URL("./app/privy-server-stub.tsx", import.meta.url));
+const privyServerAlias = {
+  name: "hoodflow:privy-server-stub",
+  enforce: "pre",
+  applyToEnvironment(environment) {
+    return environment.name === "rsc" || environment.name === "ssr";
+  },
+  resolveId(source) {
+    return source === "@privy-io/react-auth" ? privyServerStub : null;
+  },
+} satisfies Plugin;
 
 const localBindingConfig = {
   main: "./worker/index.ts",
@@ -34,7 +44,7 @@ const localBindingConfig = {
     : [],
 };
 
-export default defineConfig(async () => {
+export default defineConfig(async (): Promise<UserConfig> => {
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= "false";
@@ -45,14 +55,11 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
-    environments: {
-      rsc: { resolve: { alias: { "@privy-io/react-auth": privyServerStub } } },
-      ssr: { resolve: { alias: { "@privy-io/react-auth": privyServerStub } } },
-    },
     server: usePolling
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,
     plugins: [
+      privyServerAlias,
       vinext(),
       sites(),
       cloudflare({

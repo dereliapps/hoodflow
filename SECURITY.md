@@ -18,7 +18,7 @@ After the public repository is available, use GitHub's private vulnerability-rep
 - Engine-to-adapter, adapter-to-Permit2, and Permit2-to-router allowances are cleared after execution.
 - A guardian can pause immediately. Only the owner can restart execution or change critical configuration.
 
-## Required mainnet gates
+## Beta exit gates
 
 1. `npm run launch:preflight` passes against the intended release commit.
 2. Every production address and oracle feed is independently checked against an official primary source.
