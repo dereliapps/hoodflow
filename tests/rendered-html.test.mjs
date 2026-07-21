@@ -44,7 +44,7 @@ test("server-renders the HoodFlow product shell", async () => {
 });
 
 test("ships a bounded, interactive Robinhood mainnet experience", async () => {
-  const [page, intro, layout, css, packageJson, priceRoute, priceLib, historyRoute, stockHistory, docs, community, rewards, referralRoute, communityMarketRoute, communityChartRoute, analyticsClient] = await Promise.all([
+  const [page, intro, layout, css, packageJson, priceRoute, priceLib, historyRoute, stockHistory, docs, community, rewards, referralRoute, communityMarketRoute, communityChartRoute, analyticsClient, agents, agentLib, agentManifest, agentMarkets, agentQuoteRoute, agentGuard] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/robin-hood-intro.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -61,6 +61,12 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
     readFile(new URL("../app/api/community-markets/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/community-markets/chart/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/analytics-client.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/agents-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/hoodflow-agent.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/agents/hoodflow/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/agents/markets/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/agents/quote/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/agent-api-guard.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /"use client"/);
@@ -82,9 +88,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /ORDER REVIEW/);
   assert.match(page, /Spending limits stay enforced onchain/);
   assert.match(page, /Funds stay in your wallet/);
-  assert.match(page, /15 verified routes/);
+  assert.match(page, /executionReadyAssetCount/);
   assert.match(page, /Twenty-five assets/);
-  assert.match(page, /15 reviewed Stock Token routes are execution-enabled/);
+  assert.match(page, /reviewed Stock Token routes are execution-enabled/);
   assert.match(page, /Full-fill ready/);
   assert.match(page, /MSFT stays blocked after a deterministic-fork partial fill/);
   assert.match(page, /Use template/);
@@ -141,6 +147,13 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /HOODFLOW FEE/);
   assert.match(page, /MarketStatus/);
   assert.match(page, /label: "Crypto"/);
+  assert.match(page, /label: "Agents"/);
+  assert.match(page, /view === "agents"/);
+  assert.match(page, /AgentsWorkspace/);
+  assert.match(page, /openAgentMarket/);
+  assert.match(page, /agentSide/);
+  assert.match(page, /agentAmount/);
+  assert.match(page, /agentSlippageBps/);
   assert.match(page, /ReferralRewards/);
   assert.match(page, /href="\/docs"/);
   assert.match(docs, /Buy a Stock Token with USDG/);
@@ -148,6 +161,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(docs, /Reference price versus execution quote/);
   assert.match(docs, /Common messages/);
   assert.match(docs, /Discover tokens by contract address/);
+  assert.match(docs, /Structured preflight, human-controlled execution/);
+  assert.match(docs, /GET \/api\/agents\/markets/);
+  assert.match(docs, /POST \/api\/agents\/quote/);
   assert.match(community, /Indexed live markets/);
   assert.match(community, /metric-price/);
   assert.match(community, /metric-volume/);
@@ -187,6 +203,39 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(communityChartRoute, /item\.every\(Number\.isFinite\)/);
   assert.match(communityChartRoute, /status: timedOut \? 504/);
   assert.match(analyticsClient, /\| "settlement_selected"/);
+  assert.match(agents, /HOODFLOW FOR AGENTS/);
+  assert.match(agents, /Let an agent find the route/);
+  assert.match(agents, /You keep the signature/);
+  assert.match(agents, /AGENT API LIVE/);
+  assert.match(agents, /Virtuals ACP resource not yet published/);
+  assert.match(agents, /NOT EXECUTION-BOUND/);
+  assert.match(agents, /Open API manifest/);
+  assert.match(agents, /Stock Tokens are not shares/);
+  assert.match(agents, /Not affiliated with or endorsed by Robinhood Markets/);
+  assert.match(agents, /dataExpiresAt/);
+  assert.doesNotMatch(agents, /Agent pays|provider manifest|bounded quote job/i);
+  assert.match(agentLib, /readLiveReference/);
+  assert.match(agentLib, /point\.status !== "live"/);
+  assert.match(agentLib, /point\.oraclePaused !== false/);
+  assert.match(agentLib, /requiresUserSignature: true/);
+  assert.match(agentLib, /status: "route-reviewed"/);
+  assert.match(agentLib, /evaluateOracleDeviation/);
+  assert.match(agentLib, /MAX_ORACLE_DEVIATION_BPS = 500/);
+  assert.match(agentLib, /buildAgentMarketUrl/);
+  assert.match(agentLib, /marketUrl: handoffUrl\.href/);
+  assert.match(agentLib, /AGENT_DISABLED_MARKETS = new Set\(\["SGOV"\]\)/);
+  assert.match(agentManifest, /preflightActions/);
+  assert.match(agentManifest, /registryStatus: "not-published"/);
+  assert.match(agentMarkets, /finalWalletConfirmationRequired: true/);
+  assert.match(agentQuoteRoute, /RATE_LIMIT = 30/);
+  assert.match(agentQuoteRoute, /MAX_LOCAL_IN_FLIGHT = 6/);
+  assert.match(agentQuoteRoute, /takeDurableAgentQuoteLimit/);
+  assert.match(agentQuoteRoute, /Content-Type must be application\/json/);
+  assert.match(agentQuoteRoute, /AgentApiBodyTimeoutError/);
+  assert.match(agentGuard, /readCappedJson/);
+  assert.match(agentGuard, /agentQuoteRateLimits/);
+  assert.match(agentGuard, /RATE_LIMIT_ROW_TTL_MS/);
+  assert.match(agentGuard, /\.returning\(/);
   assert.match(communityMarketRoute, /Virtuals official/);
   assert.match(communityMarketRoute, /virtuals-bonding/);
   assert.match(css, /Authoritative responsive layout for the crypto workspace/);

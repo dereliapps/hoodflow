@@ -53,7 +53,7 @@
     "CUSO": "USO"
   },
   "launchAssets": ["AAPL", "NVDA", "GOOGL", "TSLA"],
-  "forkVerifiedAssets": ["AAPL", "AMD", "AMZN", "GOOGL", "INTC", "META", "MU", "NVDA", "SNDK", "SPCX", "TSLA", "QQQ", "SGOV", "SLV", "SPY"],
+  "forkVerifiedAssets": ["AAPL", "AMD", "AMZN", "GOOGL", "INTC", "META", "MU", "NVDA", "SNDK", "SPCX", "TSLA", "QQQ", "SLV", "SPY"],
   "v3VerifiedAssets": {
     "SGOV": 100,
     "SLV": 3000

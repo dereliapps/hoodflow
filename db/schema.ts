@@ -57,3 +57,12 @@ export const assetRequestVotes = sqliteTable("asset_request_votes", {
   index("asset_request_ticker_time_idx").on(table.ticker, table.createdAt),
   index("asset_request_wallet_time_idx").on(table.wallet, table.createdAt),
 ]);
+
+export const agentQuoteRateLimits = sqliteTable("agent_quote_rate_limits", {
+  key: text("key").primaryKey(),
+  windowStartedAt: integer("window_started_at", { mode: "timestamp" }).notNull(),
+  count: integer("count").notNull().default(0),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  index("agent_quote_rate_updated_idx").on(table.updatedAt),
+]);

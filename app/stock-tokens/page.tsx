@@ -10,9 +10,11 @@ export const metadata: Metadata = {
 };
 
 export default function StockTokensPage() {
+  const executionReadyCount = seoAssets.filter((asset) => asset.fullFill).length;
+  const watchOnlyCount = seoAssets.length - executionReadyCount;
   return <main className="seo-shell">
     <header className="seo-nav"><Link href="/" className="seo-logo">hoodflow<span>MAINNET BETA</span></Link><nav><Link href="/docs">Docs</Link><Link href="/how-it-works">How it works</Link><Link href="/security">Security</Link><Link href="/?view=assets" className="seo-cta">Open app</Link></nav></header>
-    <section className="seo-hero"><p>ROBINHOOD CHAIN MARKET DIRECTORY</p><h1>Stock Tokens,<br /><em>mapped for execution.</em></h1><div><p>Explore every canonical Stock Token and tokenized ETF currently indexed by HoodFlow. A trade button appears only after a reviewed Uniswap route passes a complete-input fork test.</p><span>25 indexed · 15 execution-enabled · 10 watch-only</span></div></section>
+    <section className="seo-hero"><p>ROBINHOOD CHAIN MARKET DIRECTORY</p><h1>Stock Tokens,<br /><em>mapped for execution.</em></h1><div><p>Explore every canonical Stock Token and tokenized ETF currently indexed by HoodFlow. A trade button appears only after a reviewed Uniswap route passes a complete-input fork test.</p><span>{seoAssets.length} indexed · {executionReadyCount} execution-enabled · {watchOnlyCount} watch-only</span></div></section>
     <section className="seo-directory">
       {seoAssets.map((asset, index) => <Link key={asset.ticker} href={`/stock-tokens/${asset.ticker.toLowerCase()}`} className="seo-asset-row">
         <span>{String(index + 1).padStart(2, "0")}</span><Image src={`/logos/${asset.ticker}.png`} alt="" width={40} height={40} /><div><strong>{asset.ticker}</strong><small>{asset.name}</small></div><p>{asset.type}</p><b className={asset.fullFill ? "ready" : "watch"}>{asset.fullFill ? "FULL-FILL READY" : "WATCH-ONLY"}</b><i>View market →</i>

@@ -63,11 +63,12 @@ function WorkspaceLoader({ label }: { label: string }) {
 }
 
 const CommunityTokens = dynamic(() => import("./community-tokens"), { ssr: false, loading: () => <WorkspaceLoader label="Loading crypto markets" /> });
+const AgentsWorkspace = dynamic(() => import("./agents-workspace"), { ssr: false, loading: () => <WorkspaceLoader label="Loading agent execution" /> });
 const AssetRequestBoard = dynamic(() => import("./asset-request-board"), { ssr: false, loading: () => <WorkspaceLoader label="Loading asset requests" /> });
 const ReferralRewards = dynamic(() => import("./referral-rewards"), { ssr: false, loading: () => <WorkspaceLoader label="Loading rewards" /> });
 const PrivyWalletRuntime = dynamic(() => import("./privy-wallet-runtime"), { ssr: false });
 
-type View = "overview" | "strategies" | "assets" | "asset" | "community" | "portfolio" | "rewards" | "marketplace" | "activity" | "controls";
+type View = "overview" | "strategies" | "assets" | "asset" | "community" | "agents" | "portfolio" | "rewards" | "marketplace" | "activity" | "controls";
 type StrategyKind = "Buy" | "Sell" | "DCA";
 type StrategyStatus = "Prepared" | "Paused" | "Confirmed" | "Cancelled";
 type MarketplaceSort = "featured" | "cadence" | "risk";
@@ -157,13 +158,14 @@ const assetRegistry = [
   { ticker: "TSLA", name: "Tesla", type: "Stock", fullFill: true, logo: "/logos/TSLA.png" },
   { ticker: "USAR", name: "USA Rare Earth", type: "Stock", fullFill: false, logo: "/logos/USAR.png" },
   { ticker: "QQQ", name: "Invesco QQQ", type: "ETF", fullFill: true, logo: "/logos/QQQ.png" },
-  { ticker: "SGOV", name: "iShares 0-3 Month Treasury", type: "ETF", fullFill: true, logo: "/logos/SGOV.png" },
+  { ticker: "SGOV", name: "iShares 0-3 Month Treasury", type: "ETF", fullFill: false, logo: "/logos/SGOV.png" },
   { ticker: "SLV", name: "iShares Silver Trust", type: "ETF", fullFill: true, logo: "/logos/SLV.png" },
   { ticker: "SPY", name: "SPDR S&P 500", type: "ETF", fullFill: true, logo: "/logos/SPY.png" },
   { ticker: "CUSO", name: "United States Oil Fund", type: "ETF", fullFill: false, logo: "/logos/CUSO.png" },
 ] as const;
 
 const assetByTicker = Object.fromEntries(assetRegistry.map((asset) => [asset.ticker, asset])) as Record<string, (typeof assetRegistry)[number]>;
+const executionReadyAssetCount = assetRegistry.filter((asset) => asset.fullFill).length;
 const priceSpotlight = ["AAPL", "NVDA", "TSLA", "GOOGL", "SPY"] as const;
 
 const marketplace = [
@@ -486,7 +488,7 @@ export default function Home() {
       }
       setPriceBook(data.prices);
       setPriceUpdatedAt(Date.parse(data.fetchedAt));
-      setPriceState(data.liveCount >= 15 ? "live" : data.liveCount > 0 ? "degraded" : "error");
+      setPriceState(data.liveCount >= executionReadyAssetCount ? "live" : data.liveCount > 0 ? "degraded" : "error");
       setPriceError(data.liveCount > 0 ? "" : "Live feed is delayed. HoodFlow is retrying automatically; trading remains locked until a verified price arrives.");
       if (data.liveCount > 0) {
         try { window.sessionStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(data)); } catch { /* Optional fast-return cache. */ }
@@ -675,11 +677,42 @@ export default function Home() {
       if (ticker && assetByTicker[ticker]) {
         setSelectedAssetTicker(ticker);
         setView("asset");
+        const agentSide = params.get("agentSide");
+        const agentAmount = params.get("agentAmount") ?? "";
+        const agentSlippageBps = Number(params.get("agentSlippageBps"));
+        const amountNumber = Number(agentAmount);
+        const amountDecimals = agentAmount.split(".")[1]?.length ?? 0;
+        const amountLimit = agentSide === "buy" ? 100_000 : 1_000_000;
+        const decimalLimit = agentSide === "buy" ? USDG_DECIMALS : STOCK_TOKEN_DECIMALS;
+        const validAgentIntent = isRoutedAsset(ticker)
+          && (agentSide === "buy" || agentSide === "sell")
+          && /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(agentAmount)
+          && Number.isFinite(amountNumber)
+          && amountNumber > 0
+          && amountNumber <= amountLimit
+          && amountDecimals <= decimalLimit
+          && Number.isInteger(agentSlippageBps)
+          && agentSlippageBps >= 1
+          && agentSlippageBps <= 500;
+        if (validAgentIntent) {
+          const nextKind = agentSide === "buy" ? "Buy" : "Sell";
+          setKind(nextKind);
+          setDraftName(`${ticker} instant ${agentSide}`);
+          setDraftAsset(ticker);
+          setDraftAmount(agentAmount);
+          setDraftSlippage(String(agentSlippageBps / 100));
+          setTransactionStep("");
+          composerQuoteRequestRef.current += 1;
+          composerQuoteKeyRef.current = "";
+          setComposerQuote(null);
+          setComposerQuoteError("");
+          setComposerOpen(true);
+        }
       } else if (/^\/crypto\/0x[a-fA-F0-9]{40}\/?$/.test(currentUrl.pathname)) {
         setView("community");
       } else if (params.get("ref")) {
         setView("rewards");
-      } else if (requestedView && ["overview", "strategies", "assets", "community", "portfolio", "rewards", "marketplace", "activity", "controls"].includes(requestedView)) {
+      } else if (requestedView && ["overview", "strategies", "assets", "community", "agents", "portfolio", "rewards", "marketplace", "activity", "controls"].includes(requestedView)) {
         setView(requestedView);
       } else if (view === "asset") {
         setView("assets");
@@ -1284,6 +1317,20 @@ export default function Home() {
     setComposerOpen(true);
   }
 
+  function openAgentMarket(ticker: string, intent?: { side: "buy" | "sell"; amount: string; slippageBps: number }) {
+    openAsset(ticker);
+    if (!intent) return;
+    openComposer(intent.side === "buy" ? "Buy" : "Sell", ticker);
+    setDraftAmount(intent.amount);
+    setDraftSlippage(String(intent.slippageBps / 100));
+    const url = new URL(window.location.href);
+    url.searchParams.set("asset", ticker);
+    url.searchParams.set("agentSide", intent.side);
+    url.searchParams.set("agentAmount", intent.amount);
+    url.searchParams.set("agentSlippageBps", String(intent.slippageBps));
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  }
+
   async function toggleStrategy(id: number) {
     const strategy = strategies.find((item) => item.id === id);
     if (!strategy || strategy.status === "Confirmed" || strategy.status === "Cancelled") return;
@@ -1705,6 +1752,7 @@ export default function Home() {
     { view: "overview", label: "Home" },
     { view: "assets", label: "Stock Tokens" },
     { view: "community", label: "Crypto" },
+    { view: "agents", label: "Agents" },
     { view: "portfolio", label: "Portfolio" },
     { view: "strategies", label: "DCA" },
     { view: "rewards", label: "Rewards" },
@@ -1737,7 +1785,7 @@ export default function Home() {
 
       {view === "overview" && (
         <section className="page overview-page hf-home">
-          <div className="hf-announcement"><span><i /> ROBINHOOD CHAIN MAINNET</span><strong>15 reviewed Stock Token routes are execution-enabled.</strong><button onClick={() => navigate("assets")}>See markets →</button></div>
+          <div className="hf-announcement"><span><i /> ROBINHOOD CHAIN MAINNET</span><strong>{executionReadyAssetCount} reviewed Stock Token routes are execution-enabled.</strong><button onClick={() => navigate("assets")}>See markets →</button></div>
           <div className="independence-notice"><strong>Independent interface built on Robinhood Chain.</strong><span>Not affiliated with or endorsed by Robinhood Markets, Inc.</span></div>
           <MarketStatus />
 
@@ -1752,7 +1800,7 @@ export default function Home() {
             </div>
             <aside className="hf-execution-card">
               <div className="hf-window-head"><span><i /> LIVE ROUTE DESK</span><b>BLOCK #{networkBlock}</b></div>
-              <div className="hf-window-title"><p>Reviewed execution markets</p><strong>{priceState === "loading" ? "15 routes ready · live feed connecting" : priceState === "error" ? "Routes ready · price check retrying" : `${priceCounts.live} oracle references ready`}</strong></div>
+              <div className="hf-window-title"><p>Reviewed execution markets</p><strong>{priceState === "loading" ? `${executionReadyAssetCount} routes ready · live feed connecting` : priceState === "error" ? "Routes ready · price check retrying" : `${priceCounts.live} oracle references ready`}</strong></div>
               <div className="hf-route-list">
                 {["AAPL", "NVDA", "SPY"].map((ticker) => <button key={ticker} onClick={() => openAsset(ticker)}><Mark ticker={ticker} small /><span><strong>{ticker} / USDG</strong><small>{isV3RoutedAsset(ticker) ? "Uniswap V3" : "Uniswap V4"} · full-fill verified</small></span><b>{priceBook[ticker]?.price ? formatPrice(priceBook[ticker].price) : <span className="price-skeleton route" aria-label="Live price loading" />}</b><i>→</i></button>)}
               </div>
@@ -1760,7 +1808,7 @@ export default function Home() {
             </aside>
           </section>
 
-          <div className="hf-proof-rail"><div><strong>25</strong><span>CANONICAL ASSETS INDEXED</span></div><div><strong>15</strong><span>FULL-FILL ROUTES READY</span></div><div><strong>V3 + V4</strong><span>REVIEWED LIQUIDITY</span></div><div><strong>10 MIN</strong><span>EXACT PERMIT WINDOW</span></div></div>
+          <div className="hf-proof-rail"><div><strong>25</strong><span>CANONICAL ASSETS INDEXED</span></div><div><strong>{executionReadyAssetCount}</strong><span>FULL-FILL ROUTES READY</span></div><div><strong>V3 + V4</strong><span>REVIEWED LIQUIDITY</span></div><div><strong>10 MIN</strong><span>EXACT PERMIT WINDOW</span></div></div>
 
           <section className="hf-thesis">
             <div><p className="eyebrow">WHY HOODFLOW</p><h2>A swap quote is easy.<br /><em>An executable route is harder.</em></h2></div>
@@ -1788,9 +1836,9 @@ export default function Home() {
             <article className="hf-first-order"><span>YOUR FIRST ROUTE</span><h2>Start with a quote.<br />Signing comes later.</h2><p>Choose a market and amount. HoodFlow checks the executable route before asking for any token permission.</p><button onClick={() => openComposer("Buy", "AAPL")}>Quote an AAPL buy →</button><small>No custody · no account · wallet confirmation required</small></article>
           </div>
 
-          <section className="hf-final-cta"><div><p className="eyebrow">ROBINHOOD CHAIN / MAINNET BETA</p><h2>Trade the route,<br /><em>not the promise.</em></h2></div><div><p>25 canonical markets are indexed. Fifteen are execution-enabled. The rest stay visible and blocked until their routes pass.</p><button onClick={() => navigate("assets")}>Open the market directory →</button></div></section>
+          <section className="hf-final-cta"><div><p className="eyebrow">ROBINHOOD CHAIN / MAINNET BETA</p><h2>Trade the route,<br /><em>not the promise.</em></h2></div><div><p>25 canonical markets are indexed. {executionReadyAssetCount} are execution-enabled. The rest stay visible and blocked until their routes pass.</p><button onClick={() => navigate("assets")}>Open the market directory →</button></div></section>
 
-          <section className="hf-faq"><p className="eyebrow">QUESTIONS BEFORE YOU SIGN</p><details><summary>Does HoodFlow custody my assets?</summary><p>No. The connected wallet signs the router transaction and received tokens remain in that wallet.</p></details><details><summary>Are Stock Tokens actual shares?</summary><p>No. Stock Tokens provide economic exposure without shareholder rights and may be restricted in your jurisdiction.</p></details><details><summary>Why are only 15 markets trade-enabled?</summary><p>HoodFlow keeps a token watch-only until a reviewed route completes a full-input fork execution and a fresh quote is available.</p></details><details><summary>Is HoodFlow independently audited?</summary><p>Not yet. Until a public final report exists, HoodFlow exposes its contract source, onchain addresses, automated checks, known limitations and a private responsible-disclosure channel on the <a href="/security">Security page</a>.</p></details></section>
+          <section className="hf-faq"><p className="eyebrow">QUESTIONS BEFORE YOU SIGN</p><details><summary>Does HoodFlow custody my assets?</summary><p>No. The connected wallet signs the router transaction and received tokens remain in that wallet.</p></details><details><summary>Are Stock Tokens actual shares?</summary><p>No. Stock Tokens provide economic exposure without shareholder rights and may be restricted in your jurisdiction.</p></details><details><summary>Why are only {executionReadyAssetCount} markets trade-enabled?</summary><p>HoodFlow keeps a token watch-only until a reviewed route completes a full-input fork execution and a fresh quote is available.</p></details><details><summary>Is HoodFlow independently audited?</summary><p>Not yet. Until a public final report exists, HoodFlow exposes its contract source, onchain addresses, automated checks, known limitations and a private responsible-disclosure channel on the <a href="/security">Security page</a>.</p></details></section>
         </section>
       )}
 
@@ -1874,6 +1922,8 @@ export default function Home() {
 
       {view === "community" && <CommunityTokens walletAddress={walletAddress} walletProvider={walletProvider} onWallet={handleWalletButton} notify={notify} onTradeConfirmed={qualifyReferral} />}
 
+      {view === "agents" && <AgentsWorkspace onOpenMarket={openAgentMarket} />}
+
       {view === "portfolio" && (
         <section className="page inner-page portfolio-page">
           <div className="inner-heading"><div><p className="eyebrow">MY PORTFOLIO</p><h1>Your positions,<br />read from the chain.</h1><p>Live wallet balances with token value, browser-tracked entry cost and confirmed HoodFlow receipts.</p></div><button className="primary-action" onClick={() => connected && walletProvider ? void refreshWalletBalances(walletAddress, new BrowserProvider(walletProvider, "any")) : handleWalletButton()}>{connected ? "Refresh wallet" : "Connect wallet"}</button></div>
@@ -1927,7 +1977,7 @@ export default function Home() {
           <div className="inner-heading"><div><p className="eyebrow">SECURITY & PERMISSIONS</p><h1>Your wallet stays in control.</h1><p>See what HoodFlow can do, what it cannot do, and every permission you have approved.</p></div></div>
           <div className="control-grid">
             <article className="control-card"><span>CUSTODY</span><strong>Funds stay in your wallet</strong><p>HoodFlow cannot withdraw assets by itself. Every Buy and Sell order requires your wallet confirmation.</p><b className="control-ok">YOU CONTROL</b></article>
-            <article className="control-card"><span>BUY & SELL</span><strong>15 verified routes</strong><p>Fresh quotes, maximum slippage protection, and exact short-lived order permissions.</p><b className="control-ok">LIVE</b></article>
+            <article className="control-card"><span>BUY & SELL</span><strong>{executionReadyAssetCount} verified routes</strong><p>Fresh quotes, maximum slippage protection, and exact short-lived order permissions.</p><b className="control-ok">LIVE</b></article>
             <article className="control-card dca-control"><span>RECURRING DCA</span><strong>{contractReady ? "Active on mainnet" : enginePaused ? "Ready to activate" : engineChecking ? "Verifying engine" : "Verification delayed"}</strong><p>{contractReady ? "Capped recurring strategies can be created and executed onchain." : enginePaused ? "Only the owner wallet can switch the DCA engine on." : contractStatus}</p><div><b className={`control-ok ${contractReady ? "" : "warning"}`}>{contractReady ? "LIVE" : engineChecking ? "CHECKING" : enginePaused ? "OWNER ACTION" : "AUTO RETRY"}</b>{!contractReady && !engineChecking && <button type="button" className="engine-retry" onClick={() => void refreshEngineStatus()}>Retry now</button>}</div></article>
             <article className="control-card"><span>RPC HEALTH</span><strong>{rpcHealth ? `${rpcHealth.endpoint} · ${rpcHealth.latencyMs} ms` : "Checking endpoints"}</strong><p>Server reads retry the configured RPC list automatically. Wallet transactions still use the endpoint selected inside your wallet.</p><b className="control-ok">{rpcHealth ? `${rpcHealth.configuredEndpoints} ENDPOINT${rpcHealth.configuredEndpoints === 1 ? "" : "S"}` : "CHECKING"}</b></article>
             <article className="control-card"><span>ENGINE CONTROL</span><strong>{engineOwner ? `${compactAddress(engineOwner)} · ${engineOwnerType}` : "Reading owner"}</strong><p>{engineOwnerType === "EOA" ? "The current owner is a single externally owned wallet. A multisig or timelock is not verified." : engineOwnerType === "Contract" ? "The controller is a contract, but its multisig or timelock policy has not been independently verified." : "Controller type is still being checked."}</p><b className={`control-ok ${engineOwnerType === "EOA" ? "warning" : ""}`}>{engineOwnerType === "EOA" ? "CENTRALIZATION RISK" : "VERIFY ONCHAIN"}</b></article>
@@ -1941,7 +1991,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Independent interface · Release 0.10.2</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Independent interface · Release 0.10.2</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("agents")}>Agents</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setComposerOpen(false); }}>
@@ -1952,10 +2002,10 @@ export default function Home() {
             </div>
             <form onSubmit={createStrategy}>
               <label>ORDER NAME<input name="name" value={draftName} onChange={(event) => setDraftName(event.target.value)} required disabled={onchainBusy} /></label>
-              <div className="asset-choice"><Mark ticker={draftAsset} /><label>ASSET <small>{kind === "DCA" ? "13 recurring V4 routes" : "15 verified swap routes"}</small><select name="asset" value={draftAsset} onChange={(event) => setDraftAsset(event.target.value)}>{assetRegistry.filter((asset) => asset.fullFill && (kind !== "DCA" || !isV3RoutedAsset(asset.ticker))).map((asset) => <option key={asset.ticker} value={asset.ticker}>{asset.ticker} · {asset.name} · {formatPrice(priceBook[asset.ticker]?.price)}</option>)}</select></label></div>
+              <div className="asset-choice"><Mark ticker={draftAsset} /><label>ASSET <small>{kind === "DCA" ? "13 recurring V4 routes" : `${executionReadyAssetCount} verified swap routes`}</small><select name="asset" value={draftAsset} onChange={(event) => setDraftAsset(event.target.value)}>{assetRegistry.filter((asset) => asset.fullFill && (kind !== "DCA" || !isV3RoutedAsset(asset.ticker))).map((asset) => <option key={asset.ticker} value={asset.ticker}>{asset.ticker} · {asset.name} · {formatPrice(priceBook[asset.ticker]?.price)}</option>)}</select></label></div>
               <div className="form-pair">
-                <label>{kind === "Buy" ? "TOTAL TO SPEND" : kind === "Sell" ? "AMOUNT TO SELL" : "EACH BUY"}<span className="input-unit"><input name="amount" type="number" min="0.000001" step="0.000001" value={draftAmount} onChange={(event) => setDraftAmount(event.target.value)} required disabled={onchainBusy} /><b>{kind === "Sell" ? draftAsset : "USDG"}</b></span></label>
-                <label>MAX SLIPPAGE<span className="input-unit"><input name="slippage" type="number" min="0.1" max="5" step="0.1" value={draftSlippage} onChange={(event) => setDraftSlippage(event.target.value)} required disabled={onchainBusy} /><b>%</b></span></label>
+                <label>{kind === "Buy" ? "TOTAL TO SPEND" : kind === "Sell" ? "AMOUNT TO SELL" : "EACH BUY"}<span className="input-unit"><input name="amount" type="number" min={kind === "Sell" ? "0.000000000000000001" : "0.000001"} step={kind === "Sell" ? "0.000000000000000001" : "0.000001"} value={draftAmount} onChange={(event) => setDraftAmount(event.target.value)} required disabled={onchainBusy} /><b>{kind === "Sell" ? draftAsset : "USDG"}</b></span></label>
+                <label>MAX SLIPPAGE<span className="input-unit"><input name="slippage" type="number" min="0.01" max="5" step="0.01" value={draftSlippage} onChange={(event) => setDraftSlippage(event.target.value)} required disabled={onchainBusy} /><b>%</b></span></label>
               </div>
               {kind === "DCA" && <div className="form-pair"><label>SCHEDULE<select name="frequency" value={draftFrequency} onChange={(event) => setDraftFrequency(event.target.value)} disabled={onchainBusy}><option>Daily</option><option>Weekly</option><option>Monthly</option></select></label><label>NUMBER OF BUYS<span className="input-unit"><input name="executions" type="number" min="2" max={draftFrequency === "Daily" ? "52" : draftFrequency === "Weekly" ? "52" : "12"} value={draftExecutions} onChange={(event) => setDraftExecutions(event.target.value)} disabled={onchainBusy} /><b>×</b></span></label></div>}
               <div className="live-order-banner"><i /><span><strong>{kind === "Buy" ? "Buy stock tokens with USDG" : kind === "Sell" ? `Sell ${draftAsset} back to USDG` : contractReady ? "Mainnet recurring strategy" : enginePaused ? "DCA engine awaits owner activation" : "Checking recurring engine"}</strong><small>{kind === "Buy" ? "Your wallet confirms a protected mainnet buy." : kind === "Sell" ? "Your wallet confirms an exact-token sell; USDG returns directly to you." : contractReady ? "The onchain engine enforces your schedule and lifetime cap." : enginePaused ? "Connect the owner wallet and confirm one activation transaction." : "Buy and Sell remain available while the engine check completes."}</small></span><b>{kind !== "DCA" || contractReady ? "LIVE" : enginePaused ? "READY" : "CHECKING"}</b></div>

@@ -27,7 +27,7 @@ export const seoAssets: SeoAsset[] = [
   { ticker: "TSLA", name: "Tesla", type: "Stock Token", fullFill: true },
   { ticker: "USAR", name: "USA Rare Earth", type: "Stock Token", fullFill: false },
   { ticker: "QQQ", name: "Invesco QQQ", type: "Tokenized ETF", fullFill: true },
-  { ticker: "SGOV", name: "iShares 0-3 Month Treasury", type: "Tokenized ETF", fullFill: true },
+  { ticker: "SGOV", name: "iShares 0-3 Month Treasury", type: "Tokenized ETF", fullFill: false },
   { ticker: "SLV", name: "iShares Silver Trust", type: "Tokenized ETF", fullFill: true },
   { ticker: "SPY", name: "SPDR S&P 500", type: "Tokenized ETF", fullFill: true },
   { ticker: "CUSO", name: "United States Oil Fund", type: "Tokenized ETF", fullFill: false },

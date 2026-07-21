@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 };
 
 const gates = [
-  ["Live", "Direct execution", "Automatic V3/V4 quotes, minimum output and exact short-lived permissions for 15 reviewed routes."],
+  ["Live", "Direct execution", "Automatic V3/V4 quotes, minimum output and exact short-lived permissions for 14 currently reviewed routes."],
   ["Live", "Wallet onboarding", "Privy social login, embedded wallets, browser wallets and WalletConnect on Robinhood Chain."],
   ["Live", "Portfolio & transparency", "Onchain balances, honest local cost basis, fee disclosure, market hours and controller visibility."],
   ["In progress", "Independent audit", "Publish an independent smart-contract and interface assessment with a public remediation log."],

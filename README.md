@@ -26,6 +26,17 @@ HoodFlow indexes the official Virtuals Robinhood Chain launch feed and keeps bon
 - Durable referral profiles, verified first-trade points, and shareable links. Public Season 0 rankings are marked **Coming Soon** until the leaderboard opens.
 - Selectable USDG, VIRTUAL, and WETH settlement with atomic V2 routing through a market's native quote token when needed.
 
+## Agent execution API
+
+HoodFlow exposes a public, read-only market resource and a bounded quote-preflight action for agents. The preflight reads the reviewed Robinhood Chain route and live oracle state, rejects excessive DEX/oracle deviation, and returns a short-lived handoff that preserves the asset, side, exact input, and slippage choice. It never submits a transaction or signs for the user; HoodFlow requests a fresh execution-bound quote before the connected wallet confirms anything.
+
+- [Open the Agents workspace](https://hoodflow.app/?view=agents)
+- [`GET /api/agents/markets`](https://hoodflow.app/api/agents/markets) — reviewed USDG markets and execution policy.
+- [`POST /api/agents/quote`](https://hoodflow.app/api/agents/quote) — indicative, rate-limited preflight with oracle-deviation protection.
+- [`GET /api/agents/hoodflow`](https://hoodflow.app/api/agents/hoodflow) — capability manifest and input schema.
+
+The API surface is ready for provider onboarding, but HoodFlow is not yet published as a live Virtuals ACP provider. Registry publication, commercial terms, and any future scoped agent signer remain separate release gates.
+
 ## Why the launchpad adapter exists
 
 A launchpad token can have a pair address while still trading on a bonding curve. Treating that empty pair as a normal DEX market produces the misleading “no route” state that originally affected CLUSTY and other Virtuals prototypes.

@@ -21,7 +21,7 @@
 
 - 27 local engine, oracle and adapter scenarios pass.
 - All 25 canonical Robinhood stock/ETF tokens, USDG and 8 protocol contracts are checked by `npm run infra:verify:mainnet`.
-- Fifteen direct Buy/Sell routes are enabled after full-input fork verification. Thirteen use the reviewed V4 adapter path and two use reviewed V3 routes.
+- Fourteen direct Buy/Sell routes are enabled after full-input fork verification. Thirteen use the reviewed V4 adapter path and SLV uses the reviewed V3 route.
 - A two-execution, 2 USDG full-engine canary verifies budget completion, replay protection, zero custody, and cleared allowances via `npm run infra:verify:canary`.
 - The fork verification performs no real-chain broadcast.
 

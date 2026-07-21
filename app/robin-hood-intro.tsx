@@ -153,7 +153,6 @@ export default function RobinHoodIntro() {
   }, []);
 
   const finish = useCallback(() => {
-    if (!showIntroRef.current) return;
     showIntroRef.current = false;
     rememberVisit();
     clearRuntime();
@@ -316,7 +315,6 @@ export default function RobinHoodIntro() {
   }, []);
 
   const skip = useCallback(() => {
-    if (!showIntroRef.current) return;
     setStep("leaving");
     rememberVisit();
     schedule(finish, 180);
