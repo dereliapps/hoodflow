@@ -181,14 +181,14 @@ export default function AgentsWorkspace({ onOpenMarket, onOpenCommunityMarket }:
 
   return (
     <section className="page inner-page agents-page">
-      <div className="agents-disclosure"><strong>Independent interface built on Robinhood Chain. Not affiliated with or endorsed by Robinhood Markets, Inc.</strong><span>Stock Tokens are not shares and may be restricted in your jurisdiction. Review eligibility and product risks before transacting.</span></div>
+      <div className="agents-disclosure"><span>Stock Tokens are not shares and may be restricted in your jurisdiction. Review eligibility and product risks before transacting.</span></div>
       <header className="agents-hero">
         <div className="agents-hero-copy">
           <div className="agents-status-line"><span><i /> RAGRET AGENT LIVE</span><b>Deterministic engine · no LLM bill</b></div>
           <p className="eyebrow">HOODFLOW FOR AGENTS</p>
           <h1>Print the road<br /><em>you didn&apos;t take.</em></h1>
           <p>RAGRET puts the same hypothetical USDG down a Stock Token path and one exact community-token path, then prints the 24-hour gap as a shareable receipt. No wallet scan, no transaction claim, no paid LLM call.</p>
-          <div className="agents-hero-actions"><button className="ragret-hero-trigger" onClick={scrollToRagret}>Print a RAGRET receipt <span>↓</span></button><button onClick={scrollToPreflight}>Run a preflight <span>↓</span></button><a href="/api/agents/hoodflow" target="_blank" rel="noreferrer">API <span>↗</span></a></div>
+          <div className="agents-hero-actions"><button className="ragret-hero-trigger" onClick={scrollToRagret}>Print a RAGRET receipt <span>↓</span></button><button onClick={scrollToPreflight}>Run a preflight <span>↓</span></button><a href="/docs#agents">API guide <span>→</span></a></div>
         </div>
         <aside className="agents-signal-card">
           <span>AVAILABLE NOW</span>
@@ -252,7 +252,7 @@ export default function AgentsWorkspace({ onOpenMarket, onOpenCommunityMarket }:
       <section className="agents-integration">
         <div><p className="eyebrow">THE PROVIDER SURFACE</p><h2>Useful to an agent.<br /><em>Understandable to a person.</em></h2></div>
         <div className="agents-endpoints">
-          <article><span>RESOURCE · GET</span><strong>/api/agents/markets</strong><p>Execution-ready tickers, token addresses, settlement asset and route policy.</p><a href="/api/agents/markets" target="_blank" rel="noreferrer">Inspect JSON ↗</a></article>
+          <article><span>RESOURCE · GET</span><strong>/api/agents/markets</strong><p>Execution-ready tickers, token addresses, settlement asset and route policy.</p><a href="/api/agents/markets">Inspect JSON →</a></article>
           <article><span>SCENARIO · POST</span><strong>/api/agents/ragret</strong><p>Deterministic 24-hour counterfactual receipt. No wallet read, transaction, signature or LLM call.</p><button onClick={scrollToRagret}>Print one above ↑</button></article>
           <article><span>PREFLIGHT · POST</span><strong>/api/agents/quote</strong><p>Exact-input route check with an indicative floor, oracle deviation guard and 75-second data expiry.</p><button onClick={scrollToPreflight}>Try it above ↑</button></article>
           <article><span>EXECUTION · HANDOFF</span><strong>HoodFlow market</strong><p>Side, amount and slippage are prefilled. HoodFlow requotes before the user confirms the router order.</p><button onClick={() => onOpenMarket(asset)}>Open {asset} →</button></article>

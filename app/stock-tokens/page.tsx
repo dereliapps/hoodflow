@@ -21,6 +21,6 @@ export default function StockTokensPage() {
       </Link>)}
     </section>
     <section className="seo-risk"><strong>Stock Tokens are not shares.</strong><p>They may be restricted in your jurisdiction and do not provide shareholder rights. Oracle prices are references; every execution receives a fresh DEX quote before wallet confirmation.</p></section>
-    <footer className="seo-footer"><span>Independent interface built on Robinhood Chain. Not affiliated with Robinhood Markets, Inc.</span><Link href="/">Trade with HoodFlow →</Link></footer>
+    <footer className="seo-footer"><Link href="/">Trade with HoodFlow →</Link></footer>
   </main>;
 }

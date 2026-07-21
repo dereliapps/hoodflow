@@ -110,7 +110,7 @@ export default function DocsPage() {
           <p>HoodFlow exposes a public read-only market resource and a bounded preflight action for AI agents. A successful response verifies the configured DEX route, the current Chainlink reference, the token&apos;s oracle-pause state and maximum DEX-to-oracle deviation. It is indicative rather than execution-bound: HoodFlow requotes before the wallet signs.</p>
           <div className="docs-split"><article><span>MARKET RESOURCE</span><h3>Discover reviewed routes</h3><p><code>GET /api/agents/markets</code> returns the currently exposed route-reviewed Stock Token markets, addresses, settlement asset and execution policy.</p></article><article className="accent"><span>PREFLIGHT ACTION</span><h3>Carry intent, then requote</h3><p><code>POST /api/agents/quote</code> accepts the asset, side, exact amount and slippage. The handoff preserves those inputs, then requests a fresh execution-bound quote for final wallet confirmation.</p></article></div>
           <div className="docs-callout"><strong>Virtuals ACP status</strong><p>The API surface is structured for provider onboarding, but HoodFlow is not claiming a live Virtuals ACP registry listing yet. Registry publication, commercial terms and any future scoped signer are separate release gates.</p></div>
-          <a className="docs-address" href="/api/agents/hoodflow" target="_blank" rel="noreferrer">Inspect the HoodFlow agent API manifest ↗</a>
+          <a className="docs-address" href="/api/agents/hoodflow">Open the live JSON manifest →</a>
         </section>
 
         <section id="community" className="docs-section">
@@ -150,7 +150,7 @@ export default function DocsPage() {
       </div>
     </div>
 
-    <section className="seo-risk"><strong>Stock Tokens are not shares.</strong><p>They may be restricted in your jurisdiction and do not provide shareholder rights. HoodFlow is an independent interface built on Robinhood Chain and is not affiliated with Robinhood Markets, Inc.</p></section>
+    <section className="seo-risk"><strong>Stock Tokens are not shares.</strong><p>They may be restricted in your jurisdiction and do not provide shareholder rights.</p></section>
     <footer className="seo-footer"><span>Documentation · Release 0.10.2</span><Link href="/learn">Read plain-language guides</Link><Link href="/security">Review security & known limitations →</Link><a href="https://x.com/hoodfloow" target="_blank" rel="noreferrer">𝕏 @hoodfloow</a></footer>
   </main>;
 }
