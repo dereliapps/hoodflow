@@ -1294,7 +1294,7 @@ footer .x-social { display: inline-flex; align-items: center; gap: 5px; color: #
 
 /* Agent execution workspace */
 .agents-page { --agent-green: #37f08a; --agent-dark: #101714; --agent-line: #d8dfd9; padding-top: 34px; }
-.agents-disclosure { margin-bottom: 14px; padding: 15px 18px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border: 1px solid #d8ded8; border-radius: 12px; color: #58645d; background: #f8faf6; font-size: 14px; line-height: 1.5; }.agents-disclosure strong { color: #24332b; }.agents-disclosure span { max-width: 530px; text-align: right; }
+.agents-disclosure { margin-bottom: 14px; padding: 15px 18px; display: flex; align-items: center; justify-content: flex-start; gap: 24px; border: 1px solid #d8ded8; border-radius: 12px; color: #58645d; background: #f8faf6; font-size: 14px; line-height: 1.5; }.agents-disclosure span { max-width: 760px; text-align: left; }
 .agents-hero { min-height: 560px; overflow: hidden; display: grid; grid-template-columns: minmax(0,1.15fr) minmax(340px,.85fr); border: 1px solid #24322b; border-radius: 28px; color: #edf6f0; background: radial-gradient(circle at 70% 18%,rgba(55,240,138,.16),transparent 29%),linear-gradient(145deg,#111b16,#090e0c 72%); box-shadow: 0 34px 85px rgba(13,28,20,.14); }
 .agents-hero-copy { padding: 58px 52px 50px; display: flex; flex-direction: column; justify-content: center; }
 .agents-status-line { margin-bottom: 46px; display: flex; align-items: center; gap: 15px; color: #8e9e95; font: 650 8px var(--font-ibm-plex-mono); letter-spacing: .08em; }

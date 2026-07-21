@@ -34,8 +34,8 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(html, /THE EXECUTION LAYER FOR STOCK TOKENS/);
   assert.match(html, /A swap quote is easy/);
   assert.match(html, /An executable route is harder/);
-  assert.match(html, /Independent interface built on Robinhood Chain/);
-  assert.match(html, /Not affiliated with or endorsed by Robinhood Markets, Inc/);
+  assert.doesNotMatch(html, /Independent interface built on Robinhood Chain/);
+  assert.doesNotMatch(html, /Not affiliated with or endorsed by Robinhood Markets, Inc/);
   assert.match(html, /Stock Tokens are not shares/);
   assert.match(html, /Compare live routes/);
   assert.match(html, /Robinhood Chain/);
@@ -209,9 +209,10 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(agents, /AGENT API LIVE/);
   assert.match(agents, /Virtuals ACP resource not yet published/);
   assert.match(agents, /NOT EXECUTION-BOUND/);
-  assert.match(agents, /Open API manifest/);
+  assert.match(agents, /View API guide/);
+  assert.match(agents, /href="\/docs#agents"/);
   assert.match(agents, /Stock Tokens are not shares/);
-  assert.match(agents, /Not affiliated with or endorsed by Robinhood Markets/);
+  assert.doesNotMatch(agents, /Not affiliated with or endorsed by Robinhood Markets/);
   assert.match(agents, /dataExpiresAt/);
   assert.doesNotMatch(agents, /Agent pays|provider manifest|bounded quote job/i);
   assert.match(agentLib, /readLiveReference/);

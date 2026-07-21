@@ -173,14 +173,14 @@ export default function AgentsWorkspace({ onOpenMarket }: Props) {
 
   return (
     <section className="page inner-page agents-page">
-      <div className="agents-disclosure"><strong>Independent interface built on Robinhood Chain. Not affiliated with or endorsed by Robinhood Markets, Inc.</strong><span>Stock Tokens are not shares and may be restricted in your jurisdiction. Review eligibility and product risks before transacting.</span></div>
+      <div className="agents-disclosure"><span>Stock Tokens are not shares and may be restricted in your jurisdiction. Review eligibility and product risks before transacting.</span></div>
       <header className="agents-hero">
         <div className="agents-hero-copy">
           <div className="agents-status-line"><span><i /> PUBLIC AGENT API LIVE</span><b>Virtuals ACP resource not yet published</b></div>
           <p className="eyebrow">HOODFLOW FOR AGENTS</p>
           <h1>Let an agent find the route.<br /><em>You keep the signature.</em></h1>
           <p>Give an AI agent a structured market registry and a bounded preflight action. HoodFlow checks reviewed Robinhood Chain liquidity, rejects unsafe oracle deviation, then carries the exact intent into a fresh wallet-confirmed order.</p>
-          <div className="agents-hero-actions"><a href="/api/agents/hoodflow" target="_blank" rel="noreferrer">Open API manifest <span>↗</span></a><button onClick={scrollToPreflight}>Run a preflight <span>↓</span></button></div>
+          <div className="agents-hero-actions"><a href="/docs#agents">View API guide <span>→</span></a><button onClick={scrollToPreflight}>Run a preflight <span>↓</span></button></div>
         </div>
         <aside className="agents-signal-card">
           <span>AVAILABLE NOW</span>
@@ -237,7 +237,7 @@ export default function AgentsWorkspace({ onOpenMarket }: Props) {
       <section className="agents-integration">
         <div><p className="eyebrow">THE PROVIDER SURFACE</p><h2>Useful to an agent.<br /><em>Understandable to a person.</em></h2></div>
         <div className="agents-endpoints">
-          <article><span>RESOURCE · GET</span><strong>/api/agents/markets</strong><p>Execution-ready tickers, token addresses, settlement asset and route policy.</p><a href="/api/agents/markets" target="_blank" rel="noreferrer">Inspect JSON ↗</a></article>
+          <article><span>RESOURCE · GET</span><strong>/api/agents/markets</strong><p>Execution-ready tickers, token addresses, settlement asset and route policy.</p><a href="/api/agents/markets">Inspect JSON →</a></article>
           <article><span>PREFLIGHT · POST</span><strong>/api/agents/quote</strong><p>Exact-input route check with an indicative floor, oracle deviation guard and 75-second data expiry.</p><button onClick={scrollToPreflight}>Try it above ↑</button></article>
           <article><span>EXECUTION · HANDOFF</span><strong>HoodFlow market</strong><p>Side, amount and slippage are prefilled. HoodFlow requotes before the user confirms the router order.</p><button onClick={() => onOpenMarket(asset)}>Open {asset} →</button></article>
         </div>

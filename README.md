@@ -4,7 +4,7 @@ HoodFlow is an independent, self-custody execution interface for Robinhood Chain
 
 Live product: [hoodflow.app](https://hoodflow.app)
 
-> Independent interface built on Robinhood Chain. Not affiliated with or endorsed by Robinhood Markets, Inc. Stock Tokens are not shares and may be restricted in your jurisdiction.
+> Stock Tokens are not shares and may be restricted in your jurisdiction.
 
 ## Virtuals on Robinhood Chain
 
