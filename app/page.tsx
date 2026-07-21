@@ -1331,6 +1331,13 @@ export default function Home() {
     window.history.replaceState({}, "", `${url.pathname}${url.search}`);
   }
 
+  function openAgentCommunityMarket(address: string) {
+    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) return;
+    setView("community");
+    window.history.pushState({}, "", `/crypto/${address.toLowerCase()}`);
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
+  }
+
   async function toggleStrategy(id: number) {
     const strategy = strategies.find((item) => item.id === id);
     if (!strategy || strategy.status === "Confirmed" || strategy.status === "Cancelled") return;
@@ -1922,7 +1929,7 @@ export default function Home() {
 
       {view === "community" && <CommunityTokens walletAddress={walletAddress} walletProvider={walletProvider} onWallet={handleWalletButton} notify={notify} onTradeConfirmed={qualifyReferral} />}
 
-      {view === "agents" && <AgentsWorkspace onOpenMarket={openAgentMarket} />}
+      {view === "agents" && <AgentsWorkspace onOpenMarket={openAgentMarket} onOpenCommunityMarket={openAgentCommunityMarket} />}
 
       {view === "portfolio" && (
         <section className="page inner-page portfolio-page">

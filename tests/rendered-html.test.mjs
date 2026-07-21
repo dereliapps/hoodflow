@@ -44,7 +44,7 @@ test("server-renders the HoodFlow product shell", async () => {
 });
 
 test("ships a bounded, interactive Robinhood mainnet experience", async () => {
-  const [page, intro, layout, css, packageJson, priceRoute, priceLib, historyRoute, stockHistory, docs, community, rewards, referralRoute, communityMarketRoute, communityChartRoute, analyticsClient, agents, agentLib, agentManifest, agentMarkets, agentQuoteRoute, agentGuard] = await Promise.all([
+  const [page, intro, layout, css, packageJson, priceRoute, priceLib, historyRoute, stockHistory, docs, community, rewards, referralRoute, communityMarketRoute, communityChartRoute, analyticsClient, agents, agentLib, agentManifest, agentMarkets, agentQuoteRoute, agentGuard, ragretUi, ragretLib, ragretSources, ragretRoute] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/robin-hood-intro.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -67,6 +67,10 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
     readFile(new URL("../app/api/agents/markets/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/agents/quote/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/agent-api-guard.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/ragret-receipt.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/ragret.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/ragret-sources.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/agents/ragret/route.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /"use client"/);
@@ -204,12 +208,12 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(communityChartRoute, /status: timedOut \? 504/);
   assert.match(analyticsClient, /\| "settlement_selected"/);
   assert.match(agents, /HOODFLOW FOR AGENTS/);
-  assert.match(agents, /Let an agent find the route/);
-  assert.match(agents, /You keep the signature/);
-  assert.match(agents, /AGENT API LIVE/);
-  assert.match(agents, /Virtuals ACP resource not yet published/);
+  assert.match(agents, /Print the road/);
+  assert.match(agents, /you didn&apos;t take/);
+  assert.match(agents, /RAGRET AGENT LIVE/);
+  assert.match(agents, /no LLM bill/);
   assert.match(agents, /NOT EXECUTION-BOUND/);
-  assert.match(agents, /Open API manifest/);
+  assert.match(agents, /Print a RAGRET receipt/);
   assert.match(agents, /Stock Tokens are not shares/);
   assert.match(agents, /Not affiliated with or endorsed by Robinhood Markets/);
   assert.match(agents, /dataExpiresAt/);
@@ -225,6 +229,8 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(agentLib, /marketUrl: handoffUrl\.href/);
   assert.match(agentLib, /AGENT_DISABLED_MARKETS = new Set\(\["SGOV"\]\)/);
   assert.match(agentManifest, /preflightActions/);
+  assert.match(agentManifest, /scenarioActions/);
+  assert.match(agentManifest, /\/api\/agents\/ragret/);
   assert.match(agentManifest, /registryStatus: "not-published"/);
   assert.match(agentMarkets, /finalWalletConfirmationRequired: true/);
   assert.match(agentQuoteRoute, /RATE_LIMIT = 30/);
@@ -236,6 +242,19 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(agentGuard, /agentQuoteRateLimits/);
   assert.match(agentGuard, /RATE_LIMIT_ROW_TTL_MS/);
   assert.match(agentGuard, /\.returning\(/);
+  assert.match(ragretUi, /RAGRET \/\/ 24H SCENARIO/);
+  assert.match(ragretUi, /SCENARIO ONLY · NOT A TRANSACTION RECEIPT/);
+  assert.match(ragretUi, /ragretStock/);
+  assert.match(ragretUi, /Share PNG/);
+  assert.match(ragretUi, /\/ragret-logo\.png/);
+  assert.match(ragretLib, /transactionProof: false/);
+  assert.match(ragretLib, /RAGRET_FORMULA_VERSION/);
+  assert.match(ragretSources, /PUBLIC_ROBINHOOD_PRICE_RPC_URL/);
+  assert.match(ragretSources, /DIRECT_RPC_MAX_BINARY_STEPS = 9/);
+  assert.match(ragretRoute, /takeDurableAgentQuoteLimit\(request, RATE_LIMIT, RATE_WINDOW_MS, "ragret"\)/);
+  assert.match(ragretRoute, /No wallet activity was inspected/);
+  assert.match(css, /RAGRET deterministic scenario agent/);
+  assert.match(css, /\.ragret-receipt/);
   assert.match(communityMarketRoute, /Virtuals official/);
   assert.match(communityMarketRoute, /virtuals-bonding/);
   assert.match(css, /Authoritative responsive layout for the crypto workspace/);
