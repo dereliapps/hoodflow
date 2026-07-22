@@ -221,7 +221,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(communityChartRoute, /geckoterminal-cache/);
   assert.match(communityChartRoute, /item\.every\(Number\.isFinite\)/);
   assert.match(communityChartRoute, /status: timedOut \? 504/);
-  assert.doesNotMatch(community, /api\.geckoterminal\.com\/api\/v2\/networks\/robinhood\/pools/);
+  assert.match(community, /fetchDirectChartFallback/);
+  assert.match(community, /tokens\/\$\{token\}\/pools\?page=1&order=h24_volume_usd_desc/);
+  assert.match(community, /points\.length < 2\) points = await fetchDirectChartFallback/);
   assert.match(worker, /40,\s*50,\s*84/);
   assert.match(worker, /content-security-policy/);
   assert.match(worker, /max-age=31536000, immutable/);

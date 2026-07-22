@@ -84,6 +84,8 @@ type CommunityMarket = {
 type MarketSort = "trending" | "volume" | "gainers" | "losers" | "liquidity" | "new";
 type ChartRange = "1D" | "7D" | "30D";
 type ChartPoint = { time: number; open: number; high: number; low: number; close: number; volume: number };
+type GeckoPoolList = { data?: Array<{ id?: string }> };
+type GeckoOhlcv = { data?: { attributes?: { ohlcv_list?: Array<[number, number, number, number, number, number]> } } };
 type Props = {
   walletAddress: string;
   walletProvider: Eip1193Provider | null;
@@ -110,6 +112,43 @@ const MARKET_SORT_OPTIONS: Array<{ value: MarketSort; label: string; description
 
 function message(error: unknown) {
   return friendlyExecutionError(error);
+}
+
+async function fetchDirectChartFallback(token: string, range: ChartRange, signal: AbortSignal) {
+  const poolResponse = await fetch(`https://api.geckoterminal.com/api/v2/networks/robinhood/tokens/${token}/pools?page=1&order=h24_volume_usd_desc`, {
+    headers: { accept: "application/json;version=20230203" },
+    signal,
+  });
+  if (!poolResponse.ok) throw new Error("The backup chart provider is temporarily unavailable.");
+  const poolPayload = await poolResponse.json() as GeckoPoolList;
+  const pools = (poolPayload.data ?? [])
+    .map((item) => item.id?.replace(/^robinhood_/i, "").toLowerCase() ?? "")
+    .filter((item) => /^0x(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(item))
+    .slice(0, 3);
+  const config = range === "1D" ? { timeframe: "minute", aggregate: "15", limit: "96" }
+    : range === "30D" ? { timeframe: "hour", aggregate: "4", limit: "180" }
+      : { timeframe: "hour", aggregate: "1", limit: "168" };
+  for (const pool of pools) {
+    try {
+      const url = new URL(`https://api.geckoterminal.com/api/v2/networks/robinhood/pools/${pool}/ohlcv/${config.timeframe}`);
+      url.searchParams.set("aggregate", config.aggregate);
+      url.searchParams.set("limit", config.limit);
+      url.searchParams.set("currency", "usd");
+      url.searchParams.set("token", token);
+      url.searchParams.set("include_empty_intervals", "true");
+      const response = await fetch(url, { headers: { accept: "application/json;version=20230203" }, signal });
+      if (!response.ok) continue;
+      const payload = await response.json() as GeckoOhlcv;
+      const points = (payload.data?.attributes?.ohlcv_list ?? [])
+        .filter((item) => Array.isArray(item) && item.length >= 6 && item.every(Number.isFinite))
+        .map(([time, open, high, low, close, volume]) => ({ time, open, high, low, close, volume }))
+        .sort((left, right) => left.time - right.time);
+      if (points.length >= 2) return points;
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+    }
+  }
+  throw new Error("No verified onchain chart history is available for this token yet.");
 }
 
 async function requireActiveWallet(provider: Eip1193Provider, expectedAddress: string) {
@@ -351,7 +390,8 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
         const params = new URLSearchParams({ pool: activeMarket.pairAddress, token: activeMarket.address, range: chartRange });
         const response = await fetch(`/api/community-markets/chart?${params}`, { cache: "no-store", signal: controller.signal });
         const payload = await response.json() as { points?: ChartPoint[]; error?: string };
-        const points = Array.isArray(payload.points) ? payload.points : [];
+        let points = response.ok && Array.isArray(payload.points) ? payload.points : [];
+        if (points.length < 2) points = await fetchDirectChartFallback(activeMarket.address, chartRange, controller.signal);
         if (points.length < 2) throw new Error(payload.error || "No chart history is available yet.");
         setChartPoints(points);
       } catch (error) {
