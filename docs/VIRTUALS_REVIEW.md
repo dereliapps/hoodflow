@@ -2,6 +2,19 @@
 
 HoodFlow is a self-custody market and execution interface for Robinhood Chain. Its Virtuals integration is live at [hoodflow.app](https://hoodflow.app/?view=community) and is intentionally split into two lifecycle states.
 
+## Public Agent API
+
+HoodFlow also exposes a bounded, read-only agent surface:
+
+- [Capability and safety manifest](https://hoodflow.app/api/agents/hoodflow)
+- [Route-reviewed Stock Token markets](https://hoodflow.app/api/agents/markets)
+- `POST https://hoodflow.app/api/agents/quote` for a short-lived indicative preflight
+- [Interactive agent workspace](https://hoodflow.app/?view=agents)
+
+The quote endpoint validates the market, finds a reviewed Uniswap V3 or V4 route, checks a live oracle reference and maximum deviation, computes an indicative minimum output, and returns a 75-second handoff. It cannot connect a wallet, approve tokens, sign, or submit a transaction. HoodFlow requotes the intent before the user's wallet confirms it.
+
+This is an API-only provider candidate. It is not a published Virtuals ACP resource, an ACP job flow, or an EconomyOS Agent Wallet integration.
+
 ## What is live
 
 1. Query the official Virtuals API with the `ROBINHOOD` chain filter.
@@ -24,6 +37,18 @@ Uniswap V2 / two pools / one Universal Router execution path
 ```
 
 The proof contains the exact block, contracts, pools, reserves, path, and raw integer output. It is evidence of route discovery, not a guaranteed future price. HoodFlow re-quotes before every wallet signature.
+
+## Completed user-signed execution proof
+
+On 2026-07-22, a user wallet completed a HoodFlow mainnet trade after an Agent API preflight:
+
+- Input: `1.0 USDG`
+- Output: `0.00937386626109376 INTC`
+- Robinhood Chain block: `16478330`
+- [Transaction receipt](https://robinhoodchain.blockscout.com/tx/0x7c9d4dcea9c32b5df03283b010617084499d5ab29ca8a093c9f49a6e5c2303c3)
+- [Decoded proof](proofs/executed-intc-buy-4663.json)
+
+The receipt independently proves the wallet/token trade. The preceding offchain preflight is builder-attested and is not cryptographically bound to the transaction. The agent did not sign or submit the trade, and this proof is not represented as an ACP job.
 
 ## Safety boundary
 
