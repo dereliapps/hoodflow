@@ -15,10 +15,16 @@ const allowedEvents = new Set([
   "transaction_failed",
   "community_token_imported",
   "community_market_opened",
+  "settlement_selected",
   "referral_registered",
   "referral_shared",
   "referral_qualified",
 ]);
+
+const MAX_BODY_BYTES = 4_096;
+const RATE_WINDOW_MS = 60_000;
+const RATE_LIMIT = 60;
+const writeRate = new Map<string, { count: number; resetAt: number }>();
 
 function clean(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -26,7 +32,32 @@ function clean(value: unknown, max: number) {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as {
+    const origin = request.headers.get("origin");
+    if (origin && new URL(origin).origin !== new URL(request.url).origin) {
+      return NextResponse.json({ ok: false }, { status: 403 });
+    }
+    const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+    const contentLength = Number(request.headers.get("content-length") || 0);
+    if (!contentType.startsWith("application/json") || contentLength > MAX_BODY_BYTES) {
+      return NextResponse.json({ ok: false }, { status: 415 });
+    }
+    const now = Date.now();
+    const client = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const previous = writeRate.get(client);
+    const rate = !previous || previous.resetAt <= now ? { count: 0, resetAt: now + RATE_WINDOW_MS } : previous;
+    rate.count += 1;
+    writeRate.set(client, rate);
+    if (writeRate.size > 5_000) {
+      for (const [key, value] of writeRate) if (value.resetAt <= now) writeRate.delete(key);
+    }
+    if (rate.count > RATE_LIMIT) {
+      return NextResponse.json({ ok: false }, { status: 429, headers: { "retry-after": String(Math.ceil((rate.resetAt - now) / 1_000)) } });
+    }
+    const rawBody = await request.text();
+    if (new TextEncoder().encode(rawBody).byteLength > MAX_BODY_BYTES) {
+      return NextResponse.json({ ok: false }, { status: 413 });
+    }
+    const body = JSON.parse(rawBody) as {
       event?: unknown;
       path?: unknown;
       sessionId?: unknown;

@@ -18,6 +18,9 @@ test("server-renders the HoodFlow product shell", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("x-frame-options"), "DENY");
+  assert.match(response.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
 
   const html = await response.text();
   assert.match(html, /<title>HoodFlow \| Crypto &amp; Stock Token Markets on Robinhood Chain<\/title>/i);
@@ -44,7 +47,7 @@ test("server-renders the HoodFlow product shell", async () => {
 });
 
 test("ships a bounded, interactive Robinhood mainnet experience", async () => {
-  const [page, intro, layout, css, packageJson, priceRoute, priceLib, historyRoute, stockHistory, docs, community, rewards, referralRoute, communityMarketRoute, communityChartRoute, analyticsClient, agents, agentLib, agentManifest, agentMarkets, agentQuoteRoute, agentGuard] = await Promise.all([
+  const [page, intro, layout, css, packageJson, priceRoute, priceLib, historyRoute, stockHistory, docs, community, rewards, referralRoute, referralQualification, communityMarketRoute, communityChartRoute, analyticsClient, agents, agentLib, agentManifest, agentMarkets, agentQuoteRoute, agentGuard, worker, oracleProtection] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/robin-hood-intro.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -58,6 +61,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
     readFile(new URL("../app/community-tokens.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/referral-rewards.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/referrals/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/referral-qualification.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/community-markets/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/community-markets/chart/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/analytics-client.ts", import.meta.url), "utf8"),
@@ -67,6 +71,8 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
     readFile(new URL("../app/api/agents/markets/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/agents/quote/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/agent-api-guard.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/oracle-protection.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /"use client"/);
@@ -89,6 +95,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /Spending limits stay enforced onchain/);
   assert.match(page, /Funds stay in your wallet/);
   assert.match(page, /executionReadyAssetCount/);
+  assert.match(page, /assetRegistry\.length - executionReadyAssetCount/);
   assert.match(page, /Twenty-five assets/);
   assert.match(page, /reviewed Stock Token routes are execution-enabled/);
   assert.match(page, /Full-fill ready/);
@@ -117,6 +124,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /buildDirectBuyCalldata/);
   assert.match(page, /buildV4ExactInputCalldata/);
   assert.match(page, /buildV3ExactInputCalldata/);
+  assert.match(page, /calculateOracleDeviation/);
   assert.match(page, /Sell now/);
   assert.match(page, /Sell to USDG/);
   assert.match(page, /Compare live routes/);
@@ -165,10 +173,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(docs, /GET \/api\/agents\/markets/);
   assert.match(docs, /POST \/api\/agents\/quote/);
   assert.match(community, /Indexed live markets/);
-  assert.match(community, /metric-price/);
-  assert.match(community, /metric-volume/);
-  assert.match(community, /metric-liquidity/);
-  assert.match(community, /metric-cap/);
+  assert.match(community, /market-card-price/);
+  assert.match(community, /market-card-metrics/);
+  assert.doesNotMatch(community, /className="[^"]*\bmetric-(?:change|price|volume|liquidity|cap)\b/);
   assert.match(community, /Most traded/);
   assert.match(community, /Deep liquidity/);
   assert.match(community, /MARKET_SORT_OPTIONS/);
@@ -179,6 +186,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(community, /settlement-trigger/);
   assert.match(community, /marketSettlement\.address/);
   assert.match(community, /Native pair routing/);
+  assert.match(community, /requireActiveWallet/);
   assert.match(community, /USDG, WETH or the listed pool/);
   assert.match(community, /UNREVIEWED TOKEN MODE/);
   assert.match(community, /ONCHAIN PRICE HISTORY/);
@@ -188,20 +196,31 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(rewards, /SEASON 0 · COMING SOON/);
   assert.match(rewards, /Rankings open later/);
   assert.match(rewards, /Create my referral link/);
+  assert.match(rewards, /AbortController/);
   assert.match(referralRoute, /verifyMessage/);
   assert.match(referralRoute, /SEASON_REFERRAL_CAP/);
   assert.match(referralRoute, /leaderboardPayload/);
+  assert.match(referralRoute, /verifyEligibleReferralTrade/);
+  assert.match(referralQualification, /Only reviewed USDG Stock Token routes/);
+  assert.match(referralQualification, /MINIMUM_USDG_VALUE/);
+  assert.match(referralQualification, /log\.address\.toLowerCase\(\) !== tokenOut\.toLowerCase\(\)/);
   assert.match(communityMarketRoute, /trending_pools/);
   assert.match(communityMarketRoute, /new_pools/);
   assert.match(communityMarketRoute, /GeckoTerminal/);
   assert.match(communityMarketRoute, /DEX Screener/);
   assert.match(communityMarketRoute, /AbortSignal\.timeout/);
   assert.match(communityMarketRoute, /partial:/);
-  assert.match(communityChartRoute, /CHART_TIMEOUT_MS = 5_000/);
+  assert.match(communityChartRoute, /CHART_TIMEOUT_MS = 8_000/);
   assert.match(communityChartRoute, /AbortSignal\.any\(\[request\.signal, AbortSignal\.timeout\(CHART_TIMEOUT_MS\)\]\)/);
-  assert.match(communityChartRoute, /partial: points\.length !== candles\.length/);
+  assert.match(communityChartRoute, /fallbackPools/);
+  assert.match(communityChartRoute, /fallbackPool: candidate !== pool/);
+  assert.match(communityChartRoute, /geckoterminal-cache/);
   assert.match(communityChartRoute, /item\.every\(Number\.isFinite\)/);
   assert.match(communityChartRoute, /status: timedOut \? 504/);
+  assert.doesNotMatch(community, /api\.geckoterminal\.com\/api\/v2\/networks\/robinhood\/pools/);
+  assert.match(worker, /40,\s*50,\s*84/);
+  assert.match(worker, /content-security-policy/);
+  assert.match(worker, /max-age=31536000, immutable/);
   assert.match(analyticsClient, /\| "settlement_selected"/);
   assert.match(agents, /HOODFLOW FOR AGENTS/);
   assert.match(agents, /Let an agent find the route/);
@@ -221,7 +240,8 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(agentLib, /requiresUserSignature: true/);
   assert.match(agentLib, /status: "route-reviewed"/);
   assert.match(agentLib, /evaluateOracleDeviation/);
-  assert.match(agentLib, /MAX_ORACLE_DEVIATION_BPS = 500/);
+  assert.match(agentLib, /calculateOracleDeviation/);
+  assert.match(oracleProtection, /MAX_ORACLE_DEVIATION_BPS = 500/);
   assert.match(agentLib, /buildAgentMarketUrl/);
   assert.match(agentLib, /marketUrl: handoffUrl\.href/);
   assert.match(agentLib, /AGENT_DISABLED_MARKETS = new Set\(\["SGOV"\]\)/);

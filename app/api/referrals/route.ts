@@ -4,10 +4,10 @@ import { getAddress, JsonRpcProvider, verifyMessage } from "ethers";
 import { getDb } from "@/db";
 import { referralAttributions, referralClaims, referralProfiles } from "@/db/schema";
 import { ROBINHOOD_MAINNET, UNIVERSAL_ROUTER_ADDRESS } from "@/lib/hoodflow-mainnet";
+import { verifyEligibleReferralTrade } from "@/lib/referral-qualification";
 import { buildReferralMessage, INVITEE_POINTS, REFERRER_POINTS, SEASON_REFERRAL_CAP } from "@/lib/referrals";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
 function normalizeWallet(value: unknown) {
   if (typeof value !== "string") throw new Error("A valid wallet is required.");
   return getAddress(value).toLowerCase();
@@ -156,12 +156,18 @@ export async function POST(request: Request) {
       if (previousClaim[0]) return NextResponse.json({ ok: true, qualified: false }, { headers: { "cache-control": "no-store" } });
 
       const provider = new JsonRpcProvider(ROBINHOOD_MAINNET.rpcUrls[0], ROBINHOOD_MAINNET.chainIdNumber, { staticNetwork: true });
-      const [receipt, transaction] = await Promise.all([provider.getTransactionReceipt(txHash), provider.getTransaction(txHash)]);
+      const [receipt, transaction] = await Promise.all([provider.getTransactionReceipt(txHash), provider.getTransaction(txHash)]).finally(() => provider.destroy());
       if (!receipt || receipt.status !== 1 || !transaction) throw new Error("The qualifying transaction is not confirmed on Robinhood Chain.");
       if (transaction.from.toLowerCase() !== wallet || transaction.to?.toLowerCase() !== UNIVERSAL_ROUTER_ADDRESS.toLowerCase()) {
         throw new Error("This transaction is not an eligible HoodFlow router trade from the connected wallet.");
       }
-      const block = await provider.getBlock(receipt.blockNumber);
+      try {
+        verifyEligibleReferralTrade({ transactionData: transaction.data, wallet, logs: receipt.logs });
+      } catch (error) {
+        throw new Error(error instanceof Error ? error.message : "The transaction does not prove a completed eligible HoodFlow swap.");
+      }
+      const blockProvider = new JsonRpcProvider(ROBINHOOD_MAINNET.rpcUrls[0], ROBINHOOD_MAINNET.chainIdNumber, { staticNetwork: true });
+      const block = await blockProvider.getBlock(receipt.blockNumber).finally(() => blockProvider.destroy());
       if (!block || block.timestamp * 1_000 < attribution.createdAt.getTime()) throw new Error("The trade predates this referral activation.");
 
       const qualifiedRows = await db.select({ total: count() }).from(referralClaims).where(eq(referralClaims.referrerWallet, attribution.referrerWallet));

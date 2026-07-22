@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   HOODFLOW_DCA_ADDRESS,
   HOODFLOW_ENGINE_ABI,
+  HOODFLOW_V4_ADAPTER_ADDRESS,
   ROBINHOOD_MAINNET,
   USDG_ADDRESS,
 } from "@/lib/hoodflow-mainnet";
@@ -40,7 +41,7 @@ async function readEngine(rpcUrl: string, endpointIndex: number) {
   const ownerCode = await provider.getCode(owner);
 
   const configured = settlementToken.toLowerCase() === USDG_ADDRESS.toLowerCase()
-    && swapAdapter !== "0x0000000000000000000000000000000000000000"
+    && swapAdapter.toLowerCase() === HOODFLOW_V4_ADAPTER_ADDRESS.toLowerCase()
     && keeperCount > 0n
     && allowedTokenCount >= 2n
     && maxTranche > 0n
@@ -52,6 +53,8 @@ async function readEngine(rpcUrl: string, endpointIndex: number) {
     owner,
     paused,
     configured,
+    swapAdapter,
+    expectedSwapAdapter: HOODFLOW_V4_ADAPTER_ADDRESS,
     keeperCount: keeperCount.toString(),
     allowedTokenCount: allowedTokenCount.toString(),
     protocolFeeBps: Number(protocolFeeBps),

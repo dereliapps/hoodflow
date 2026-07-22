@@ -22,6 +22,13 @@ import {
   type PricePoint,
   type PriceRpcResult,
 } from "@/lib/robinhood-prices";
+import {
+  calculateOracleDeviation,
+  OracleDeviationError,
+  type OracleDeviationInput,
+} from "@/lib/oracle-protection";
+
+export { MAX_ORACLE_DEVIATION_BPS } from "@/lib/oracle-protection";
 
 export type AgentQuoteSide = "buy" | "sell";
 
@@ -85,8 +92,6 @@ const MAX_BUY_AMOUNT = 100_000;
 const MAX_SELL_AMOUNT = 1_000_000;
 const QUOTE_TTL_MS = 75_000;
 const RPC_TIMEOUT_MS = 5_000;
-export const MAX_ORACLE_DEVIATION_BPS = 500;
-
 const CANONICAL_SITE_ORIGIN = "https://hoodflow.app";
 
 export class AgentQuoteValidationError extends Error {}
@@ -203,25 +208,13 @@ type RouteQuote = {
   gasEstimate: bigint | null;
 };
 
-export function evaluateOracleDeviation(input: {
-  side: AgentQuoteSide;
-  inputAmount: string;
-  outputAmount: string;
-  oraclePrice: number;
-  maxDeviationBps?: number;
-}) {
-  const inputAmount = Number(input.inputAmount);
-  const outputAmount = Number(input.outputAmount);
-  if (!Number.isFinite(inputAmount) || inputAmount <= 0 || !Number.isFinite(outputAmount) || outputAmount <= 0 || !Number.isFinite(input.oraclePrice) || input.oraclePrice <= 0) {
-    throw new AgentQuoteUnavailableError("The quote could not be compared with its oracle reference.");
+export function evaluateOracleDeviation(input: OracleDeviationInput) {
+  try {
+    return calculateOracleDeviation(input);
+  } catch (error) {
+    if (error instanceof OracleDeviationError) throw new AgentQuoteUnavailableError(error.message);
+    throw error;
   }
-  const impliedDexPrice = input.side === "buy" ? inputAmount / outputAmount : outputAmount / inputAmount;
-  const deviationBps = Math.round(Math.abs(impliedDexPrice - input.oraclePrice) / input.oraclePrice * 10_000);
-  const maxDeviationBps = input.maxDeviationBps ?? MAX_ORACLE_DEVIATION_BPS;
-  if (!Number.isFinite(impliedDexPrice) || deviationBps > maxDeviationBps) {
-    throw new AgentQuoteUnavailableError("The DEX quote moved too far from the live oracle reference.");
-  }
-  return { impliedDexPrice, deviationBps, maxDeviationBps };
 }
 
 async function readLiveReference(provider: JsonRpcProvider, asset: string): Promise<PricePoint & { price: number; updatedAt: number; oraclePaused: false; status: "live" }> {

@@ -402,6 +402,7 @@ footer { min-height: 72px; border-top: 1px solid var(--line); padding: 0 4.5vw; 
 .market-change { width: fit-content; padding: 6px 7px; border-radius: 4px; font-size: 9px; }
 .market-change.up { background: #def5e6; color: #17683b; }
 .market-change.down { background: #f8e5df; color: #9b3d2d; }
+.market-change.neutral { background: #edf1ee; color: #68736c; }
 .market-row-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
 .market-row-actions button, .market-row-actions a { min-height: 33px; padding: 0 7px; display: grid; place-items: center; border: 1px solid #d4dad3; border-radius: 4px; background: white; color: #29332e; font-size: 7px; text-decoration: none; cursor: pointer; }
 .market-row-actions button { background: #1a211f; border-color: #1a211f; color: white; }

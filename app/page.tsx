@@ -17,6 +17,7 @@ import {
   ERC20_ABI,
   HOODFLOW_DCA_ADDRESS,
   HOODFLOW_ENGINE_ABI,
+  HOODFLOW_V4_ADAPTER_ADDRESS,
   PERMIT2_ABI,
   PERMIT2_ADDRESS,
   PERMIT2_TYPES,
@@ -53,6 +54,7 @@ import {
 } from "@/lib/robinhood-prices";
 import { ROBINHOOD_PRICE_FEEDS } from "@/config/robinhood-price-feeds";
 import { track } from "@/lib/analytics-client";
+import { calculateOracleDeviation } from "@/lib/oracle-protection";
 import MarketStatus from "./market-status";
 import type { PrivyWalletController } from "./privy-wallet-bridge";
 import { PRIVY_CONFIGURED } from "./privy-config";
@@ -130,7 +132,7 @@ declare global {
   }
 }
 
-const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_HOODFLOW_CONTRACT_ADDRESS?.trim() || HOODFLOW_DCA_ADDRESS;
+const CONTRACT_ADDRESS = HOODFLOW_DCA_ADDRESS;
 const contractConfigured = /^0x[a-fA-F0-9]{40}$/.test(CONTRACT_ADDRESS);
 const ORDER_STORAGE_PREFIX = "hoodflow-mainnet-orders-v4";
 const PRICE_CACHE_KEY = "hoodflow-live-prices-v1";
@@ -347,6 +349,7 @@ export default function Home() {
   const [networkBlock, setNetworkBlock] = useState("Checking");
   const [contractStatus, setContractStatus] = useState(contractConfigured ? "Checking DCA engine" : "Engine address missing");
   const [contractReady, setContractReady] = useState(false);
+  const [engineConfigured, setEngineConfigured] = useState(false);
   const [engineChecking, setEngineChecking] = useState(contractConfigured);
   const [enginePaused, setEnginePaused] = useState(false);
   const [engineOwner, setEngineOwner] = useState("");
@@ -796,9 +799,10 @@ export default function Home() {
 
   useEffect(() => {
     async function readNetwork() {
+      let provider: JsonRpcProvider | null = null;
       try {
         const startedAt = Date.now();
-        const provider = new JsonRpcProvider(
+        provider = new JsonRpcProvider(
           ROBINHOOD_MAINNET.rpcUrls[0],
           ROBINHOOD_MAINNET.chainIdNumber,
           { staticNetwork: true },
@@ -809,6 +813,7 @@ export default function Home() {
           if (code === "0x") {
             setContractStatus("Engine address empty");
             setContractReady(false);
+            setEngineConfigured(false);
           } else {
             const engine = new Contract(CONTRACT_ADDRESS, HOODFLOW_ENGINE_ABI, provider);
             const [owner, paused, settlementToken, swapAdapter, keeperCount, allowedTokenCount, maxTranche, maxBudget, protocolFeeBps, inputConfig] = await Promise.all([
@@ -830,19 +835,25 @@ export default function Home() {
             setEngineOwnerType(ownerCode === "0x" ? "EOA" : "Contract");
             setRpcHealth({ endpoint: "Browser fallback", configuredEndpoints: 1, latencyMs: Date.now() - startedAt });
             const configured = settlementToken.toLowerCase() === USDG_ADDRESS.toLowerCase()
-              && swapAdapter !== "0x0000000000000000000000000000000000000000"
+              && swapAdapter.toLowerCase() === HOODFLOW_V4_ADAPTER_ADDRESS.toLowerCase()
               && keeperCount > 0n
               && allowedTokenCount >= 2n
               && maxTranche > 0n
               && maxBudget >= maxTranche
               && Boolean(inputConfig.allowed);
-            setContractStatus(paused ? "Engine deployed · owner activation required" : configured ? "Engine live" : "Engine config invalid");
+            setEngineConfigured(configured);
+            setContractStatus(!configured ? "Engine configuration needs review" : paused ? "Engine deployed · owner activation required" : "Onchain engine config verified");
             setContractReady(!paused && configured);
           }
         }
       } catch {
-        setNetworkBlock("Online");
+        setNetworkBlock("Unavailable");
+        setRpcHealth(null);
+        setContractReady(false);
+        setEngineConfigured(false);
         if (contractConfigured) setContractStatus("Verification temporarily unavailable · retrying automatically");
+      } finally {
+        provider?.destroy();
       }
     }
     void readNetwork();
@@ -874,14 +885,17 @@ export default function Home() {
       setEngineOwnerType(status.ownerType ?? "Unknown");
       setEngineFeeBps(typeof status.protocolFeeBps === "number" ? status.protocolFeeBps : null);
       setRpcHealth(status.rpc ?? null);
-      setContractReady(!status.paused && Boolean(status.configured));
-      setContractStatus(status.paused
-        ? "Engine deployed · owner activation required"
-        : status.configured ? "Engine live · verified onchain" : "Engine configuration needs review");
+      const configured = Boolean(status.configured);
+      setEngineConfigured(configured);
+      setContractReady(!status.paused && configured);
+      setContractStatus(!configured
+        ? "Engine configuration needs review"
+        : status.paused ? "Engine deployed · owner activation required" : "Onchain engine config verified");
     } catch {
-      setContractStatus((current) => current.startsWith("Engine live") || current.startsWith("Engine deployed")
-        ? current
-        : "Verification temporarily unavailable · retrying automatically");
+      setContractReady(false);
+      setEngineConfigured(false);
+      setRpcHealth(null);
+      setContractStatus("Verification temporarily unavailable · retrying automatically");
     } finally {
       window.clearTimeout(timeout);
       setEngineChecking(false);
@@ -944,8 +958,10 @@ export default function Home() {
       setComposerQuote(null);
     }
     setComposerQuoteBusy(true);
+    let quoteProvider: JsonRpcProvider | null = null;
     try {
       const provider = new JsonRpcProvider(ROBINHOOD_MAINNET.rpcUrls[0], ROBINHOOD_MAINNET.chainIdNumber, { staticNetwork: true });
+      quoteProvider = provider;
       const tokenAddress = ROBINHOOD_TOKENS[draftAsset];
       const tokenIn = kind === "Buy" ? USDG_ADDRESS : tokenAddress;
       const tokenOut = kind === "Buy" ? tokenAddress : USDG_ADDRESS;
@@ -958,6 +974,12 @@ export default function Home() {
           })()
         : await getBestV4Quote(provider, tokenIn, tokenOut, amountIn).then((result) => ({ protocol: "V4" as const, amountOut: result.amountOut, feeBps: result.route.fee / 100 }));
       if (route.amountOut <= 0n) throw new Error("No live route is available for this amount.");
+      calculateOracleDeviation({
+        side: kind === "Buy" ? "buy" : "sell",
+        inputAmount: formatUnits(amountIn, kind === "Buy" ? USDG_DECIMALS : STOCK_TOKEN_DECIMALS),
+        outputAmount: formatUnits(route.amountOut, kind === "Buy" ? STOCK_TOKEN_DECIMALS : USDG_DECIMALS),
+        oraclePrice: priceBook[draftAsset]?.price ?? 0,
+      });
       const slippageBps = Math.max(10, Math.min(500, Math.round(Number(draftSlippage || 0.5) * 100)));
       const minimum = route.amountOut * BigInt(10_000 - slippageBps) / 10_000n;
       const decimals = kind === "Buy" ? STOCK_TOKEN_DECIMALS : USDG_DECIMALS;
@@ -976,6 +998,7 @@ export default function Home() {
       setComposerQuote((current) => composerQuoteKeyRef.current === requestKey ? current : null);
       setComposerQuoteError(errorMessage(error));
     } finally {
+      quoteProvider?.destroy();
       if (requestId === composerQuoteRequestRef.current) setComposerQuoteBusy(false);
     }
   }, [composerOpen, connected, draftAmount, draftAsset, draftSlippage, kind, priceBook, walletChainId]);
@@ -1013,6 +1036,7 @@ export default function Home() {
   }
 
   async function activateDcaEngine() {
+    if (!engineConfigured) throw new Error("The DCA engine configuration could not be verified. Activation is blocked.");
     if (!walletProvider || !connected) {
       openWalletModal();
       throw new Error("Connect the engine owner wallet to activate recurring DCA.");
@@ -1030,11 +1054,9 @@ export default function Home() {
     const transaction = await engine.unpauseEverything();
     const receipt = await transaction.wait();
     if (!receipt || receipt.status !== 1) throw new Error("Engine activation was not confirmed.");
-    setEnginePaused(false);
-    setContractReady(true);
-    setContractStatus("Engine live");
+    await refreshEngineStatus();
     setTransactionStep("");
-    notify("DCA engine is live on Robinhood mainnet");
+    notify("DCA engine activation confirmed on Robinhood mainnet");
   }
 
   const refreshWalletBalances = useCallback(async (address: string, provider: BrowserProvider) => {
@@ -1433,6 +1455,12 @@ export default function Home() {
       : await getBestV4Quote(provider, USDG_ADDRESS, tokenOutAddress, amountIn).then((result) => ({ protocol: "V4" as const, ...result }));
     const minAmountOut = quote.amountOut * BigInt(10_000 - slippageBps) / 10_000n;
     if (minAmountOut <= 0n) throw new Error("The protected output is zero.");
+    calculateOracleDeviation({
+      side: "buy",
+      inputAmount: formatUnits(amountIn, USDG_DECIMALS),
+      outputAmount: formatUnits(quote.amountOut, STOCK_TOKEN_DECIMALS),
+      oraclePrice: priceBook[draftAsset]?.price ?? 0,
+    });
     track("quote_received", { ticker: draftAsset, side: "buy", protocol: quote.protocol });
 
     const currentAllowance = BigInt(await usdG.allowance(address, PERMIT2_ADDRESS));
@@ -1546,6 +1574,12 @@ export default function Home() {
       : await getBestV4Quote(provider, tokenInAddress, USDG_ADDRESS, amountIn).then((result) => ({ protocol: "V4" as const, ...result }));
     const minAmountOut = quote.amountOut * BigInt(10_000 - slippageBps) / 10_000n;
     if (minAmountOut <= 0n) throw new Error("The protected USDG output is zero.");
+    calculateOracleDeviation({
+      side: "sell",
+      inputAmount: formatUnits(amountIn, STOCK_TOKEN_DECIMALS),
+      outputAmount: formatUnits(quote.amountOut, USDG_DECIMALS),
+      oraclePrice: priceBook[draftAsset]?.price ?? 0,
+    });
     track("quote_received", { ticker: draftAsset, side: "sell", protocol: quote.protocol });
 
     const currentAllowance = BigInt(await inputToken.allowance(address, PERMIT2_ADDRESS));
@@ -1691,7 +1725,7 @@ export default function Home() {
     }
     setOnchainBusy(true);
     try {
-      if (kind === "DCA" && enginePaused) {
+      if (kind === "DCA" && enginePaused && engineConfigured) {
         await activateDcaEngine();
         return;
       }
@@ -1844,9 +1878,9 @@ export default function Home() {
       {view === "strategies" && (
         <section className="page inner-page dca-page">
           <div className="inner-heading"><div><p className="eyebrow">RECURRING ORDERS</p><h1>DCA command center</h1><p>Choose an asset, set an exact USDG amount and lifetime cap, then let the onchain schedule enforce the rest.</p></div><button className="primary-action" onClick={() => openComposer("DCA")}><span>+</span> Create DCA</button></div>
-          <div className={`dca-live-strip ${contractReady ? "ready" : "waiting"}`}><div><span><i /> MAINNET ENGINE</span><strong>{contractReady ? "Recurring execution is live" : enginePaused ? "Owner activation required" : "Engine verification retrying"}</strong></div><p>{contractReady ? "The keeper can execute only when the asset, schedule, remaining budget, oracle and slippage checks all pass." : contractStatus}</p><div><span>DCA FEE</span><strong>{engineFeeBps === null ? "Checking" : `${(engineFeeBps / 100).toFixed(2)}%`}</strong></div></div>
+          <div className={`dca-live-strip ${contractReady ? "ready" : "waiting"}`}><div><span><i /> MAINNET ENGINE</span><strong>{contractReady ? "Onchain DCA engine is configured" : enginePaused && engineConfigured ? "Owner activation required" : engineConfigured ? "Engine verification retrying" : "Configuration review required"}</strong></div><p>{contractReady ? "The contract enforces asset, schedule, budget, oracle and slippage checks. Scheduled execution also depends on an available keeper." : contractStatus}</p><div><span>DCA FEE</span><strong>{engineFeeBps === null ? "Checking" : `${(engineFeeBps / 100).toFixed(2)}%`}</strong></div></div>
           <div className="dca-quick-grid"><article><span>01 · WEEKLY CORE</span><Mark ticker="AAPL" small /><h2>20 USDG into AAPL</h2><p>A simple weekly schedule with a 12-buy lifetime cap.</p><button onClick={() => applyTemplate("AAPL", "Weekly", "Weekly Apple")}>Build this plan →</button></article><article><span>02 · MONTHLY INDEX</span><Mark ticker="SPY" small /><h2>50 USDG into SPY</h2><p>A slower index schedule with every limit visible before signing.</p><button onClick={() => applyTemplate("SPY", "Monthly", "Monthly Index")}>Build this plan →</button></article><article><span>03 · CHIP ACCUMULATION</span><Mark ticker="NVDA" small /><h2>25 USDG into NVDA</h2><p>A weekly semiconductor plan you can pause from the same wallet.</p><button onClick={() => applyTemplate("NVDA", "Weekly", "Weekly NVIDIA")}>Build this plan →</button></article></div>
-          <div className="summary-row dca-summary"><div><span>Saved automations</span><strong>{dcaRows.length}</strong></div><div><span>Active schedules</span><strong>{activeDcaCount}</strong></div><div><span>Scheduled cap</span><strong>{scheduledDcaBudget.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDG</strong></div><div><span>Engine status</span><strong>{contractReady ? "Live" : engineChecking ? "Checking" : enginePaused ? "Activation" : "Retrying"}</strong></div></div>
+          <div className="summary-row dca-summary"><div><span>Saved automations</span><strong>{dcaRows.length}</strong></div><div><span>Active schedules</span><strong>{activeDcaCount}</strong></div><div><span>Scheduled cap</span><strong>{scheduledDcaBudget.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDG</strong></div><div><span>Engine status</span><strong>{contractReady ? "Configured" : engineChecking ? "Checking" : enginePaused && engineConfigured ? "Activation" : engineConfigured ? "Retrying" : "Review"}</strong></div></div>
           <div className="dca-how"><article><span>1</span><p><strong>You choose the rules</strong><small>Asset, amount per buy, cadence, total number of buys and maximum slippage.</small></p></article><article><span>2</span><p><strong>The contract enforces the cap</strong><small>No execution can spend above the per-buy amount or remaining lifetime budget.</small></p></article><article><span>3</span><p><strong>You keep control</strong><small>Pause, resume or cancel from the strategy owner wallet. Tokens settle directly to it.</small></p></article></div>
           <div className="device-save-note"><span><i /> RECEIPTS SAVED ON THIS DEVICE</span><p>Confirmed transaction references and onchain strategy IDs are kept locally. Wallet keys and account data are never stored.</p></div>
           <div className="table-card">
@@ -1854,7 +1888,7 @@ export default function Home() {
             {dcaRows.map((item) => <StrategyRow key={item.id} item={item} detailed onToggle={() => toggleStrategy(item.id)} onInspect={() => setSelectedStrategy(item)} />)}
             {dcaRows.length === 0 && <div className="empty-state order-empty dca-empty"><strong>Your first DCA takes about a minute to configure</strong><span>Start with a template, edit every limit, and review the exact onchain cap before your wallet signs.</span><button onClick={() => openComposer("DCA")}>Create first DCA</button></div>}
           </div>
-          <p className="dca-risk-note">Automation does not guarantee execution or returns. A stale oracle, paused token, insufficient allowance, low liquidity or slippage breach stops the scheduled buy.</p>
+          <p className="dca-risk-note"><strong>Pre-audit beta:</strong> the engine currently has an owner-controlled admin and depends on a keeper service. Automation does not guarantee execution or returns; use a small lifetime cap. A stale oracle, paused token, insufficient allowance, low liquidity or slippage breach stops the scheduled buy.</p>
         </section>
       )}
 
@@ -1862,7 +1896,7 @@ export default function Home() {
         <section className="page inner-page assets-page">
           <div className="asset-hero">
             <div><p className="eyebrow">ROBINHOOD ASSET MATRIX</p><h1>Twenty-five assets.<br /><span>Priced onchain.</span></h1><p>Every canonical Robinhood stock token and ETF is indexed with its real brand mark and multiplier-adjusted Chainlink token price. HoodFlow only enables assets that completed a full-input fork swap; everything else stays safely watch-only.</p></div>
-            <div className="asset-totals"><div><strong>25</strong><span>INDEXED TOKENS</span></div><div><strong>15</strong><span>FULL-FILL READY</span></div><div><strong>10</strong><span>WATCH-ONLY</span></div></div>
+            <div className="asset-totals"><div><strong>{assetRegistry.length}</strong><span>INDEXED TOKENS</span></div><div><strong>{executionReadyAssetCount}</strong><span>FULL-FILL READY</span></div><div><strong>{assetRegistry.length - executionReadyAssetCount}</strong><span>WATCH-ONLY</span></div></div>
           </div>
           <div className="asset-logo-cloud" aria-label="All supported brands">{assetRegistry.map((asset) => <Mark key={asset.ticker} ticker={asset.ticker} small />)}<span>20 stocks + 5 ETFs</span></div>
           <div className={`price-source-bar ${priceState}`}>
@@ -1945,13 +1979,13 @@ export default function Home() {
               <article className="market-card" key={item.name}>
                 <div className="market-number">0{index + 1}</div><div className="market-top"><span className={`risk risk-${index}`}>{item.risk}</span><span>{item.cadence} cadence</span></div>
                 <h2>{item.name}</h2><p>{item.desc}</p><div className="asset-pile">{item.assets.map((asset) => <Mark key={asset} ticker={asset} small />)}</div>
-                <div className="market-metrics triple"><div><span>FIRST ASSET</span><strong>{item.assets[0]}</strong></div><div><span>SCHEDULE</span><strong>{item.cadence}</strong></div><div><span>ENGINE</span><strong>{contractReady ? "Live" : "Pending"}</strong></div></div>
+                <div className="market-metrics triple"><div><span>FIRST ASSET</span><strong>{item.assets[0]}</strong></div><div><span>SCHEDULE</span><strong>{item.cadence}</strong></div><div><span>ENGINE</span><strong>{contractReady ? "Configured" : "Pending"}</strong></div></div>
                 <div className="creator"><span>You choose the amount, cap and slippage</span><button onClick={() => applyTemplate(item.assets[0], item.cadence, item.name)}>Use template</button></div>
               </article>
             ))}
             {visibleMarketplace.length === 0 && <div className="empty-state market-empty"><strong>No strategy found</strong><span>Try another name or asset ticker.</span></div>}
           </div>
-          <p className="market-note">{contractReady ? "Recurring templates open an editable capped strategy. Nothing moves until your wallet confirms." : "Recurring templates are unavailable while the HoodFlow engine is not verified and active on mainnet."}</p>
+          <p className="market-note">{contractReady ? "Pre-audit templates open an editable capped strategy. Nothing moves until your wallet confirms; keeper and admin risks remain." : "Recurring templates are unavailable while the HoodFlow engine configuration cannot be verified."}</p>
         </section>
       )}
 
@@ -1977,7 +2011,7 @@ export default function Home() {
           <div className="control-grid">
             <article className="control-card"><span>CUSTODY</span><strong>Funds stay in your wallet</strong><p>HoodFlow cannot withdraw assets by itself. Every Buy and Sell order requires your wallet confirmation.</p><b className="control-ok">YOU CONTROL</b></article>
             <article className="control-card"><span>BUY & SELL</span><strong>{executionReadyAssetCount} verified routes</strong><p>Fresh quotes, maximum slippage protection, and exact short-lived order permissions.</p><b className="control-ok">LIVE</b></article>
-            <article className="control-card dca-control"><span>RECURRING DCA</span><strong>{contractReady ? "Active on mainnet" : enginePaused ? "Ready to activate" : engineChecking ? "Verifying engine" : "Verification delayed"}</strong><p>{contractReady ? "Capped recurring strategies can be created and executed onchain." : enginePaused ? "Only the owner wallet can switch the DCA engine on." : contractStatus}</p><div><b className={`control-ok ${contractReady ? "" : "warning"}`}>{contractReady ? "LIVE" : engineChecking ? "CHECKING" : enginePaused ? "OWNER ACTION" : "AUTO RETRY"}</b>{!contractReady && !engineChecking && <button type="button" className="engine-retry" onClick={() => void refreshEngineStatus()}>Retry now</button>}</div></article>
+            <article className="control-card dca-control"><span>RECURRING DCA</span><strong>{contractReady ? "Configured · pre-audit" : enginePaused && engineConfigured ? "Ready to activate" : engineChecking ? "Verifying engine" : engineConfigured ? "Verification delayed" : "Configuration review required"}</strong><p>{contractReady ? "The onchain engine is available, but independent audit, multisig ownership and keeper redundancy remain pending." : enginePaused && engineConfigured ? "Only the owner wallet can switch the verified DCA engine on." : contractStatus}</p><div><b className="control-ok warning">{contractReady ? "PRE-AUDIT" : engineChecking ? "CHECKING" : enginePaused && engineConfigured ? "OWNER ACTION" : engineConfigured ? "AUTO RETRY" : "BLOCKED"}</b>{!contractReady && !engineChecking && <button type="button" className="engine-retry" onClick={() => void refreshEngineStatus()}>Retry now</button>}</div></article>
             <article className="control-card"><span>RPC HEALTH</span><strong>{rpcHealth ? `${rpcHealth.endpoint} · ${rpcHealth.latencyMs} ms` : "Checking endpoints"}</strong><p>Server reads retry the configured RPC list automatically. Wallet transactions still use the endpoint selected inside your wallet.</p><b className="control-ok">{rpcHealth ? `${rpcHealth.configuredEndpoints} ENDPOINT${rpcHealth.configuredEndpoints === 1 ? "" : "S"}` : "CHECKING"}</b></article>
             <article className="control-card"><span>ENGINE CONTROL</span><strong>{engineOwner ? `${compactAddress(engineOwner)} · ${engineOwnerType}` : "Reading owner"}</strong><p>{engineOwnerType === "EOA" ? "The current owner is a single externally owned wallet. A multisig or timelock is not verified." : engineOwnerType === "Contract" ? "The controller is a contract, but its multisig or timelock policy has not been independently verified." : "Controller type is still being checked."}</p><b className={`control-ok ${engineOwnerType === "EOA" ? "warning" : ""}`}>{engineOwnerType === "EOA" ? "CENTRALIZATION RISK" : "VERIFY ONCHAIN"}</b></article>
           </div>
@@ -1997,7 +2031,7 @@ export default function Home() {
           <section className="composer wide-composer" role="dialog" aria-modal="true" aria-labelledby="composer-title">
             <div className="composer-head"><div><p className="eyebrow">NEW ORDER</p><h2 id="composer-title">{kind === "Buy" ? "Buy with limits." : kind === "Sell" ? "Sell to USDG." : "Automate with limits."}</h2></div><button aria-label="Close strategy builder" onClick={() => setComposerOpen(false)} disabled={onchainBusy}>x</button></div>
             <div className="kind-grid">
-              {(["Buy", "Sell", "DCA"] as StrategyKind[]).map((item, index) => <button type="button" key={item} className={kind === item ? "selected" : ""} onClick={() => openComposer(item, draftAsset)} disabled={onchainBusy}><span>{String(index + 1).padStart(2, "0")}</span><strong>{item === "Buy" ? "Buy now" : item === "Sell" ? "Sell now" : "Recurring DCA"}</strong><small>{item === "Buy" ? "USDG to stock token" : item === "Sell" ? "Stock token to USDG" : contractReady ? "Recurring mainnet buys" : enginePaused ? "Owner activation required" : "Checking engine"}</small></button>)}
+              {(["Buy", "Sell", "DCA"] as StrategyKind[]).map((item, index) => <button type="button" key={item} className={kind === item ? "selected" : ""} onClick={() => openComposer(item, draftAsset)} disabled={onchainBusy}><span>{String(index + 1).padStart(2, "0")}</span><strong>{item === "Buy" ? "Buy now" : item === "Sell" ? "Sell now" : "Recurring DCA"}</strong><small>{item === "Buy" ? "USDG to stock token" : item === "Sell" ? "Stock token to USDG" : contractReady ? "Configured onchain · pre-audit" : enginePaused && engineConfigured ? "Owner activation required" : engineConfigured ? "Checking engine" : "Configuration review required"}</small></button>)}
             </div>
             <form onSubmit={createStrategy}>
               <label>ORDER NAME<input name="name" value={draftName} onChange={(event) => setDraftName(event.target.value)} required disabled={onchainBusy} /></label>
@@ -2007,13 +2041,13 @@ export default function Home() {
                 <label>MAX SLIPPAGE<span className="input-unit"><input name="slippage" type="number" min="0.01" max="5" step="0.01" value={draftSlippage} onChange={(event) => setDraftSlippage(event.target.value)} required disabled={onchainBusy} /><b>%</b></span></label>
               </div>
               {kind === "DCA" && <div className="form-pair"><label>SCHEDULE<select name="frequency" value={draftFrequency} onChange={(event) => setDraftFrequency(event.target.value)} disabled={onchainBusy}><option>Daily</option><option>Weekly</option><option>Monthly</option></select></label><label>NUMBER OF BUYS<span className="input-unit"><input name="executions" type="number" min="2" max={draftFrequency === "Daily" ? "52" : draftFrequency === "Weekly" ? "52" : "12"} value={draftExecutions} onChange={(event) => setDraftExecutions(event.target.value)} disabled={onchainBusy} /><b>×</b></span></label></div>}
-              <div className="live-order-banner"><i /><span><strong>{kind === "Buy" ? "Buy stock tokens with USDG" : kind === "Sell" ? `Sell ${draftAsset} back to USDG` : contractReady ? "Mainnet recurring strategy" : enginePaused ? "DCA engine awaits owner activation" : "Checking recurring engine"}</strong><small>{kind === "Buy" ? "Your wallet confirms a protected mainnet buy." : kind === "Sell" ? "Your wallet confirms an exact-token sell; USDG returns directly to you." : contractReady ? "The onchain engine enforces your schedule and lifetime cap." : enginePaused ? "Connect the owner wallet and confirm one activation transaction." : "Buy and Sell remain available while the engine check completes."}</small></span><b>{kind !== "DCA" || contractReady ? "LIVE" : enginePaused ? "READY" : "CHECKING"}</b></div>
-              <div className="execution-preview"><div className="preview-head"><span>ORDER REVIEW</span><b>{kind === "DCA" ? contractReady ? "MAINNET DCA" : enginePaused ? "OWNER ACTIVATION REQUIRED" : "ENGINE CHECK" : composerQuoteBusy ? "UPDATING QUOTE" : composerQuote ? `LIVE ${composerQuote.protocol} QUOTE` : "WAITING FOR ROUTE"}</b></div><div className="preview-grid"><p><span>Estimated receive</span><strong>{kind === "DCA" ? `${estimatedUnits} ${draftAsset} each` : composerQuote ? `${Number(composerQuote.amountOut).toLocaleString("en-US", { maximumFractionDigits: 8 })} ${kind === "Sell" ? "USDG" : draftAsset}` : "—"}</strong></p><p><span>{kind === "Sell" ? "Sell amount" : "Total USDG cap"}</span><strong>{kind === "Sell" ? `${draftAmount || "0"} ${draftAsset}` : `${draftTotalBudget.toFixed(2)} USDG`}</strong></p><p><span>Minimum received</span><strong>{kind === "DCA" ? `${draftSlippage}% max · engine cap` : composerQuote ? `${Number(composerQuote.minimumOut).toLocaleString("en-US", { maximumFractionDigits: 8 })} ${kind === "Sell" ? "USDG" : draftAsset}` : "Waiting for route"}</strong></p><p><span>Oracle status</span><strong>{priceBook[draftAsset]?.status === "live" ? formatPriceAge(priceBook[draftAsset].updatedAt) : priceBook[draftAsset]?.status ?? "Syncing"}</strong></p></div></div>
+              <div className="live-order-banner"><i /><span><strong>{kind === "Buy" ? "Buy stock tokens with USDG" : kind === "Sell" ? `Sell ${draftAsset} back to USDG` : contractReady ? "Pre-audit recurring strategy" : enginePaused && engineConfigured ? "DCA engine awaits owner activation" : engineConfigured ? "Checking recurring engine" : "DCA configuration is blocked"}</strong><small>{kind === "Buy" ? "Your wallet confirms a protected mainnet buy." : kind === "Sell" ? "Your wallet confirms an exact-token sell; USDG returns directly to you." : contractReady ? "The contract enforces your schedule and lifetime cap; keeper and admin risks still apply." : enginePaused && engineConfigured ? "Connect the owner wallet and confirm one activation transaction." : engineConfigured ? "Buy and Sell remain available while the engine check completes." : "Activation and strategy creation stay disabled until every engine address and limit is verified."}</small></span><b>{kind !== "DCA" ? "LIVE" : contractReady ? "PRE-AUDIT" : enginePaused && engineConfigured ? "READY" : engineConfigured ? "CHECKING" : "BLOCKED"}</b></div>
+              <div className="execution-preview"><div className="preview-head"><span>ORDER REVIEW</span><b>{kind === "DCA" ? contractReady ? "MAINNET DCA" : enginePaused && engineConfigured ? "OWNER ACTIVATION REQUIRED" : engineConfigured ? "ENGINE CHECK" : "CONFIG REVIEW REQUIRED" : composerQuoteBusy ? "UPDATING QUOTE" : composerQuote ? `LIVE ${composerQuote.protocol} QUOTE` : "WAITING FOR ROUTE"}</b></div><div className="preview-grid"><p><span>Estimated receive</span><strong>{kind === "DCA" ? `${estimatedUnits} ${draftAsset} each` : composerQuote ? `${Number(composerQuote.amountOut).toLocaleString("en-US", { maximumFractionDigits: 8 })} ${kind === "Sell" ? "USDG" : draftAsset}` : "—"}</strong></p><p><span>{kind === "Sell" ? "Sell amount" : "Total USDG cap"}</span><strong>{kind === "Sell" ? `${draftAmount || "0"} ${draftAsset}` : `${draftTotalBudget.toFixed(2)} USDG`}</strong></p><p><span>Minimum received</span><strong>{kind === "DCA" ? `${draftSlippage}% max · engine cap` : composerQuote ? `${Number(composerQuote.minimumOut).toLocaleString("en-US", { maximumFractionDigits: 8 })} ${kind === "Sell" ? "USDG" : draftAsset}` : "Waiting for route"}</strong></p><p><span>Oracle status</span><strong>{priceBook[draftAsset]?.status === "live" ? formatPriceAge(priceBook[draftAsset].updatedAt) : priceBook[draftAsset]?.status ?? "Syncing"}</strong></p></div></div>
               <div className="fee-review"><div><span>POOL FEE</span><strong>{kind === "DCA" ? "Selected at execution" : composerQuote ? `${(composerQuote.feeBps / 100).toFixed(2)}%` : "—"}</strong></div><div><span>HOODFLOW FEE</span><strong>{kind === "DCA" ? engineFeeBps === null ? "Checking" : `${(engineFeeBps / 100).toFixed(2)}%` : "0.00%"}</strong></div><div><span>NETWORK GAS</span><strong>Shown in wallet</strong></div><div><span>QUOTE REFRESH</span><strong>{kind === "DCA" ? "At execution" : composerQuote ? composerQuoteBusy ? "Refreshing · last quote kept" : "Fresh · auto" : composerQuoteBusy ? "Updating" : "Unavailable"}</strong></div></div>
               {composerQuoteError && kind !== "DCA" && <div className="quote-inline-error"><strong>Route unavailable for this amount.</strong><span>{composerQuoteError}</span><button type="button" onClick={() => void refreshComposerQuote()}>Try again</button></div>}
               <div className="limit-note"><span>✓</span><p><strong>{kind === "DCA" ? "Spending limits stay enforced onchain." : "The order permission is exact and short-lived."}</strong><small>{kind === "Buy" ? "HoodFlow signs only this USDG amount for the router." : kind === "Sell" ? `HoodFlow signs only the selected ${draftAsset} amount; sale proceeds return as USDG.` : "The recurring engine cannot execute outside the selected asset, total budget, schedule and expiry."}</small></p></div>
               {transactionStep && <div className="transaction-step"><i /><span>{transactionStep}</span></div>}
-              <div className="composer-actions"><button type="button" onClick={() => setComposerOpen(false)} disabled={onchainBusy}>Cancel</button><button type="submit" className="primary-action" disabled={onchainBusy || (connected && (kind === "Buy" || kind === "Sell") && !composerQuote) || (connected && kind === "DCA" && !contractReady && !enginePaused)}>{onchainBusy ? "Working…" : kind === "Buy" ? connected ? `Buy ${draftAsset} with USDG` : "Connect wallet first" : kind === "Sell" ? connected ? `Sell ${draftAsset} for USDG` : "Connect wallet first" : contractReady ? connected ? "Create onchain DCA" : "Connect wallet first" : enginePaused ? connected ? "Activate DCA engine" : "Connect owner wallet to activate" : connected ? "Checking engine" : "Connect wallet first"} <span>&rarr;</span></button></div>
+              <div className="composer-actions"><button type="button" onClick={() => setComposerOpen(false)} disabled={onchainBusy}>Cancel</button><button type="submit" className="primary-action" disabled={onchainBusy || (connected && (kind === "Buy" || kind === "Sell") && !composerQuote) || (kind === "DCA" && !contractReady && !(enginePaused && engineConfigured))}>{onchainBusy ? "Working…" : kind === "Buy" ? connected ? `Buy ${draftAsset} with USDG` : "Connect wallet first" : kind === "Sell" ? connected ? `Sell ${draftAsset} for USDG` : "Connect wallet first" : contractReady ? connected ? "Create onchain DCA" : "Connect wallet first" : enginePaused && engineConfigured ? connected ? "Activate DCA engine" : "Connect owner wallet to activate" : engineConfigured ? connected ? "Checking engine" : "Connect wallet first" : "Configuration review required"} <span>&rarr;</span></button></div>
             </form>
           </section>
         </div>

@@ -17,6 +17,12 @@ const GOOD_CACHE_TTL_MS = 30_000;
 let lastGoodResponse: PriceResponse | null = null;
 let lastGoodResponseAt = 0;
 
+const PRICE_RPC_URLS = [
+  process.env.ROBINHOOD_PRICE_RPC_URL ?? "",
+  ...(process.env.ROBINHOOD_RPC_URLS ?? "").split(","),
+  PUBLIC_ROBINHOOD_PRICE_RPC_URL,
+].map((url) => url.trim()).filter((url, index, urls) => Boolean(url) && urls.indexOf(url) === index);
+
 function chunkRequests<T>(items: T[], size: number) {
   return Array.from({ length: Math.ceil(items.length / size) }, (_, index) =>
     items.slice(index * size, (index + 1) * size));
@@ -26,11 +32,11 @@ function resultIsUsable(result: PriceRpcResult | undefined) {
   return Boolean(result?.result && !result.error);
 }
 
-async function requestBatch(batch: PriceRpcRequest[]) {
+async function requestBatch(batch: PriceRpcRequest[], rpcUrl: string) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(process.env.ROBINHOOD_PRICE_RPC_URL || PUBLIC_ROBINHOOD_PRICE_RPC_URL, {
+    const response = await fetch(rpcUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(batch),
@@ -49,12 +55,13 @@ async function requestBatch(batch: PriceRpcRequest[]) {
 async function readPriceRpc(requests: PriceRpcRequest[]) {
   const collected = new Map<string, PriceRpcResult>();
   for (let attempt = 0; attempt < MAX_RPC_ATTEMPTS; attempt += 1) {
+    const rpcUrl = PRICE_RPC_URLS[attempt % PRICE_RPC_URLS.length];
     const remaining = requests.filter((request) => !resultIsUsable(collected.get(request.id)));
     if (remaining.length === 0) break;
     // Robinhood's public RPC rate-limits concurrent requests from some edge regions.
     // Sequential batches are slightly slower but avoid returning a single lucky batch.
     for (const batch of chunkRequests(remaining, PRICE_BATCH_SIZE)) {
-      const response = await requestBatch(batch);
+      const response = await requestBatch(batch, rpcUrl);
       response.forEach((result) => {
         if (result && typeof result.id === "string" && resultIsUsable(result)) collected.set(result.id, result);
       });

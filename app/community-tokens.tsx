@@ -112,6 +112,15 @@ function message(error: unknown) {
   return friendlyExecutionError(error);
 }
 
+async function requireActiveWallet(provider: Eip1193Provider, expectedAddress: string) {
+  const accounts = await provider.request({ method: "eth_accounts" });
+  const active = Array.isArray(accounts) && typeof accounts[0] === "string" ? getAddress(accounts[0]) : "";
+  if (!active || active.toLowerCase() !== expectedAddress.toLowerCase()) {
+    throw new Error("The active wallet account changed. Reconnect before signing this trade.");
+  }
+  return active;
+}
+
 function compact(value: string) {
   return `${value.slice(0, 6)}…${value.slice(-4)}`;
 }
@@ -342,22 +351,7 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
         const params = new URLSearchParams({ pool: activeMarket.pairAddress, token: activeMarket.address, range: chartRange });
         const response = await fetch(`/api/community-markets/chart?${params}`, { cache: "no-store", signal: controller.signal });
         const payload = await response.json() as { points?: ChartPoint[]; error?: string };
-        let points = response.ok && Array.isArray(payload.points) ? payload.points : [];
-        if (points.length < 2) {
-          const config = chartRange === "1D" ? { timeframe: "minute", aggregate: "15", limit: "96" }
-            : chartRange === "30D" ? { timeframe: "hour", aggregate: "4", limit: "180" }
-              : { timeframe: "hour", aggregate: "1", limit: "168" };
-          const direct = new URL(`https://api.geckoterminal.com/api/v2/networks/robinhood/pools/${activeMarket.pairAddress}/ohlcv/${config.timeframe}`);
-          direct.searchParams.set("aggregate", config.aggregate);
-          direct.searchParams.set("limit", config.limit);
-          direct.searchParams.set("currency", "usd");
-          direct.searchParams.set("token", activeMarket.address);
-          direct.searchParams.set("include_empty_intervals", "true");
-          const directResponse = await fetch(direct, { headers: { accept: "application/json;version=20230203" }, signal: controller.signal });
-          if (!directResponse.ok) throw new Error(payload.error || `Price history ${directResponse.status}`);
-          const directPayload = await directResponse.json() as { data?: { attributes?: { ohlcv_list?: Array<[number, number, number, number, number, number]> } } };
-          points = (directPayload.data?.attributes?.ohlcv_list ?? []).map(([time, open, high, low, close, volume]) => ({ time, open, high, low, close, volume })).sort((left, right) => left.time - right.time);
-        }
+        const points = Array.isArray(payload.points) ? payload.points : [];
         if (points.length < 2) throw new Error(payload.error || "No chart history is available yet.");
         setChartPoints(points);
       } catch (error) {
@@ -554,6 +548,10 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
       await walletProvider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: ROBINHOOD_MAINNET.chainId }] });
       const provider = new BrowserProvider(walletProvider, "any");
       const signer = await provider.getSigner();
+      const tradeAddress = await requireActiveWallet(walletProvider, walletAddress);
+      if ((await signer.getAddress()).toLowerCase() !== tradeAddress.toLowerCase()) {
+        throw new Error("The active wallet account changed. Reconnect before signing this trade.");
+      }
       const amountIn = parseUnits(amount, side === "buy" ? settlement.decimals : token.decimals);
       const slippageBps = Math.round(Number(slippage) * 100);
       if (amountIn <= 0n || amountIn > MAX_UINT128) throw new Error("Enter a valid amount.");
@@ -565,37 +563,40 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
       setQuote(liveQuote);
       const minAmountOut = liveQuote.amountOut * BigInt(10_000 - slippageBps) / 10_000n;
       const input = new Contract(tokenIn, ERC20_ABI, signer);
-      const [balance, gas] = await Promise.all([input.balanceOf(walletAddress) as Promise<bigint>, provider.getBalance(walletAddress)]);
+      const [balance, gas] = await Promise.all([input.balanceOf(tradeAddress) as Promise<bigint>, provider.getBalance(tradeAddress)]);
       if (balance < amountIn) throw new Error(`Insufficient ${side === "buy" ? settlement.symbol : token.symbol} balance.`);
       if (gas === 0n) throw new Error("A small ETH balance is required for gas.");
-      if (BigInt(await input.allowance(walletAddress, PERMIT2_ADDRESS)) < amountIn) {
+      if (BigInt(await input.allowance(tradeAddress, PERMIT2_ADDRESS)) < amountIn) {
+        await requireActiveWallet(walletProvider, tradeAddress);
         setStep("Confirm the exact Permit2 token approval…");
         const approval = await input.approve(PERMIT2_ADDRESS, amountIn);
         const approvalReceipt = await approval.wait();
         if (!approvalReceipt || approvalReceipt.status !== 1) throw new Error("Token approval was not confirmed.");
       }
       const permit2 = new Contract(PERMIT2_ADDRESS, PERMIT2_ABI, provider);
-      const allowance = await permit2.allowance(walletAddress, tokenIn, UNIVERSAL_ROUTER_ADDRESS) as { nonce?: bigint; 2?: bigint };
+      const allowance = await permit2.allowance(tradeAddress, tokenIn, UNIVERSAL_ROUTER_ADDRESS) as { nonce?: bigint; 2?: bigint };
       const now = Math.floor(Date.now() / 1_000);
       const permit: PermitSingle = { details: { token: tokenIn, amount: amountIn, expiration: now + 600, nonce: BigInt(allowance.nonce ?? allowance[2] ?? 0n) }, spender: UNIVERSAL_ROUTER_ADDRESS, sigDeadline: now + 600 };
+      await requireActiveWallet(walletProvider, tradeAddress);
       setStep("Sign the exact, ten-minute order permission…");
       const signature = await signer.signTypedData({ name: "Permit2", chainId: ROBINHOOD_MAINNET.chainIdNumber, verifyingContract: PERMIT2_ADDRESS }, PERMIT2_TYPES, permit);
       const calldata = liveQuote.protocol === "V2"
-        ? buildV2ExactInputCalldata({ tokenIn, tokenOut, recipient: walletAddress, amountIn, minAmountOut, path: liveQuote.path, permit, signature })
+        ? buildV2ExactInputCalldata({ tokenIn, tokenOut, recipient: tradeAddress, amountIn, minAmountOut, path: liveQuote.path, permit, signature })
         : liveQuote.protocol === "V3"
-          ? buildV3ExactInputCalldata({ tokenIn, tokenOut, recipient: walletAddress, amountIn, minAmountOut, fee: liveQuote.fee, permit, signature })
+          ? buildV3ExactInputCalldata({ tokenIn, tokenOut, recipient: tradeAddress, amountIn, minAmountOut, fee: liveQuote.fee, permit, signature })
           : buildV4ExactInputCalldata({ tokenIn, tokenOut, amountIn, minAmountOut, route: liveQuote.route, permit, signature });
       const router = new Contract(UNIVERSAL_ROUTER_ADDRESS, UNIVERSAL_ROUTER_ABI, signer);
       setStep("Simulating the protected trade…");
       await router.execute.staticCall(calldata.commands, calldata.inputs, now + 300);
       setStep("Confirm the protected mainnet trade in your wallet…");
+      await requireActiveWallet(walletProvider, tradeAddress);
       track("transaction_started", { ticker: token.symbol, side });
       const transaction = await router.execute(calldata.commands, calldata.inputs, now + 300);
       setStep("Waiting for Robinhood Chain confirmation…");
       const receipt = await transaction.wait();
       if (!receipt || receipt.status !== 1) throw new Error("The trade was not confirmed.");
       track("transaction_confirmed", { ticker: token.symbol, side });
-      onTradeConfirmed(receipt.hash, walletAddress);
+      onTradeConfirmed(receipt.hash, tradeAddress);
       notify(`${side === "buy" ? "Buy" : "Sell"} confirmed: ${token.symbol}`);
       setStep(`Confirmed on mainnet · ${compact(receipt.hash)}`);
     } catch (error) {
@@ -663,9 +664,9 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
         {!marketsLoading && marketsError && !markets.length && <div className="market-loading error"><strong>Market feed temporarily unavailable</strong><span>{marketsError}</span></div>}
         {!marketsLoading && visibleMarkets.map((market, index) => <article className="market-discovery-card" key={market.address}>
           <button className="market-card-main" type="button" aria-label={`Open ${market.symbol} market`} onClick={() => inspectMarket(market)}>
-            <header><div className="market-card-identity">{market.imageUrl ? <img src={market.imageUrl} alt="" width={48} height={48} loading={index < 6 ? "eager" : "lazy"} /> : <b>{market.symbol.slice(0, 2).toUpperCase()}</b>}<p><span>#{String(index + 1).padStart(2, "0")}</span><strong>{market.symbol}</strong><small>{market.name}</small></p></div><strong className={`market-change metric-change ${(market.priceChange24h ?? 0) >= 0 ? "up" : "down"}`}>{percent(market.priceChange24h)}</strong></header>
-            <div className="market-card-price metric-price"><span>PRICE</span><strong>{compactMoney(market.priceUsd, true)}</strong><small>{compact(market.address)}</small></div>
-            <div className="market-card-metrics"><div className="metric-volume"><span>24H VOLUME</span><strong>{compactMoney(market.volume24h)}</strong><small>{market.transactions24h ? `${market.transactions24h.toLocaleString("en-US")} trades` : "24 hours"}</small></div><div className="metric-liquidity"><span>LIQUIDITY</span><strong>{compactMoney(market.liquidityUsd)}</strong><small>Pool depth</small></div><div className="metric-cap"><span>{market.marketCapUsd !== null ? "MARKET CAP" : "FDV"}</span><strong>{compactMoney(market.marketCapUsd ?? market.fdvUsd)}</strong><small>{market.marketCapUsd !== null ? "Reported cap" : market.fdvUsd !== null ? "Fully diluted" : "Not reported"}</small></div></div>
+            <header><div className="market-card-identity">{market.imageUrl ? <img src={market.imageUrl} alt="" width={48} height={48} loading={index < 6 ? "eager" : "lazy"} /> : <b>{market.symbol.slice(0, 2).toUpperCase()}</b>}<p><span>#{String(index + 1).padStart(2, "0")}</span><strong>{market.symbol}</strong><small>{market.name}</small></p></div><strong className={`market-change ${market.priceChange24h === null ? "neutral" : market.priceChange24h >= 0 ? "up" : "down"}`}>{percent(market.priceChange24h)}</strong></header>
+            <div className="market-card-price"><span>PRICE</span><strong>{compactMoney(market.priceUsd, true)}</strong><small>{compact(market.address)}</small></div>
+            <div className="market-card-metrics"><div><span>24H VOLUME</span><strong>{compactMoney(market.volume24h > 0 ? market.volume24h : null)}</strong><small>{market.transactions24h ? `${market.transactions24h.toLocaleString("en-US")} trades` : "Not reported"}</small></div><div><span>LIQUIDITY</span><strong>{compactMoney(market.liquidityUsd > 0 ? market.liquidityUsd : null)}</strong><small>{market.liquidityUsd > 0 ? "Pool depth" : "Not reported"}</small></div><div><span>{market.marketCapUsd !== null ? "MARKET CAP" : "FDV"}</span><strong>{compactMoney(market.marketCapUsd ?? market.fdvUsd)}</strong><small>{market.marketCapUsd !== null ? "Reported cap" : market.fdvUsd !== null ? "Fully diluted" : "Not reported"}</small></div></div>
             <div className="market-card-enter"><span><strong>{market.lifecycle === "bonding" ? "BONDING" : `${market.symbol}/${market.quoteSymbol}`}</strong><small>{market.dex} · {poolAge(market.poolCreatedAt)}</small></span><b>Open market →</b></div>
           </button>
           <footer><div>{market.canonical && <em>CANONICAL</em>}{market.launchpad === "virtuals" && <em className="virtuals">VIRTUALS</em>}{!market.canonical && market.launchpad !== "virtuals" && <span>COMMUNITY MARKET</span>}</div><a href={market.externalUrl || market.pairUrl} target="_blank" rel="noreferrer" aria-label={`Open ${market.symbol} source market`}>Source ↗</a></footer>

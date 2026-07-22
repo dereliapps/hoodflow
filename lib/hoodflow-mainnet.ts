@@ -26,6 +26,7 @@ export const V2_FACTORY_ADDRESS = getAddress(infrastructure.contracts.v2Factory)
 export const V4_QUOTER_ADDRESS = getAddress(infrastructure.contracts.quoter);
 export const V3_QUOTER_ADDRESS = getAddress(infrastructure.contracts.v3Quoter);
 export const HOODFLOW_DCA_ADDRESS = getAddress(infrastructure.contracts.hoodFlowDca);
+export const HOODFLOW_V4_ADAPTER_ADDRESS = getAddress(infrastructure.contracts.hoodFlowV4Adapter);
 export const USDG_ADDRESS = ROBINHOOD_TOKENS.USDG;
 export const USDG_DECIMALS = 6;
 export const WETH_ADDRESS = getAddress("0x0bd7d308f8e1639fab988df18a8011f41eacad73");
