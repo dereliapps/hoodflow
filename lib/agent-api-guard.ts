@@ -78,8 +78,8 @@ function clientIdentity(request: Request) {
     || "anonymous").trim().slice(0, 96);
 }
 
-async function hashIdentity(value: string) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`hoodflow-agent-quote:${value}`));
+async function hashIdentity(value: string, scope: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`hoodflow-agent:${scope}:${value}`));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
@@ -98,11 +98,16 @@ async function cleanUpStaleRateLimitRows(
   }
 }
 
-export async function takeDurableAgentQuoteLimit(request: Request, limit: number, windowMs: number) {
+export async function takeDurableAgentQuoteLimit(
+  request: Request,
+  limit: number,
+  windowMs: number,
+  scope = "quote",
+) {
   const now = Date.now();
   const nowSeconds = Math.floor(now / 1_000);
   const cutoffSeconds = Math.floor((now - windowMs) / 1_000);
-  const key = await hashIdentity(clientIdentity(request));
+  const key = await hashIdentity(clientIdentity(request), scope);
   const db = await getDb();
   const [bucket] = await db.insert(agentQuoteRateLimits).values({
     key,
