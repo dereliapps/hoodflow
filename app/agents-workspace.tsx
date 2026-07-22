@@ -3,11 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 
-import RagretReceipt from "./ragret-receipt";
-
 type Props = {
   onOpenMarket: (ticker: string, intent?: { side: "buy" | "sell"; amount: string; slippageBps: number }) => void;
-  onOpenCommunityMarket: (address: string) => void;
 };
 
 type Market = {
@@ -59,7 +56,7 @@ function compactAmount(value: string) {
   return number.toLocaleString("en-US", { maximumFractionDigits: number >= 1 ? 6 : 10 });
 }
 
-export default function AgentsWorkspace({ onOpenMarket, onOpenCommunityMarket }: Props) {
+export default function AgentsWorkspace({ onOpenMarket }: Props) {
   const [markets, setMarkets] = useState(FALLBACK_MARKETS);
   const [prices, setPrices] = useState<PricePayload["prices"]>({});
   const [asset, setAsset] = useState("AAPL");
@@ -174,28 +171,22 @@ export default function AgentsWorkspace({ onOpenMarket, onOpenCommunityMarket }:
     document.getElementById("agent-preflight")?.scrollIntoView({ behavior: reduced ? "auto" : "smooth" });
   }
 
-  function scrollToRagret() {
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    document.getElementById("agent-ragret")?.scrollIntoView({ behavior: reduced ? "auto" : "smooth" });
-  }
-
   return (
     <section className="page inner-page agents-page">
       <div className="agents-disclosure"><span>Stock Tokens are not shares and may be restricted in your jurisdiction. Review eligibility and product risks before transacting.</span></div>
       <header className="agents-hero">
         <div className="agents-hero-copy">
-          <div className="agents-status-line"><span><i /> RAGRET AGENT LIVE</span><b>Deterministic engine · no LLM bill</b></div>
+          <div className="agents-status-line"><span><i /> PUBLIC AGENT API LIVE</span><b>Virtuals ACP resource not yet published</b></div>
           <p className="eyebrow">HOODFLOW FOR AGENTS</p>
-          <h1>Print the road<br /><em>you didn&apos;t take.</em></h1>
-          <p>RAGRET puts the same hypothetical USDG down a Stock Token path and one exact community-token path, then prints an up-to-24-hour gap as a shareable receipt. No wallet scan, no transaction claim, no paid LLM call.</p>
-          <div className="agents-hero-actions"><button className="ragret-hero-trigger" onClick={scrollToRagret}>Print a RAGRET receipt <span>↓</span></button><button onClick={scrollToPreflight}>Run a preflight <span>↓</span></button><a href="/docs#agents">API guide <span>→</span></a></div>
+          <h1>Let an agent find the route.<br /><em>You keep the signature.</em></h1>
+          <p>Give an AI agent a structured market registry and a bounded preflight action. HoodFlow checks reviewed Robinhood Chain liquidity, rejects unsafe oracle deviation, then carries the exact intent into a fresh wallet-confirmed order.</p>
+          <div className="agents-hero-actions"><a href="/docs#agents">View API guide <span>→</span></a><button onClick={scrollToPreflight}>Run a preflight <span>↓</span></button></div>
         </div>
         <aside className="agents-signal-card">
           <span>AVAILABLE NOW</span>
           <div><b>01</b><p><strong>Read markets</strong><small>{markets.length} currently exposed USDG routes</small></p><em>GET</em></div>
-          <div><b>02</b><p><strong>Print RAGRET</strong><small>Same notional, two source windows</small></p><em>POST</em></div>
-          <div><b>03</b><p><strong>Prepare quote</strong><small>Exact amount + output floor</small></p><em>POST</em></div>
-          <div><b>04</b><p><strong>Open the market</strong><small>Review either route from the receipt</small></p><em>USER</em></div>
+          <div><b>02</b><p><strong>Prepare quote</strong><small>Exact amount + output floor</small></p><em>POST</em></div>
+          <div><b>03</b><p><strong>Carry intent</strong><small>Side, amount and slippage preserved</small></p><em>USER</em></div>
           <footer><i /><span>No custody. No background signing.</span></footer>
         </aside>
       </header>
@@ -206,12 +197,6 @@ export default function AgentsWorkspace({ onOpenMarket, onOpenCommunityMarket }:
         <article><span>PREPARE</span><strong>Indicative preflight</strong><small>DEX output must remain within the oracle deviation boundary.</small></article>
         <article><span>CONFIRM</span><strong>Fresh wallet quote</strong><small>HoodFlow requotes before the user signs the transaction.</small></article>
       </div>
-
-      <RagretReceipt
-        stockMarkets={markets}
-        onOpenStockMarket={onOpenMarket}
-        onOpenCommunityMarket={onOpenCommunityMarket}
-      />
 
       <section className="agents-console" id="agent-preflight">
         <div className="agents-console-intro">
@@ -253,13 +238,12 @@ export default function AgentsWorkspace({ onOpenMarket, onOpenCommunityMarket }:
         <div><p className="eyebrow">THE PROVIDER SURFACE</p><h2>Useful to an agent.<br /><em>Understandable to a person.</em></h2></div>
         <div className="agents-endpoints">
           <article><span>RESOURCE · GET</span><strong>/api/agents/markets</strong><p>Execution-ready tickers, token addresses, settlement asset and route policy.</p><a href="/api/agents/markets">Inspect JSON →</a></article>
-          <article><span>SCENARIO · POST</span><strong>/api/agents/ragret</strong><p>Deterministic 24-hour counterfactual receipt. No wallet read, transaction, signature or LLM call.</p><button onClick={scrollToRagret}>Print one above ↑</button></article>
           <article><span>PREFLIGHT · POST</span><strong>/api/agents/quote</strong><p>Exact-input route check with an indicative floor, oracle deviation guard and 75-second data expiry.</p><button onClick={scrollToPreflight}>Try it above ↑</button></article>
           <article><span>EXECUTION · HANDOFF</span><strong>HoodFlow market</strong><p>Side, amount and slippage are prefilled. HoodFlow requotes before the user confirms the router order.</p><button onClick={() => onOpenMarket(asset)}>Open {asset} →</button></article>
         </div>
       </section>
 
-      <div className="agents-trust-note"><strong>What is not being claimed</strong><p>The RAGRET Virtuals profile and token are live, but this HoodFlow scenario action is not yet a published Virtuals ACP service. A RAGRET receipt is a source-backed counterfactual, not proof of a wallet transaction or financial advice.</p></div>
+      <div className="agents-trust-note"><strong>What is not being claimed</strong><p>HoodFlow is not yet listed as a live Virtuals ACP provider. The public resource and quote-preflight surface are ready; registry onboarding, commercial terms and any future scoped agent signer remain separate release gates.</p></div>
     </section>
   );
 }

@@ -42,23 +42,6 @@ export async function GET() {
         },
         output: "Indicative route check plus an exact-intent HoodFlow handoff. HoodFlow requotes before final wallet confirmation.",
       }],
-      scenarioActions: [{
-        id: "hoodflow.calculate-ragret-scenario",
-        description: "Compare the same hypothetical USDG notional across a supported Stock Token and a Robinhood Chain community token. This deterministic scenario never reads wallet activity or submits a transaction.",
-        method: "POST",
-        endpoint: `${origin}/api/agents/ragret`,
-        inputSchema: {
-          type: "object",
-          additionalProperties: false,
-          required: ["stock", "communityAddress", "notionalUsdg"],
-          properties: {
-            stock: { type: "string", description: "A supported Robinhood Chainlink Stock Token ticker, for example AAPL." },
-            communityAddress: { type: "string", pattern: "^0x[a-fA-F0-9]{40}$", description: "Robinhood Chain community-token contract address." },
-            notionalUsdg: { type: "string", pattern: "^(?:0|[1-9]\\d{0,5})(?:\\.\\d{1,2})?$", description: "Hypothetical USDG notional from 0.01 through 999,999.99." },
-          },
-        },
-        output: "A deterministic, scenario-only RAGRET receipt with comparison values, methodology, source timestamps, and explicit non-transaction flags.",
-      }],
     },
     safety: {
       custody: "self-custody",
