@@ -187,15 +187,15 @@ export default function AgentsWorkspace({ onOpenMarket, onOpenCommunityMarket }:
           <div className="agents-status-line"><span><i /> RAGRET AGENT LIVE</span><b>Deterministic engine · no LLM bill</b></div>
           <p className="eyebrow">HOODFLOW FOR AGENTS</p>
           <h1>Print the road<br /><em>you didn&apos;t take.</em></h1>
-          <p>RAGRET puts the same hypothetical USDG down a Stock Token path and one exact community-token path, then prints the 24-hour gap as a shareable receipt. No wallet scan, no transaction claim, no paid LLM call.</p>
+          <p>RAGRET puts the same hypothetical USDG down a Stock Token path and one exact community-token path, then prints an up-to-24-hour gap as a shareable receipt. No wallet scan, no transaction claim, no paid LLM call.</p>
           <div className="agents-hero-actions"><button className="ragret-hero-trigger" onClick={scrollToRagret}>Print a RAGRET receipt <span>↓</span></button><button onClick={scrollToPreflight}>Run a preflight <span>↓</span></button><a href="/docs#agents">API guide <span>→</span></a></div>
         </div>
         <aside className="agents-signal-card">
           <span>AVAILABLE NOW</span>
           <div><b>01</b><p><strong>Read markets</strong><small>{markets.length} currently exposed USDG routes</small></p><em>GET</em></div>
-          <div><b>02</b><p><strong>Print RAGRET</strong><small>Same notional, two 24h roads</small></p><em>POST</em></div>
+          <div><b>02</b><p><strong>Print RAGRET</strong><small>Same notional, two source windows</small></p><em>POST</em></div>
           <div><b>03</b><p><strong>Prepare quote</strong><small>Exact amount + output floor</small></p><em>POST</em></div>
-          <div><b>04</b><p><strong>Carry intent</strong><small>Side, amount and slippage preserved</small></p><em>USER</em></div>
+          <div><b>04</b><p><strong>Open the market</strong><small>Review either route from the receipt</small></p><em>USER</em></div>
           <footer><i /><span>No custody. No background signing.</span></footer>
         </aside>
       </header>

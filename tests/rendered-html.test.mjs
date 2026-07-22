@@ -264,8 +264,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(agentGuard, /agentQuoteRateLimits/);
   assert.match(agentGuard, /RATE_LIMIT_ROW_TTL_MS/);
   assert.match(agentGuard, /\.returning\(/);
-  assert.match(ragretUi, /RAGRET \/\/ 24H SCENARIO/);
+  assert.match(ragretUi, /RAGRET \/\/ UP TO 24H/);
   assert.match(ragretUi, /SCENARIO ONLY · NOT A TRANSACTION RECEIPT/);
+  assert.match(ragretUi, /newer community token may use its since-launch window/i);
   assert.match(ragretUi, /ragretStock/);
   assert.match(ragretUi, /Share PNG/);
   assert.match(ragretUi, /\/ragret-logo\.png/);

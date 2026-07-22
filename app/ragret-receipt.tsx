@@ -577,9 +577,9 @@ export default function RagretReceipt({
     <section className="ragret-shell" id="agent-ragret" aria-labelledby="ragret-title">
       <header className="ragret-heading">
         <div className="ragret-heading-copy">
-          <p className="ragret-eyebrow">RAGRET // 24H SCENARIO</p>
+          <p className="ragret-eyebrow">RAGRET // UP TO 24H</p>
           <h2 id="ragret-title">Put the same USDG<br />down two roads.</h2>
-          <p>Compare one Stock Token with one exact Robinhood Chain community-token contract over a source-backed rolling window.</p>
+          <p>Compare one Stock Token with one exact Robinhood Chain community-token contract over source-backed windows of up to 24 hours.</p>
         </div>
         <div className="ragret-heading-badge">
           <Image src="/ragret-logo.png" alt="RAGRET agent logo" width={58} height={58} priority />
@@ -589,12 +589,12 @@ export default function RagretReceipt({
 
       <div className="ragret-permanent-disclaimer" role="note">
         <strong>SCENARIO ONLY · NOT A TRANSACTION RECEIPT</strong>
-        <span>No wallet activity is inspected. Values assume 1 USDG = 1 USD and exclude fees, slippage, taxes and execution feasibility.</span>
+        <span>No wallet activity is inspected. A newer community token may use its since-launch window. Values assume 1 USDG = 1 USD and exclude fees, slippage, taxes and execution feasibility.</span>
       </div>
 
       <div className="ragret-workbench">
         <form className="ragret-form" onSubmit={createScenario} aria-busy={receiptBusy}>
-          <div className="ragret-form-head"><span>BUILD_RAGRET_RECEIPT</span><b>ROLLING 24H</b></div>
+          <div className="ragret-form-head"><span>BUILD_RAGRET_RECEIPT</span><b>UP TO 24H</b></div>
 
           <label className="ragret-field">
             <span>STOCK TOKEN</span>
@@ -710,7 +710,7 @@ export default function RagretReceipt({
               <div><span>COMMUNITY CONTRACT</span><strong>{receipt.community.address}</strong></div>
               <div><span>GENERATED</span><strong>{new Date(receipt.generatedAt).toLocaleString()}</strong></div>
             </div>
-            <footer className="ragret-receipt-disclaimer"><strong>SCENARIO ONLY · NOT A TRANSACTION RECEIPT</strong><span>No wallet activity inspected · 1 USDG = 1 USD · Fees, slippage, taxes and execution feasibility excluded.</span></footer>
+            <footer className="ragret-receipt-disclaimer"><strong>SCENARIO ONLY · NOT A TRANSACTION RECEIPT</strong><span>No wallet activity inspected · Newer community tokens may use since-launch data · Fees, slippage, taxes and execution feasibility excluded.</span></footer>
           </article>}
 
           {receipt && <div className="ragret-actions">
