@@ -28,14 +28,15 @@ test("encodes an atomic V2 route through the selected market settlement token", 
 
   assert.equal(calldata.commands, "0x0a08");
   const decoded = AbiCoder.defaultAbiCoder().decode(
-    ["address", "uint256", "uint256", "address[]", "bool"],
+    ["address", "uint256", "uint256", "address[]", "bool", "uint256[]"],
     calldata.inputs[1],
   );
   assert.deepEqual(decoded[3].map((address: string) => address.toLowerCase()), [USDG, VIRTUAL, TOKEN].map((address) => address.toLowerCase()));
   assert.equal(decoded[4], true);
+  assert.deepEqual([...decoded[5]], []);
 });
 
-test("encodes the deployed router's five-field V3 exact-input payload", () => {
+test("encodes the deployed router's guarded V3 exact-input payload", () => {
   const calldata = buildV3ExactInputCalldata({
     tokenIn: USDG,
     tokenOut: TOKEN,
@@ -52,13 +53,14 @@ test("encodes the deployed router's five-field V3 exact-input payload", () => {
   });
 
   const decoded = AbiCoder.defaultAbiCoder().decode(
-    ["address", "uint256", "uint256", "bytes", "bool"],
+    ["address", "uint256", "uint256", "bytes", "bool", "uint256[]"],
     calldata.inputs[1],
   );
   assert.equal(decoded[0].toLowerCase(), RECIPIENT.toLowerCase());
   assert.equal(decoded[1], 10_000_000n);
   assert.equal(decoded[2], 1n);
   assert.equal(decoded[4], true);
+  assert.deepEqual([...decoded[5]], []);
 });
 
 test("maps the deployed router's SliceOutOfBounds selector to a safe user message", () => {

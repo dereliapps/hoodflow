@@ -54,6 +54,21 @@ const canonicalAssets = [
   ...infrastructure.assetTypes.etfs,
 ];
 const forkVerifiedAssets = new Set(infrastructure.forkVerifiedAssets);
+const dcaEnabledAssets = new Set(infrastructure.dcaEnabledAssets);
+if (forkVerifiedAssets.size !== infrastructure.forkVerifiedAssets.length) {
+  throw new Error("forkVerifiedAssets contains a duplicate ticker");
+}
+if (dcaEnabledAssets.size !== infrastructure.dcaEnabledAssets.length) {
+  throw new Error("dcaEnabledAssets contains a duplicate ticker");
+}
+for (const symbol of dcaEnabledAssets) {
+  if (!forkVerifiedAssets.has(symbol)) {
+    throw new Error(`${symbol} is DCA-enabled without a fork-verified direct route`);
+  }
+  if (symbol in v3VerifiedAssets) {
+    throw new Error(`${symbol} is DCA-enabled but its configured direct route is V3`);
+  }
+}
 const codeResults = await Promise.all(
   [...contractEntries, ...tokenEntries].map(async ([name, rawAddress]) => {
     const address = getAddress(rawAddress);
@@ -225,6 +240,19 @@ for (const symbol of infrastructure.launchAssets) {
   const route = routeResults.find((candidate) => candidate.symbol === symbol);
   if (!route?.executable) {
     throw new Error(`${symbol}/USDG has no quoted V4 route compatible with the adapter`);
+  }
+}
+
+for (const symbol of forkVerifiedAssets) {
+  const route = routeResults.find((candidate) => candidate.symbol === symbol);
+  if (!route?.executable) {
+    throw new Error(`${symbol}/USDG is marked fork-verified but has no live executable route`);
+  }
+  if (symbol in v3VerifiedAssets && route.v3Pool === null) {
+    throw new Error(`${symbol}/USDG is configured for V3 but its verified V3 route is unavailable`);
+  }
+  if (!(symbol in v3VerifiedAssets) && route.bestRoute?.protocol !== "V4") {
+    throw new Error(`${symbol}/USDG is configured for V4 but no compatible V4 route is executable`);
   }
 }
 

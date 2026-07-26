@@ -10,6 +10,7 @@ const localNetwork = await ethers.provider.getNetwork();
 if (localNetwork.chainId !== 31_337n) {
   throw new Error(`Refusing to run: expected local fork chain 31337, received ${localNetwork.chainId}`);
 }
+const forkBlockNumber = await ethers.provider.getBlockNumber();
 
 const [recipient] = await ethers.getSigners();
 const poolManagerAddress = getAddress(infrastructure.contracts.poolManager);
@@ -40,20 +41,33 @@ await adapter.waitForDeployment();
 
 const routeAmount = 1_000_000n;
 const routes = [
-  { symbol: "AAPL", fee: 500, tickSpacing: 10 },
+  { symbol: "AAPL", fee: 3_000, tickSpacing: 60 },
   { symbol: "AMD", fee: 10_000, tickSpacing: 200 },
   { symbol: "AMZN", fee: 3_000, tickSpacing: 60 },
+  { symbol: "COIN", fee: 3_000, tickSpacing: 60 },
   { symbol: "GOOGL", fee: 3_000, tickSpacing: 60 },
-  { symbol: "INTC", fee: 10_000, tickSpacing: 200 },
+  { symbol: "INTC", fee: 3_000, tickSpacing: 60 },
   { symbol: "META", fee: 3_000, tickSpacing: 60 },
   { symbol: "MU", fee: 10_000, tickSpacing: 200 },
-  { symbol: "NVDA", fee: 3_000, tickSpacing: 60 },
+  { symbol: "NVDA", fee: 10_000, tickSpacing: 200 },
+  { symbol: "PLTR", fee: 10_000, tickSpacing: 200 },
   { symbol: "SNDK", fee: 10_000, tickSpacing: 200 },
-  { symbol: "SPCX", fee: 10_000, tickSpacing: 200 },
+  { symbol: "SPCX", fee: 3_000, tickSpacing: 60 },
   { symbol: "TSLA", fee: 3_000, tickSpacing: 60 },
+  { symbol: "USAR", fee: 10_000, tickSpacing: 200 },
   { symbol: "QQQ", fee: 10_000, tickSpacing: 200 },
   { symbol: "SPY", fee: 3_000, tickSpacing: 60 },
 ] as const;
+const configuredV3Assets = new Set(Object.keys(infrastructure.v3VerifiedAssets));
+const configuredV4Assets = infrastructure.forkVerifiedAssets.filter(
+  (symbol) => !configuredV3Assets.has(symbol),
+);
+if (
+  configuredV4Assets.length !== routes.length
+  || routes.some((route, index) => route.symbol !== configuredV4Assets[index])
+) {
+  throw new Error("The V4 fork fixtures do not match the configured direct V4 route registry");
+}
 const requiredUsdG = routeAmount * BigInt(routes.length);
 const poolManagerBalance = BigInt(await usdG.balanceOf(poolManagerAddress));
 if (poolManagerBalance < requiredUsdG) {
@@ -91,6 +105,32 @@ for (const route of routes) {
   const receipt = await transaction.wait();
   const amountOut = BigInt(await outputToken.balanceOf(recipient.address)) - before;
   if (amountOut <= 0n) throw new Error(`${route.symbol}/USDG fork swap returned no output`);
+
+  const outputWithSigner = new Contract(outputAddress, erc20Abi, recipient);
+  await (await outputWithSigner.transfer(await engine.getAddress(), amountOut)).wait();
+  await (await engine.approveToken(outputAddress, await adapter.getAddress(), MaxUint256)).wait();
+  const usdGBeforeSell = BigInt(await new Contract(
+    usdGAddress,
+    erc20Abi,
+    ethers.provider,
+  ).balanceOf(recipient.address));
+  const sellTransaction = await engine.executeSwap(
+    await adapter.getAddress(),
+    outputAddress,
+    usdGAddress,
+    amountOut,
+    1,
+    recipient.address,
+    block.timestamp + 300,
+    routeData,
+  );
+  const sellReceipt = await sellTransaction.wait();
+  const sellAmountOut = BigInt(await new Contract(
+    usdGAddress,
+    erc20Abi,
+    ethers.provider,
+  ).balanceOf(recipient.address)) - usdGBeforeSell;
+  if (sellAmountOut <= 0n) throw new Error(`${route.symbol}/USDG reverse fork swap returned no USDG`);
   results.push({
     pair: `${route.symbol}/USDG`,
     fee: route.fee,
@@ -98,6 +138,9 @@ for (const route of routes) {
     amountIn: routeAmount.toString(),
     amountOut: amountOut.toString(),
     gasUsed: receipt?.gasUsed.toString(),
+    sellAmountIn: amountOut.toString(),
+    sellAmountOut: sellAmountOut.toString(),
+    sellGasUsed: sellReceipt?.gasUsed.toString(),
   });
   console.log(`fork route passed: ${route.symbol}`);
 }
@@ -105,6 +148,7 @@ for (const route of routes) {
 console.log(JSON.stringify({
   verified: true,
   environment: "local Robinhood mainnet fork",
+  forkBlockNumber,
   upstreamChainId: infrastructure.chainId,
   localChainId: Number(localNetwork.chainId),
   broadcast: false,

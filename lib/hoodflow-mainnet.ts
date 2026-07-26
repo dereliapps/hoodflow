@@ -16,6 +16,7 @@ export const ROBINHOOD_TOKENS = Object.fromEntries(
 ) as Record<string, string>;
 
 export const ROUTED_ASSETS = infrastructure.forkVerifiedAssets as readonly string[];
+export const DCA_ENABLED_ASSETS = infrastructure.dcaEnabledAssets as readonly string[];
 export const WATCH_ONLY_ASSETS = Object.keys(ROBINHOOD_TOKENS).filter(
   (ticker) => ticker !== "USDG" && !ROUTED_ASSETS.includes(ticker),
 );
@@ -163,6 +164,13 @@ export function isRoutedAsset(ticker: string): boolean {
   return ROUTED_ASSETS.includes(ticker) && Boolean(ROBINHOOD_TOKENS[ticker]);
 }
 
+export function isDcaEnabledAsset(ticker: string): boolean {
+  return DCA_ENABLED_ASSETS.includes(ticker)
+    && ROUTED_ASSETS.includes(ticker)
+    && Boolean(ROBINHOOD_TOKENS[ticker])
+    && !isV3RoutedAsset(ticker);
+}
+
 export function isV3RoutedAsset(ticker: string): boolean {
   return Number.isInteger(V3_ROUTE_FEES[ticker]) && V3_ROUTE_FEES[ticker] > 0;
 }
@@ -288,8 +296,8 @@ export function buildV3ExactInputCalldata(args: {
     [getAddress(args.tokenIn), args.fee, getAddress(args.tokenOut)],
   );
   const swapInput = coder.encode(
-    ["address", "uint256", "uint256", "bytes", "bool"],
-    [getAddress(args.recipient), args.amountIn, args.minAmountOut, path, true],
+    ["address", "uint256", "uint256", "bytes", "bool", "uint256[]"],
+    [getAddress(args.recipient), args.amountIn, args.minAmountOut, path, true, []],
   );
   const permitInput = coder.encode(
     ["tuple(tuple(address token,uint160 amount,uint48 expiration,uint48 nonce) details,address spender,uint256 sigDeadline)", "bytes"],
@@ -318,13 +326,14 @@ export function buildV2ExactInputCalldata(args: {
     throw new Error("The V2 route path does not match the selected input and output tokens.");
   }
   const swapInput = coder.encode(
-    ["address", "uint256", "uint256", "address[]", "bool"],
+    ["address", "uint256", "uint256", "address[]", "bool", "uint256[]"],
     [
       getAddress(args.recipient),
       args.amountIn,
       args.minAmountOut,
       path,
       true,
+      [],
     ],
   );
   const permitInput = coder.encode(

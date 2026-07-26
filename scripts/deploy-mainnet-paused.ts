@@ -48,8 +48,20 @@ if (keepers.some((keeper) => roleSet.has(lower(keeper)))) {
   throw new Error("Keeper addresses must not overlap owner, guardian or fee recipient");
 }
 
+const directSwapTickers = new Set(infrastructure.forkVerifiedAssets);
 const v3Only = new Set(Object.keys(infrastructure.v3VerifiedAssets));
-const dcaTickers = infrastructure.forkVerifiedAssets.filter((ticker) => !v3Only.has(ticker));
+const dcaTickers = infrastructure.dcaEnabledAssets;
+if (new Set(dcaTickers).size !== dcaTickers.length) {
+  throw new Error("dcaEnabledAssets contains a duplicate ticker");
+}
+for (const ticker of dcaTickers) {
+  if (!directSwapTickers.has(ticker)) {
+    throw new Error(`${ticker} cannot be DCA-enabled before its direct route is fork-verified`);
+  }
+  if (v3Only.has(ticker)) {
+    throw new Error(`${ticker} uses a direct V3 route and is not compatible with the V4 DCA adapter`);
+  }
+}
 const tokenConfigs = dcaTickers.map((ticker) => {
   const token = infrastructure.tokens[ticker as keyof typeof infrastructure.tokens];
   const oracle = ROBINHOOD_PRICE_FEEDS[ticker as keyof typeof ROBINHOOD_PRICE_FEEDS];

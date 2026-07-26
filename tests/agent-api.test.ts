@@ -15,15 +15,37 @@ import {
   AgentApiBodyTooLargeError,
   readCappedJson,
 } from "../lib/agent-api-guard.js";
+import {
+  DCA_ENABLED_ASSETS,
+  ROUTED_ASSETS,
+  isDcaEnabledAsset,
+  isV3RoutedAsset,
+} from "../lib/hoodflow-mainnet.js";
+import { seoAssets } from "../lib/seo-assets.js";
 
 test("publishes only route-reviewed HoodFlow markets", () => {
   const markets = listAgentMarkets();
-  assert.equal(markets.length, 14);
+  assert.equal(markets.length, 18);
   assert.ok(markets.every((market) => market.status === "route-reviewed"));
   assert.ok(markets.every((market) => market.settlementTicker === "USDG"));
   assert.equal(markets.find((market) => market.ticker === "SGOV"), undefined);
   assert.equal(markets.find((market) => market.ticker === "SLV")?.route, "Uniswap V3");
+  assert.equal(markets.find((market) => market.ticker === "CUSO")?.route, "Uniswap V3");
+  assert.equal(markets.find((market) => market.ticker === "CUSO")?.type, "ETF Token");
   assert.equal(markets.find((market) => market.ticker === "AAPL")?.route, "Uniswap V4");
+  for (const ticker of ["COIN", "PLTR", "USAR"]) {
+    assert.equal(markets.find((market) => market.ticker === ticker)?.route, "Uniswap V4");
+  }
+});
+
+test("keeps direct, DCA, SEO and agent route registries in sync", () => {
+  const seoRoutedAssets = seoAssets.filter((asset) => asset.fullFill).map((asset) => asset.ticker);
+  assert.deepEqual(seoRoutedAssets, [...ROUTED_ASSETS]);
+  assert.deepEqual(listAgentMarkets().map((market) => market.ticker), [...ROUTED_ASSETS]);
+  assert.equal(new Set(ROUTED_ASSETS).size, ROUTED_ASSETS.length);
+  assert.equal(new Set(DCA_ENABLED_ASSETS).size, DCA_ENABLED_ASSETS.length);
+  assert.ok(DCA_ENABLED_ASSETS.every((ticker) => ROUTED_ASSETS.includes(ticker)));
+  assert.ok(DCA_ENABLED_ASSETS.every((ticker) => isDcaEnabledAsset(ticker) && !isV3RoutedAsset(ticker)));
 });
 
 test("normalizes bounded quote requests", () => {
@@ -38,6 +60,12 @@ test("normalizes bounded quote requests", () => {
     side: "sell",
     amount: "0.125",
     slippageBps: 25,
+  });
+  assert.deepEqual(parseAgentQuoteRequest({ asset: "cuso", side: "BUY", amount: "10" }), {
+    asset: "CUSO",
+    side: "buy",
+    amount: "10",
+    slippageBps: 50,
   });
 });
 

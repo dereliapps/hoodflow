@@ -53,10 +53,11 @@
     "CUSO": "USO"
   },
   "launchAssets": ["AAPL", "NVDA", "GOOGL", "TSLA"],
-  "forkVerifiedAssets": ["AAPL", "AMD", "AMZN", "GOOGL", "INTC", "META", "MU", "NVDA", "SNDK", "SPCX", "TSLA", "QQQ", "SLV", "SPY"],
+  "forkVerifiedAssets": ["AAPL", "AMD", "AMZN", "COIN", "GOOGL", "INTC", "META", "MU", "NVDA", "PLTR", "SNDK", "SPCX", "TSLA", "USAR", "QQQ", "SLV", "SPY", "CUSO"],
+  "dcaEnabledAssets": ["AAPL", "AMD", "AMZN", "GOOGL", "INTC", "META", "MU", "NVDA", "SNDK", "SPCX", "TSLA", "QQQ", "SPY"],
   "v3VerifiedAssets": {
-    "SGOV": 100,
-    "SLV": 3000
+    "SLV": 3000,
+    "CUSO": 3000
   },
   "sources": {
     "network": "https://docs.robinhood.com/chain/connecting/",

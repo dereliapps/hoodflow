@@ -33,12 +33,14 @@ import {
   V3_QUOTER_ABI,
   V3_QUOTER_ADDRESS,
   V3_ROUTE_FEES,
+  DCA_ENABLED_ASSETS,
   buildDirectBuyCalldata,
   buildV4ExactInputCalldata,
   buildV3DirectBuyCalldata,
   buildV3ExactInputCalldata,
   buildExactInputQuoteParams,
   friendlyExecutionError,
+  isDcaEnabledAsset,
   isRoutedAsset,
   isV3RoutedAsset,
   type PoolCandidate,
@@ -53,6 +55,7 @@ import {
 } from "@/lib/robinhood-prices";
 import { ROBINHOOD_PRICE_FEEDS } from "@/config/robinhood-price-feeds";
 import { track } from "@/lib/analytics-client";
+import { seoAssets } from "@/lib/seo-assets";
 import MarketStatus from "./market-status";
 import type { PrivyWalletController } from "./privy-wallet-bridge";
 import { PRIVY_CONFIGURED } from "./privy-config";
@@ -136,33 +139,13 @@ const ORDER_STORAGE_PREFIX = "hoodflow-mainnet-orders-v4";
 const PRICE_CACHE_KEY = "hoodflow-live-prices-v1";
 const MAX_UINT128 = (1n << 128n) - 1n;
 
-const assetRegistry = [
-  { ticker: "AAPL", name: "Apple", type: "Stock", fullFill: true, logo: "/logos/AAPL.png" },
-  { ticker: "AMD", name: "AMD", type: "Stock", fullFill: true, logo: "/logos/AMD.png" },
-  { ticker: "AMZN", name: "Amazon", type: "Stock", fullFill: true, logo: "/logos/AMZN.png" },
-  { ticker: "BABA", name: "Alibaba", type: "Stock", fullFill: false, logo: "/logos/BABA.png" },
-  { ticker: "BE", name: "Bloom Energy", type: "Stock", fullFill: false, logo: "/logos/BE.png" },
-  { ticker: "COIN", name: "Coinbase", type: "Stock", fullFill: false, logo: "/logos/COIN.png" },
-  { ticker: "CRCL", name: "Circle", type: "Stock", fullFill: false, logo: "/logos/CRCL.png" },
-  { ticker: "CRWV", name: "CoreWeave", type: "Stock", fullFill: false, logo: "/logos/CRWV.png" },
-  { ticker: "GOOGL", name: "Alphabet", type: "Stock", fullFill: true, logo: "/logos/GOOGL.png" },
-  { ticker: "INTC", name: "Intel", type: "Stock", fullFill: true, logo: "/logos/INTC.png" },
-  { ticker: "META", name: "Meta", type: "Stock", fullFill: true, logo: "/logos/META.png" },
-  { ticker: "MSFT", name: "Microsoft", type: "Stock", fullFill: false, logo: "/logos/MSFT.png" },
-  { ticker: "MU", name: "Micron", type: "Stock", fullFill: true, logo: "/logos/MU.png" },
-  { ticker: "NVDA", name: "NVIDIA", type: "Stock", fullFill: true, logo: "/logos/NVDA.png" },
-  { ticker: "ORCL", name: "Oracle", type: "Stock", fullFill: false, logo: "/logos/ORCL.png" },
-  { ticker: "PLTR", name: "Palantir", type: "Stock", fullFill: false, logo: "/logos/PLTR.png" },
-  { ticker: "SNDK", name: "Sandisk", type: "Stock", fullFill: true, logo: "/logos/SNDK.png" },
-  { ticker: "SPCX", name: "SpaceX", type: "Stock", fullFill: true, logo: "/logos/SPCX.png" },
-  { ticker: "TSLA", name: "Tesla", type: "Stock", fullFill: true, logo: "/logos/TSLA.png" },
-  { ticker: "USAR", name: "USA Rare Earth", type: "Stock", fullFill: false, logo: "/logos/USAR.png" },
-  { ticker: "QQQ", name: "Invesco QQQ", type: "ETF", fullFill: true, logo: "/logos/QQQ.png" },
-  { ticker: "SGOV", name: "iShares 0-3 Month Treasury", type: "ETF", fullFill: false, logo: "/logos/SGOV.png" },
-  { ticker: "SLV", name: "iShares Silver Trust", type: "ETF", fullFill: true, logo: "/logos/SLV.png" },
-  { ticker: "SPY", name: "SPDR S&P 500", type: "ETF", fullFill: true, logo: "/logos/SPY.png" },
-  { ticker: "CUSO", name: "United States Oil Fund", type: "ETF", fullFill: false, logo: "/logos/CUSO.png" },
-] as const;
+const assetRegistry = seoAssets.map((asset) => ({
+  ticker: asset.ticker,
+  name: asset.name,
+  type: asset.type === "Tokenized ETF" ? "ETF" : "Stock",
+  fullFill: asset.fullFill,
+  logo: `/logos/${asset.ticker}.png`,
+}));
 
 const assetByTicker = Object.fromEntries(assetRegistry.map((asset) => [asset.ticker, asset])) as Record<string, (typeof assetRegistry)[number]>;
 const executionReadyAssetCount = assetRegistry.filter((asset) => asset.fullFill).length;
@@ -1300,7 +1283,7 @@ export default function Home() {
 
   function openComposer(nextKind: StrategyKind = "Buy", nextAsset?: string) {
     setKind(nextKind);
-    const asset = nextAsset && (nextKind !== "DCA" || !isV3RoutedAsset(nextAsset))
+    const asset = nextAsset && (nextKind !== "DCA" || isDcaEnabledAsset(nextAsset))
       ? nextAsset
       : nextKind === "DCA" ? "AAPL" : "INTC";
     setDraftName(nextKind === "Buy" ? `${asset} instant buy` : nextKind === "Sell" ? `${asset} instant sell` : `Weekly ${asset}`);
@@ -1610,8 +1593,7 @@ export default function Home() {
 
   async function createOnchainDca(provider: BrowserProvider, address: string) {
     if (!contractConfigured || !contractReady) throw new Error(`Recurring engine is not live yet (${contractStatus}).`);
-    if (!isRoutedAsset(draftAsset)) throw new Error(`${draftAsset} is not enabled for recurring execution.`);
-    if (isV3RoutedAsset(draftAsset)) throw new Error(`${draftAsset} is enabled for Buy Now, but not for recurring V4 execution.`);
+    if (!isDcaEnabledAsset(draftAsset)) throw new Error(`${draftAsset} is enabled for Buy or Sell, but not for recurring execution.`);
     if (priceBook[draftAsset]?.status !== "live") throw new Error(`${draftAsset} oracle is not live. The strategy is blocked.`);
     const executions = Number.parseInt(draftExecutions, 10);
     if (!Number.isInteger(executions) || executions < 2 || executions > 52) throw new Error("Choose between 2 and 52 executions.");
@@ -1842,7 +1824,7 @@ export default function Home() {
             <article className="hf-first-order"><span>YOUR FIRST ROUTE</span><h2>Start with a quote.<br />Signing comes later.</h2><p>Choose a market and amount. HoodFlow checks the executable route before asking for any token permission.</p><button onClick={() => openComposer("Buy", "AAPL")}>Quote an AAPL buy →</button><small>No custody · no account · wallet confirmation required</small></article>
           </div>
 
-          <section className="hf-final-cta"><div><p className="eyebrow">ROBINHOOD CHAIN / MAINNET BETA</p><h2>Trade the route,<br /><em>not the promise.</em></h2></div><div><p>25 canonical markets are indexed. {executionReadyAssetCount} are execution-enabled. The rest stay visible and blocked until their routes pass.</p><button onClick={() => navigate("assets")}>Open the market directory →</button></div></section>
+          <section className="hf-final-cta"><div><p className="eyebrow">ROBINHOOD CHAIN / MAINNET BETA</p><h2>Trade the route,<br /><em>not the promise.</em></h2></div><div><p>{assetRegistry.length} canonical markets are indexed. {executionReadyAssetCount} are execution-enabled. The rest stay visible and blocked until their routes pass.</p><button onClick={() => navigate("assets")}>Open the market directory →</button></div></section>
 
           <section className="hf-faq"><p className="eyebrow">QUESTIONS BEFORE YOU SIGN</p><details><summary>Does HoodFlow custody my assets?</summary><p>No. The connected wallet signs the router transaction and received tokens remain in that wallet.</p></details><details><summary>Are Stock Tokens actual shares?</summary><p>No. Stock Tokens provide economic exposure without shareholder rights and may be restricted in your jurisdiction.</p></details><details><summary>Why are only {executionReadyAssetCount} markets trade-enabled?</summary><p>HoodFlow keeps a token watch-only until a reviewed route completes a full-input fork execution and a fresh quote is available.</p></details><details><summary>Is HoodFlow independently audited?</summary><p>Not yet. Until a public final report exists, HoodFlow exposes its contract source, onchain addresses, automated checks, known limitations and a private responsible-disclosure channel on the <a href="/security">Security page</a>.</p></details></section>
         </section>
@@ -1869,7 +1851,7 @@ export default function Home() {
         <section className="page inner-page assets-page">
           <div className="asset-hero">
             <div><p className="eyebrow">ROBINHOOD ASSET MATRIX</p><h1>Twenty-five assets.<br /><span>Priced onchain.</span></h1><p>Every canonical Robinhood stock token and ETF is indexed with its real brand mark and multiplier-adjusted Chainlink token price. HoodFlow only enables assets that completed a full-input fork swap; everything else stays safely watch-only.</p></div>
-            <div className="asset-totals"><div><strong>25</strong><span>INDEXED TOKENS</span></div><div><strong>15</strong><span>FULL-FILL READY</span></div><div><strong>10</strong><span>WATCH-ONLY</span></div></div>
+            <div className="asset-totals"><div><strong>{assetRegistry.length}</strong><span>INDEXED TOKENS</span></div><div><strong>{executionReadyAssetCount}</strong><span>FULL-FILL READY</span></div><div><strong>{assetRegistry.length - executionReadyAssetCount}</strong><span>WATCH-ONLY</span></div></div>
           </div>
           <div className="asset-logo-cloud" aria-label="All supported brands">{assetRegistry.map((asset) => <Mark key={asset.ticker} ticker={asset.ticker} small />)}<span>20 stocks + 5 ETFs</span></div>
           <div className={`price-source-bar ${priceState}`}>
@@ -2008,7 +1990,7 @@ export default function Home() {
             </div>
             <form onSubmit={createStrategy}>
               <label>ORDER NAME<input name="name" value={draftName} onChange={(event) => setDraftName(event.target.value)} required disabled={onchainBusy} /></label>
-              <div className="asset-choice"><Mark ticker={draftAsset} /><label>ASSET <small>{kind === "DCA" ? "13 recurring V4 routes" : `${executionReadyAssetCount} verified swap routes`}</small><select name="asset" value={draftAsset} onChange={(event) => setDraftAsset(event.target.value)}>{assetRegistry.filter((asset) => asset.fullFill && (kind !== "DCA" || !isV3RoutedAsset(asset.ticker))).map((asset) => <option key={asset.ticker} value={asset.ticker}>{asset.ticker} · {asset.name} · {formatPrice(priceBook[asset.ticker]?.price)}</option>)}</select></label></div>
+              <div className="asset-choice"><Mark ticker={draftAsset} /><label>ASSET <small>{kind === "DCA" ? `${DCA_ENABLED_ASSETS.length} recurring V4 routes` : `${executionReadyAssetCount} verified swap routes`}</small><select name="asset" value={draftAsset} onChange={(event) => setDraftAsset(event.target.value)}>{assetRegistry.filter((asset) => asset.fullFill && (kind !== "DCA" || isDcaEnabledAsset(asset.ticker))).map((asset) => <option key={asset.ticker} value={asset.ticker}>{asset.ticker} · {asset.name} · {formatPrice(priceBook[asset.ticker]?.price)}</option>)}</select></label></div>
               <div className="form-pair">
                 <label>{kind === "Buy" ? "TOTAL TO SPEND" : kind === "Sell" ? "AMOUNT TO SELL" : "EACH BUY"}<span className="input-unit"><input name="amount" type="number" min={kind === "Sell" ? "0.000000000000000001" : "0.000001"} step={kind === "Sell" ? "0.000000000000000001" : "0.000001"} value={draftAmount} onChange={(event) => setDraftAmount(event.target.value)} required disabled={onchainBusy} /><b>{kind === "Sell" ? draftAsset : "USDG"}</b></span></label>
                 <label>MAX SLIPPAGE<span className="input-unit"><input name="slippage" type="number" min="0.01" max="5" step="0.01" value={draftSlippage} onChange={(event) => setDraftSlippage(event.target.value)} required disabled={onchainBusy} /><b>%</b></span></label>

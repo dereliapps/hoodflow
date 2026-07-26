@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 
+import { isV3RoutedAsset } from "@/lib/hoodflow-mainnet";
+import { seoAssets } from "@/lib/seo-assets";
 import RagretReceipt from "./ragret-receipt";
 
 type Props = {
@@ -34,22 +36,12 @@ type PricePayload = {
   prices?: Record<string, { price: number | null; status: string; updatedAt: number | null }>;
 };
 
-const FALLBACK_MARKETS: Market[] = [
-  ["AAPL", "Apple", "Stock Token", "Uniswap V4"],
-  ["AMD", "AMD", "Stock Token", "Uniswap V4"],
-  ["AMZN", "Amazon", "Stock Token", "Uniswap V4"],
-  ["GOOGL", "Alphabet", "Stock Token", "Uniswap V4"],
-  ["INTC", "Intel", "Stock Token", "Uniswap V4"],
-  ["META", "Meta", "Stock Token", "Uniswap V4"],
-  ["MU", "Micron", "Stock Token", "Uniswap V4"],
-  ["NVDA", "NVIDIA", "Stock Token", "Uniswap V4"],
-  ["SNDK", "Sandisk", "Stock Token", "Uniswap V4"],
-  ["SPCX", "SpaceX", "Stock Token", "Uniswap V4"],
-  ["TSLA", "Tesla", "Stock Token", "Uniswap V4"],
-  ["QQQ", "Invesco QQQ", "ETF Token", "Uniswap V4"],
-  ["SLV", "iShares Silver Trust", "ETF Token", "Uniswap V3"],
-  ["SPY", "SPDR S&P 500", "ETF Token", "Uniswap V4"],
-].map(([ticker, name, type, route]) => ({ ticker, name, type, route })) as Market[];
+const FALLBACK_MARKETS: Market[] = seoAssets.filter((asset) => asset.fullFill).map((asset) => ({
+  ticker: asset.ticker,
+  name: asset.name,
+  type: asset.type === "Tokenized ETF" ? "ETF Token" : "Stock Token",
+  route: isV3RoutedAsset(asset.ticker) ? "Uniswap V3" : "Uniswap V4",
+}));
 
 const priceFormatter = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 

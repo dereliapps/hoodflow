@@ -37,7 +37,10 @@ const supportedPools = [
   { fee: 3_000, tickSpacing: 60 },
   { fee: 10_000, tickSpacing: 200 },
 ] as const;
-const forkBlockNumber = Number(process.env.ROBINHOOD_FORK_BLOCK_NUMBER ?? "10453077");
+const configuredForkBlockNumber = process.env.ROBINHOOD_FORK_BLOCK_NUMBER?.trim();
+const forkBlockNumber = configuredForkBlockNumber
+  ? Number(configuredForkBlockNumber)
+  : await ethers.provider.getBlockNumber();
 
 const grossTranche = 1_000_000n;
 const totalBudget = 2_000_000n;

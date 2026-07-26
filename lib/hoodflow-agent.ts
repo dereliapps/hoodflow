@@ -64,21 +64,25 @@ const MARKET_NAMES: Record<string, string> = {
   AAPL: "Apple",
   AMD: "AMD",
   AMZN: "Amazon",
+  COIN: "Coinbase",
   GOOGL: "Alphabet",
   INTC: "Intel",
   META: "Meta",
   MU: "Micron",
   NVDA: "NVIDIA",
+  PLTR: "Palantir",
   SNDK: "Sandisk",
   SPCX: "SpaceX",
   TSLA: "Tesla",
+  USAR: "USA Rare Earth",
   QQQ: "Invesco QQQ",
   SGOV: "iShares 0-3 Month Treasury",
   SLV: "iShares Silver Trust",
   SPY: "SPDR S&P 500",
+  CUSO: "United States Oil Fund",
 };
 
-const ETF_TICKERS = new Set(["QQQ", "SGOV", "SLV", "SPY"]);
+const ETF_TICKERS = new Set(["QQQ", "SGOV", "SLV", "SPY", "CUSO"]);
 const AGENT_DISABLED_MARKETS = new Set(["SGOV"]);
 const DECIMAL_INPUT = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
 const MAX_BUY_AMOUNT = 100_000;
