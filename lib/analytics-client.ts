@@ -7,7 +7,10 @@ export type HoodFlowEvent =
   | "quote_received"
   | "transaction_started"
   | "transaction_confirmed"
+  | "transaction_confirmation_pending"
   | "transaction_failed"
+  | "balance_reconciliation_deferred"
+  | "wallet_balance_refresh_deferred"
   | "community_token_imported"
   | "community_market_opened"
   | "settlement_selected"
@@ -26,17 +29,21 @@ function sessionId() {
 }
 
 export function track(event: HoodFlowEvent, properties: Record<string, string | number | boolean | null> = {}) {
-  if (typeof window === "undefined" || navigator.doNotTrack === "1") return;
-  const body = JSON.stringify({
-    event,
-    path: `${window.location.pathname}${window.location.search}`,
-    sessionId: sessionId(),
-    referrer: document.referrer ? new URL(document.referrer).hostname : "direct",
-    properties,
-  });
-  if (navigator.sendBeacon) {
-    navigator.sendBeacon("/api/analytics", new Blob([body], { type: "application/json" }));
-    return;
+  try {
+    if (typeof window === "undefined" || navigator.doNotTrack === "1") return;
+    const body = JSON.stringify({
+      event,
+      path: `${window.location.pathname}${window.location.search}`,
+      sessionId: sessionId(),
+      referrer: document.referrer ? new URL(document.referrer).hostname : "direct",
+      properties,
+    });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon("/api/analytics", new Blob([body], { type: "application/json" }));
+      return;
+    }
+    void fetch("/api/analytics", { method: "POST", headers: { "content-type": "application/json" }, body, keepalive: true }).catch(() => undefined);
+  } catch {
+    // Analytics must never interrupt a wallet or transaction lifecycle.
   }
-  void fetch("/api/analytics", { method: "POST", headers: { "content-type": "application/json" }, body, keepalive: true });
 }

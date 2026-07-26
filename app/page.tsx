@@ -10,8 +10,10 @@ import {
   JsonRpcProvider,
   formatEther,
   formatUnits,
+  isError,
   parseUnits,
   type Eip1193Provider,
+  type TransactionReceipt,
 } from "ethers";
 import {
   ERC20_ABI,
@@ -62,6 +64,11 @@ import MarketStatus from "./market-status";
 import type { PrivyWalletController } from "./privy-wallet-bridge";
 import { PRIVY_CONFIGURED } from "./privy-config";
 import RobinHoodIntro from "./robin-hood-intro";
+import type {
+  BasketExecutionProgress,
+  BasketHandoffLeg,
+  BasketPreparedPlan,
+} from "./agents-workspace";
 
 function WorkspaceLoader({ label }: { label: string }) {
   return <section className="workspace-loader" role="status" aria-live="polite"><i /><strong>{label}</strong><span>Preparing the latest onchain view.</span></section>;
@@ -122,6 +129,90 @@ type DirectQuotePreview = {
   minimumOut: string;
   updatedAt: number;
 };
+
+type ActiveBasketLeg = {
+  basketId: string;
+  index: number;
+  totalLegs: number;
+  asset: string;
+  amount: string;
+  rawAmount: string;
+  slippageBps: number;
+};
+
+class BasketTransactionPendingError extends Error {
+  readonly txHash: string;
+
+  constructor(txHash: string) {
+    super(`Transaction ${txHash.slice(0, 10)}… was broadcast, but its receipt could not be verified yet. This basket leg is locked to prevent a duplicate buy.`);
+    this.name = "BasketTransactionPendingError";
+    this.txHash = txHash;
+  }
+}
+
+type PendingBasketTransaction = {
+  txHash: string;
+  basketId: string;
+  legIndex: number;
+  walletAddress: string;
+  asset: string;
+  rawAmount: string;
+  submittedAt: number;
+};
+
+const PENDING_BASKET_TX_STORAGE_PREFIX = "hoodflow-pending-basket-tx-v1";
+
+function pendingBasketTransactionKey(walletAddress: string, asset: string, rawAmount: string) {
+  return `${PENDING_BASKET_TX_STORAGE_PREFIX}:${walletAddress.toLowerCase()}:${asset}:${rawAmount}`;
+}
+
+function canPersistPendingBasketTransaction() {
+  try {
+    const probeKey = `${PENDING_BASKET_TX_STORAGE_PREFIX}:probe`;
+    window.localStorage.setItem(probeKey, "1");
+    window.localStorage.removeItem(probeKey);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readPendingBasketTransaction(walletAddress: string, asset: string, rawAmount: string) {
+  try {
+    const value = window.localStorage.getItem(pendingBasketTransactionKey(walletAddress, asset, rawAmount));
+    if (!value) return null;
+    const record = JSON.parse(value) as Partial<PendingBasketTransaction>;
+    return typeof record.txHash === "string"
+      && /^0x[0-9a-fA-F]{64}$/.test(record.txHash)
+      && record.walletAddress?.toLowerCase() === walletAddress.toLowerCase()
+      && record.asset === asset
+      && record.rawAmount === rawAmount
+      ? record as PendingBasketTransaction
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePendingBasketTransaction(record: PendingBasketTransaction) {
+  try {
+    window.localStorage.setItem(
+      pendingBasketTransactionKey(record.walletAddress, record.asset, record.rawAmount),
+      JSON.stringify(record),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearPendingBasketTransaction(walletAddress: string, asset: string, rawAmount: string) {
+  try {
+    window.localStorage.removeItem(pendingBasketTransactionKey(walletAddress, asset, rawAmount));
+  } catch {
+    // The in-memory submitted lock remains active if storage becomes unavailable.
+  }
+}
 
 type HistoryPoint = {
   roundId: string;
@@ -374,6 +465,9 @@ export default function Home() {
   const [composerQuote, setComposerQuote] = useState<DirectQuotePreview | null>(null);
   const [composerQuoteBusy, setComposerQuoteBusy] = useState(false);
   const [composerQuoteError, setComposerQuoteError] = useState("");
+  const [basketPlan, setBasketPlan] = useState<BasketPreparedPlan | null>(null);
+  const [basketExecution, setBasketExecution] = useState<BasketExecutionProgress | null>(null);
+  const [activeBasketLeg, setActiveBasketLeg] = useState<ActiveBasketLeg | null>(null);
   const composerQuoteRequestRef = useRef(0);
   const composerQuoteKeyRef = useRef("");
   const walletBalanceRequestRef = useRef(0);
@@ -404,6 +498,7 @@ export default function Home() {
     setPortfolioBalances({});
     setPortfolioLoading(false);
     setSelectedStrategy(null);
+    setActiveBasketLeg(null);
     setComposerQuote(null);
     setComposerQuoteBusy(false);
     setComposerQuoteError("");
@@ -425,6 +520,10 @@ export default function Home() {
   }, []);
 
   const connected = Boolean(walletAddress);
+  const activeBasketExecutionLeg = activeBasketLeg
+    ? basketExecution?.legs.find((leg) => leg.index === activeBasketLeg.index)
+    : undefined;
+  const activeBasketLegSubmitted = activeBasketExecutionLeg?.status === "submitted";
   useEffect(() => () => {
     composerQuoteRequestRef.current += 1;
     walletBalanceRequestRef.current += 1;
@@ -681,6 +780,7 @@ export default function Home() {
           && agentSlippageBps >= 1
           && agentSlippageBps <= 500;
         if (validAgentIntent) {
+          setActiveBasketLeg(null);
           const nextKind = agentSide === "buy" ? "Buy" : "Sell";
           setKind(nextKind);
           setDraftName(`${ticker} instant ${agentSide}`);
@@ -963,7 +1063,7 @@ export default function Home() {
         outputAmount: formatUnits(route.amountOut, kind === "Buy" ? STOCK_TOKEN_DECIMALS : USDG_DECIMALS),
         oraclePrice: priceBook[draftAsset]?.price ?? 0,
       });
-      const slippageBps = Math.max(10, Math.min(500, Math.round(Number(draftSlippage || 0.5) * 100)));
+      const slippageBps = Math.max(1, Math.min(500, Math.round(Number(draftSlippage || 0.5) * 100)));
       const minimum = route.amountOut * BigInt(10_000 - slippageBps) / 10_000n;
       const decimals = kind === "Buy" ? STOCK_TOKEN_DECIMALS : USDG_DECIMALS;
       if (requestId !== composerQuoteRequestRef.current) return;
@@ -1304,6 +1404,7 @@ export default function Home() {
   }
 
   function openComposer(nextKind: StrategyKind = "Buy", nextAsset?: string) {
+    setActiveBasketLeg(null);
     setKind(nextKind);
     const asset = nextAsset && (nextKind !== "DCA" || isDcaEnabledAsset(nextAsset))
       ? nextAsset
@@ -1323,6 +1424,7 @@ export default function Home() {
   }
 
   function openAgentMarket(ticker: string, intent?: { side: "buy" | "sell"; amount: string; slippageBps: number }) {
+    setActiveBasketLeg(null);
     openAsset(ticker);
     if (!intent) return;
     openComposer(intent.side === "buy" ? "Buy" : "Sell", ticker);
@@ -1334,6 +1436,59 @@ export default function Home() {
     url.searchParams.set("agentAmount", intent.amount);
     url.searchParams.set("agentSlippageBps", String(intent.slippageBps));
     window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  }
+
+  function handleBasketPrepared(plan: BasketPreparedPlan) {
+    setBasketPlan(plan);
+    setBasketExecution({
+      basketId: plan.basketId,
+      legs: [
+        ...plan.legs.map((leg) => ({ index: leg.index, status: "ready" as const })),
+        ...plan.rejectedLegs.map((leg) => ({ index: leg.index, status: "skipped" as const })),
+      ],
+    });
+    setActiveBasketLeg(null);
+  }
+
+  function clearBasket() {
+    setBasketPlan(null);
+    setBasketExecution(null);
+    setActiveBasketLeg(null);
+  }
+
+  function openBasketLeg(leg: BasketHandoffLeg) {
+    if (!basketPlan || basketPlan.basketId !== basketExecution?.basketId) {
+      notify("Prepare the basket again before opening a leg.");
+      return;
+    }
+    const executionLeg = basketExecution.legs.find((item) => item.index === leg.index);
+    if (!executionLeg || executionLeg.status !== "ready") {
+      notify(executionLeg?.status === "confirmed"
+        ? `${leg.asset} is already confirmed.`
+        : executionLeg?.status === "submitted"
+          ? `${leg.asset} was already submitted. Verify its receipt before continuing.`
+          : "This basket leg is unavailable.");
+      return;
+    }
+    openComposer("Buy", leg.asset);
+    setDraftName(`Basket ${leg.index + 1} · ${leg.asset}`);
+    setDraftAmount(leg.allocation.amount);
+    setDraftSlippage(String(basketPlan.protection.slippageBps / 100));
+    setActiveBasketLeg({
+      basketId: basketPlan.basketId,
+      index: leg.index,
+      totalLegs: basketPlan.progress.requestedLegs,
+      asset: leg.asset,
+      amount: leg.allocation.amount,
+      rawAmount: leg.allocation.rawAmount,
+      slippageBps: basketPlan.protection.slippageBps,
+    });
+  }
+
+  function closeComposer() {
+    if (onchainBusy) return;
+    setComposerOpen(false);
+    setActiveBasketLeg(null);
   }
 
   async function toggleStrategy(id: number) {
@@ -1402,8 +1557,61 @@ export default function Home() {
     const amountIn = parseUnits(draftAmount, USDG_DECIMALS);
     if (amountIn <= 0n || amountIn > MAX_UINT128) throw new Error("Enter a valid USDG amount.");
     const slippageBps = Math.round(Number(draftSlippage) * 100);
-    if (!Number.isInteger(slippageBps) || slippageBps < 10 || slippageBps > 500) {
-      throw new Error("Slippage must be between 0.10% and 5.00%.");
+    if (!Number.isInteger(slippageBps) || slippageBps < 1 || slippageBps > 500) {
+      throw new Error("Slippage must be between 0.01% and 5.00%.");
+    }
+    if (activeBasketLeg && (
+      kind !== "Buy"
+      || activeBasketLeg.asset !== draftAsset
+      || activeBasketLeg.rawAmount !== amountIn.toString()
+      || activeBasketLeg.slippageBps !== slippageBps
+      || activeBasketLeg.basketId !== basketPlan?.basketId
+    )) {
+      throw new Error("This basket leg changed. Close it and reopen the prepared leg.");
+    }
+    const basketLegInFlight = activeBasketLeg;
+    const recordBasketLeg = (
+      status: BasketExecutionProgress["legs"][number]["status"],
+      txHash?: string,
+    ) => {
+      if (!basketLegInFlight) return;
+      setBasketExecution((current) => current?.basketId === basketLegInFlight.basketId ? {
+        ...current,
+        legs: current.legs.map((leg) => leg.index === basketLegInFlight.index
+          ? { ...leg, status, txHash }
+          : leg),
+      } : current);
+    };
+    if (basketLegInFlight) {
+      if (!canPersistPendingBasketTransaction()) {
+        throw new Error("Browser storage is required to lock a submitted basket leg against duplicate execution.");
+      }
+      const pendingTransaction = readPendingBasketTransaction(address, draftAsset, amountIn.toString());
+      if (pendingTransaction) {
+        let pendingReceipt: TransactionReceipt | null = null;
+        try {
+          pendingReceipt = await provider.getTransactionReceipt(pendingTransaction.txHash);
+        } catch {
+          // An unavailable receipt is treated as unresolved and remains locked.
+        }
+        if (pendingReceipt?.status === 0) {
+          clearPendingBasketTransaction(address, draftAsset, amountIn.toString());
+          recordBasketLeg("ready");
+        } else if (pendingReceipt?.status === 1) {
+          clearPendingBasketTransaction(address, draftAsset, amountIn.toString());
+          recordBasketLeg("confirmed", pendingReceipt.hash);
+          setActiveBasketLeg(null);
+          setComposerOpen(false);
+          track("transaction_confirmed", { ticker: draftAsset, side: "buy", reconciled: true });
+          qualifyReferral(pendingReceipt.hash, address);
+          navigate("agents");
+          notify(`${draftAsset} basket receipt verified · choose the next leg`);
+          return;
+        } else {
+          recordBasketLeg("submitted", pendingTransaction.txHash);
+          throw new BasketTransactionPendingError(pendingTransaction.txHash);
+        }
+      }
     }
 
     const signer = await getVerifiedSigner(provider, address);
@@ -1495,24 +1703,100 @@ export default function Home() {
     track("transaction_started", { ticker: draftAsset, side: "buy" });
     setTransactionStep(`Confirm the ${draftAsset} buy in your wallet…`);
     const transaction = await router.execute(calldata.commands, calldata.inputs, now + 300);
+    recordBasketLeg("submitted", transaction.hash);
+    if (basketLegInFlight) {
+      const persisted = writePendingBasketTransaction({
+        txHash: transaction.hash,
+        basketId: basketLegInFlight.basketId,
+        legIndex: basketLegInFlight.index,
+        walletAddress: address.toLowerCase(),
+        asset: draftAsset,
+        rawAmount: amountIn.toString(),
+        submittedAt: Date.now(),
+      });
+      if (!persisted) throw new BasketTransactionPendingError(transaction.hash);
+    }
     setTransactionStep("Waiting for mainnet confirmation…");
-    const receipt = await transaction.wait();
-    if (!receipt || receipt.status !== 1) throw new Error("The buy was not confirmed.");
-    const outputAfter = BigInt(await outputToken.balanceOf(address));
-    const received = outputAfter - outputBefore;
-    if (received <= 0n) throw new Error("Transaction confirmed but no output token was received.");
+    let receipt: TransactionReceipt | null;
+    try {
+      receipt = await transaction.wait();
+    } catch (error) {
+      if (isError(error, "TRANSACTION_REPLACED")) {
+        if (!error.cancelled && error.receipt.status === 1) {
+          receipt = error.receipt;
+        } else {
+          clearPendingBasketTransaction(address, draftAsset, amountIn.toString());
+          recordBasketLeg("ready");
+          throw new Error("The submitted buy was cancelled or reverted. No basket leg was completed.");
+        }
+      } else {
+        const failedReceipt = typeof error === "object" && error !== null && "receipt" in error
+          ? (error as { receipt?: { status?: number } }).receipt
+          : undefined;
+        if (failedReceipt?.status === 0) {
+          clearPendingBasketTransaction(address, draftAsset, amountIn.toString());
+          recordBasketLeg("ready");
+          throw new Error("The submitted buy reverted. The basket leg is ready for a fresh quote.");
+        }
+        if (basketLegInFlight) throw new BasketTransactionPendingError(transaction.hash);
+        throw error;
+      }
+    }
+    if (!receipt) {
+      if (basketLegInFlight) throw new BasketTransactionPendingError(transaction.hash);
+      throw new Error("The buy receipt is not available yet.");
+    }
+    if (receipt.status !== 1) {
+      clearPendingBasketTransaction(address, draftAsset, amountIn.toString());
+      recordBasketLeg("ready");
+      throw new Error("The buy was not confirmed.");
+    }
+
+    const completedBasketLeg = basketLegInFlight;
+    if (completedBasketLeg) {
+      clearPendingBasketTransaction(address, draftAsset, amountIn.toString());
+      recordBasketLeg("confirmed", receipt.hash);
+      setActiveBasketLeg(null);
+    }
+
+    const strategyId = Date.now();
+    setStrategies((current) => [{
+      id: strategyId, name: draftName, kind: "Buy", asset: draftAsset,
+      rule: `Buy once with ${draftAmount} USDG`, detail: "Receipt confirmed · balance reconciliation pending", status: "Confirmed",
+      budget: `${Number(draftAmount).toFixed(2)} USDG`, expires: "Completed", createdAt: Date.now(), txHash: receipt.hash,
+      walletAddress: address.toLowerCase(), inputAmount: Number(draftAmount),
+    }, ...current]);
+    setComposerOpen(false);
     track("transaction_confirmed", { ticker: draftAsset, side: "buy" });
     qualifyReferral(receipt.hash, address);
 
-    setStrategies((current) => [{
-      id: Date.now(), name: draftName, kind: "Buy", asset: draftAsset,
-      rule: `Buy once with ${draftAmount} USDG`, detail: `${Number(formatUnits(received, STOCK_TOKEN_DECIMALS)).toFixed(6)} ${draftAsset} received`, status: "Confirmed",
-      budget: `${Number(draftAmount).toFixed(2)} USDG`, expires: "Completed", createdAt: Date.now(), txHash: receipt.hash,
-      walletAddress: address.toLowerCase(),
-      inputAmount: Number(draftAmount), outputAmount: Number(formatUnits(received, STOCK_TOKEN_DECIMALS)),
-    }, ...current]);
-    await refreshWalletBalances(address, provider);
-    setComposerOpen(false);
+    void (async () => {
+      try {
+        const outputAfter = BigInt(await outputToken.balanceOf(address));
+        const received = outputAfter - outputBefore;
+        if (received > 0n) {
+          const outputAmount = Number(formatUnits(received, STOCK_TOKEN_DECIMALS));
+          setStrategies((current) => current.map((strategy) => strategy.id === strategyId
+            ? { ...strategy, detail: `${outputAmount.toFixed(6)} ${draftAsset} received`, outputAmount }
+            : strategy));
+        } else {
+          track("balance_reconciliation_deferred", { ticker: draftAsset, side: "buy", reason: "non_positive_delta" });
+        }
+      } catch {
+        track("balance_reconciliation_deferred", { ticker: draftAsset, side: "buy", reason: "rpc_unavailable" });
+      }
+      try {
+        await refreshWalletBalances(address, provider);
+      } catch {
+        track("wallet_balance_refresh_deferred", { ticker: draftAsset, side: "buy" });
+      }
+    })();
+
+    if (completedBasketLeg) {
+      navigate("agents");
+      notify(`${completedBasketLeg.asset} basket leg confirmed · choose the next leg`);
+      return;
+    }
     navigate("strategies");
     notify(`${draftAsset} buy confirmed on Robinhood Chain`);
   }
@@ -1523,7 +1807,7 @@ export default function Home() {
     const amountIn = parseUnits(draftAmount, STOCK_TOKEN_DECIMALS);
     if (amountIn <= 0n || amountIn > MAX_UINT128) throw new Error(`Enter a valid ${draftAsset} amount.`);
     const slippageBps = Math.round(Number(draftSlippage) * 100);
-    if (!Number.isInteger(slippageBps) || slippageBps < 10 || slippageBps > 500) throw new Error("Slippage must be between 0.10% and 5.00%.");
+    if (!Number.isInteger(slippageBps) || slippageBps < 1 || slippageBps > 500) throw new Error("Slippage must be between 0.01% and 5.00%.");
 
     const signer = await getVerifiedSigner(provider, address);
     const tokenInAddress = ROBINHOOD_TOKENS[draftAsset];
@@ -1700,6 +1984,10 @@ export default function Home() {
   async function createStrategy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!draftName.trim()) return;
+    if (activeBasketLegSubmitted) {
+      notify("This basket transaction is already submitted. Verify its receipt before continuing.");
+      return;
+    }
     if (!walletProvider || !connected) {
       openWalletModal();
       notify(kind === "DCA" && enginePaused ? "Connect the engine owner wallet to activate DCA." : "Connect a Robinhood Chain mainnet wallet first.");
@@ -1718,9 +2006,15 @@ export default function Home() {
       else if (kind === "Sell") await executeDirectSell(provider, walletAddress);
       else await createOnchainDca(provider, walletAddress);
     } catch (error) {
-      track("transaction_failed", { ticker: draftAsset, side: kind.toLowerCase(), reason: errorMessage(error).slice(0, 80) });
-      notify(errorMessage(error));
-      setTransactionStep("");
+      if (error instanceof BasketTransactionPendingError) {
+        track("transaction_confirmation_pending", { ticker: draftAsset, side: kind.toLowerCase(), txHash: error.txHash });
+        notify(error.message);
+        setTransactionStep("Broadcast recorded · verify the submitted receipt before continuing.");
+      } else {
+        track("transaction_failed", { ticker: draftAsset, side: kind.toLowerCase(), reason: errorMessage(error).slice(0, 80) });
+        notify(errorMessage(error));
+        setTransactionStep("");
+      }
     } finally {
       setOnchainBusy(false);
     }
@@ -1937,7 +2231,14 @@ export default function Home() {
 
       {view === "community" && <CommunityTokens walletAddress={walletAddress} walletProvider={walletProvider} onWallet={handleWalletButton} notify={notify} onTradeConfirmed={qualifyReferral} />}
 
-      {view === "agents" && <AgentsWorkspace onOpenMarket={openAgentMarket} />}
+      {view === "agents" && <AgentsWorkspace
+        onOpenMarket={openAgentMarket}
+        basketPlan={basketPlan}
+        basketExecution={basketExecution}
+        onBasketPrepared={handleBasketPrepared}
+        onOpenBasketLeg={openBasketLeg}
+        onClearBasket={clearBasket}
+      />}
 
       {view === "portfolio" && (
         <section className="page inner-page portfolio-page">
@@ -2006,21 +2307,22 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Release 0.10.2</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("agents")}>Agents</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Release 0.11.0</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("agents")}>Agents</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setComposerOpen(false); }}>
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) closeComposer(); }}>
           <section className="composer wide-composer" role="dialog" aria-modal="true" aria-labelledby="composer-title">
-            <div className="composer-head"><div><p className="eyebrow">NEW ORDER</p><h2 id="composer-title">{kind === "Buy" ? "Buy with limits." : kind === "Sell" ? "Sell to USDG." : "Automate with limits."}</h2></div><button aria-label="Close strategy builder" onClick={() => setComposerOpen(false)} disabled={onchainBusy}>x</button></div>
+            <div className="composer-head"><div><p className="eyebrow">{activeBasketLeg ? `BASKET LEG ${activeBasketLeg.index + 1} OF ${activeBasketLeg.totalLegs}` : "NEW ORDER"}</p><h2 id="composer-title">{activeBasketLeg ? `Confirm ${activeBasketLeg.asset} separately.` : kind === "Buy" ? "Buy with limits." : kind === "Sell" ? "Sell to USDG." : "Automate with limits."}</h2></div><button aria-label="Close strategy builder" onClick={closeComposer} disabled={onchainBusy}>x</button></div>
+            {activeBasketLeg && <div className="basket-order-context" role="status"><i /><span><strong>{activeBasketLegSubmitted ? "Transaction already submitted" : "Fresh quote required for this leg"}</strong><small>{activeBasketLegSubmitted ? "This leg is locked against retry until its receipt is verified. Close this panel to open the explorer link in the basket plan." : "The asset, USDG allocation and slippage are locked to the prepared basket. This confirmation cannot execute another leg."}</small></span><b>{activeBasketLegSubmitted ? "SUBMITTED" : "NON-ATOMIC"}</b></div>}
             <div className="kind-grid">
-              {(["Buy", "Sell", "DCA"] as StrategyKind[]).map((item, index) => <button type="button" key={item} className={kind === item ? "selected" : ""} onClick={() => openComposer(item, draftAsset)} disabled={onchainBusy}><span>{String(index + 1).padStart(2, "0")}</span><strong>{item === "Buy" ? "Buy now" : item === "Sell" ? "Sell now" : "Recurring DCA"}</strong><small>{item === "Buy" ? "USDG to stock token" : item === "Sell" ? "Stock token to USDG" : contractReady ? "Configured onchain · pre-audit" : enginePaused && engineConfigured ? "Owner activation required" : engineConfigured ? "Checking engine" : "Configuration review required"}</small></button>)}
+              {(["Buy", "Sell", "DCA"] as StrategyKind[]).map((item, index) => <button type="button" key={item} className={kind === item ? "selected" : ""} onClick={() => openComposer(item, draftAsset)} disabled={onchainBusy || Boolean(activeBasketLeg)}><span>{String(index + 1).padStart(2, "0")}</span><strong>{item === "Buy" ? "Buy now" : item === "Sell" ? "Sell now" : "Recurring DCA"}</strong><small>{item === "Buy" ? "USDG to stock token" : item === "Sell" ? "Stock token to USDG" : contractReady ? "Configured onchain · pre-audit" : enginePaused && engineConfigured ? "Owner activation required" : engineConfigured ? "Checking engine" : "Configuration review required"}</small></button>)}
             </div>
             <form onSubmit={createStrategy}>
               <label>ORDER NAME<input name="name" value={draftName} onChange={(event) => setDraftName(event.target.value)} required disabled={onchainBusy} /></label>
-              <div className="asset-choice"><Mark ticker={draftAsset} /><label>ASSET <small>{kind === "DCA" ? `${DCA_ENABLED_ASSETS.length} recurring V4 routes` : `${executionReadyAssetCount} verified swap routes`}</small><select name="asset" value={draftAsset} onChange={(event) => setDraftAsset(event.target.value)}>{assetRegistry.filter((asset) => asset.fullFill && (kind !== "DCA" || isDcaEnabledAsset(asset.ticker))).map((asset) => <option key={asset.ticker} value={asset.ticker}>{asset.ticker} · {asset.name} · {formatPrice(priceBook[asset.ticker]?.price)}</option>)}</select></label></div>
+              <div className="asset-choice"><Mark ticker={draftAsset} /><label>ASSET <small>{kind === "DCA" ? `${DCA_ENABLED_ASSETS.length} recurring V4 routes` : `${executionReadyAssetCount} verified swap routes`}</small><select name="asset" value={draftAsset} onChange={(event) => setDraftAsset(event.target.value)} disabled={Boolean(activeBasketLeg)}>{assetRegistry.filter((asset) => asset.fullFill && (kind !== "DCA" || isDcaEnabledAsset(asset.ticker))).map((asset) => <option key={asset.ticker} value={asset.ticker}>{asset.ticker} · {asset.name} · {formatPrice(priceBook[asset.ticker]?.price)}</option>)}</select></label></div>
               <div className="form-pair">
-                <label>{kind === "Buy" ? "TOTAL TO SPEND" : kind === "Sell" ? "AMOUNT TO SELL" : "EACH BUY"}<span className="input-unit"><input name="amount" type="number" min={kind === "Sell" ? "0.000000000000000001" : "0.000001"} step={kind === "Sell" ? "0.000000000000000001" : "0.000001"} value={draftAmount} onChange={(event) => setDraftAmount(event.target.value)} required disabled={onchainBusy} /><b>{kind === "Sell" ? draftAsset : "USDG"}</b></span></label>
-                <label>MAX SLIPPAGE<span className="input-unit"><input name="slippage" type="number" min="0.01" max="5" step="0.01" value={draftSlippage} onChange={(event) => setDraftSlippage(event.target.value)} required disabled={onchainBusy} /><b>%</b></span></label>
+                <label>{kind === "Buy" ? "TOTAL TO SPEND" : kind === "Sell" ? "AMOUNT TO SELL" : "EACH BUY"}<span className="input-unit"><input name="amount" type="number" min={kind === "Sell" ? "0.000000000000000001" : "0.000001"} step={kind === "Sell" ? "0.000000000000000001" : "0.000001"} value={draftAmount} onChange={(event) => setDraftAmount(event.target.value)} required disabled={onchainBusy || Boolean(activeBasketLeg)} /><b>{kind === "Sell" ? draftAsset : "USDG"}</b></span></label>
+                <label>MAX SLIPPAGE<span className="input-unit"><input name="slippage" type="number" min="0.01" max="5" step="0.01" value={draftSlippage} onChange={(event) => setDraftSlippage(event.target.value)} required disabled={onchainBusy || Boolean(activeBasketLeg)} /><b>%</b></span></label>
               </div>
               {kind === "DCA" && <div className="form-pair"><label>SCHEDULE<select name="frequency" value={draftFrequency} onChange={(event) => setDraftFrequency(event.target.value)} disabled={onchainBusy}><option>Daily</option><option>Weekly</option><option>Monthly</option></select></label><label>NUMBER OF BUYS<span className="input-unit"><input name="executions" type="number" min="2" max={draftFrequency === "Daily" ? "52" : draftFrequency === "Weekly" ? "52" : "12"} value={draftExecutions} onChange={(event) => setDraftExecutions(event.target.value)} disabled={onchainBusy} /><b>×</b></span></label></div>}
               <div className="live-order-banner"><i /><span><strong>{kind === "Buy" ? "Buy stock tokens with USDG" : kind === "Sell" ? `Sell ${draftAsset} back to USDG` : contractReady ? "Pre-audit recurring strategy" : enginePaused && engineConfigured ? "DCA engine awaits owner activation" : engineConfigured ? "Checking recurring engine" : "DCA configuration is blocked"}</strong><small>{kind === "Buy" ? "Your wallet confirms a protected mainnet buy." : kind === "Sell" ? "Your wallet confirms an exact-token sell; USDG returns directly to you." : contractReady ? "The contract enforces your schedule and lifetime cap; keeper and admin risks still apply." : enginePaused && engineConfigured ? "Connect the owner wallet and confirm one activation transaction." : engineConfigured ? "Buy and Sell remain available while the engine check completes." : "Activation and strategy creation stay disabled until every engine address and limit is verified."}</small></span><b>{kind !== "DCA" ? "LIVE" : contractReady ? "PRE-AUDIT" : enginePaused && engineConfigured ? "READY" : engineConfigured ? "CHECKING" : "BLOCKED"}</b></div>
@@ -2029,7 +2331,7 @@ export default function Home() {
               {composerQuoteError && kind !== "DCA" && <div className="quote-inline-error"><strong>Route unavailable for this amount.</strong><span>{composerQuoteError}</span><button type="button" onClick={() => void refreshComposerQuote()}>Try again</button></div>}
               <div className="limit-note"><span>✓</span><p><strong>{kind === "DCA" ? "Spending limits stay enforced onchain." : "The order permission is exact and short-lived."}</strong><small>{kind === "Buy" ? "HoodFlow signs only this USDG amount for the router." : kind === "Sell" ? `HoodFlow signs only the selected ${draftAsset} amount; sale proceeds return as USDG.` : "The recurring engine cannot execute outside the selected asset, total budget, schedule and expiry."}</small></p></div>
               {transactionStep && <div className="transaction-step"><i /><span>{transactionStep}</span></div>}
-              <div className="composer-actions"><button type="button" onClick={() => setComposerOpen(false)} disabled={onchainBusy}>Cancel</button><button type="submit" className="primary-action" disabled={onchainBusy || (connected && (kind === "Buy" || kind === "Sell") && !composerQuote) || (kind === "DCA" && !contractReady && !(enginePaused && engineConfigured))}>{onchainBusy ? "Working…" : kind === "Buy" ? connected ? `Buy ${draftAsset} with USDG` : "Connect wallet first" : kind === "Sell" ? connected ? `Sell ${draftAsset} for USDG` : "Connect wallet first" : contractReady ? connected ? "Create onchain DCA" : "Connect wallet first" : enginePaused && engineConfigured ? connected ? "Activate DCA engine" : "Connect owner wallet to activate" : engineConfigured ? connected ? "Checking engine" : "Connect wallet first" : "Configuration review required"} <span>&rarr;</span></button></div>
+              <div className="composer-actions"><button type="button" onClick={closeComposer} disabled={onchainBusy}>Cancel</button><button type="submit" className="primary-action" disabled={onchainBusy || activeBasketLegSubmitted || (connected && (kind === "Buy" || kind === "Sell") && !composerQuote) || (kind === "DCA" && !contractReady && !(enginePaused && engineConfigured))}>{onchainBusy ? "Working…" : activeBasketLegSubmitted ? "Submitted · verify receipt" : activeBasketLeg ? connected ? `Confirm leg ${activeBasketLeg.index + 1} · ${draftAsset}` : "Connect wallet first" : kind === "Buy" ? connected ? `Buy ${draftAsset} with USDG` : "Connect wallet first" : kind === "Sell" ? connected ? `Sell ${draftAsset} for USDG` : "Connect wallet first" : contractReady ? connected ? "Create onchain DCA" : "Connect wallet first" : enginePaused && engineConfigured ? connected ? "Activate DCA engine" : "Connect owner wallet to activate" : engineConfigured ? connected ? "Checking engine" : "Connect wallet first" : "Configuration review required"} <span>&rarr;</span></button></div>
             </form>
           </section>
         </div>

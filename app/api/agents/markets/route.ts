@@ -31,6 +31,9 @@ export async function GET() {
     marketCount: markets.length,
     resourceUrl: `${origin}/api/agents/markets`,
     quoteEndpoint: `${origin}/api/agents/quote`,
+    basketEndpoint: `${origin}/api/agents/basket`,
+    mcpEndpoint: `${origin}/mcp`,
+    openApiUrl: `${origin}/openapi.json`,
     fetchedAt: new Date().toISOString(),
   }, {
     headers: {

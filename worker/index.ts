@@ -45,6 +45,10 @@ const worker = {
           return result.response();
         },
       }, allowedWidths);
+    } else if (url.pathname === "/.well-known/api-catalog") {
+      const internalUrl = new URL(request.url);
+      internalUrl.pathname = "/api-catalog";
+      response = await handler.fetch(new Request(internalUrl, request), env, ctx);
     } else {
       response = await handler.fetch(request, env, ctx);
     }

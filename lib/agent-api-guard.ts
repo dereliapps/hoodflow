@@ -8,8 +8,24 @@ export class AgentApiBodyTimeoutError extends Error {}
 
 const RATE_LIMIT_ROW_TTL_MS = 24 * 60 * 60 * 1_000;
 const RATE_LIMIT_CLEANUP_INTERVAL_MS = 60 * 60 * 1_000;
+const MAX_LOCAL_QUOTE_UNITS = 12;
 
 let nextRateLimitCleanupAt = 0;
+let localQuoteUnitsInFlight = 0;
+
+export function acquireLocalAgentQuoteCapacity(cost = 1) {
+  if (!Number.isInteger(cost) || cost <= 0 || cost > MAX_LOCAL_QUOTE_UNITS) {
+    throw new Error("Invalid local quote capacity cost.");
+  }
+  if (localQuoteUnitsInFlight + cost > MAX_LOCAL_QUOTE_UNITS) return null;
+  localQuoteUnitsInFlight += cost;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    localQuoteUnitsInFlight = Math.max(0, localQuoteUnitsInFlight - cost);
+  };
+}
 
 async function cancelReaderSafely(reader: ReadableStreamDefaultReader<Uint8Array>) {
   try {
@@ -103,7 +119,11 @@ export async function takeDurableAgentQuoteLimit(
   limit: number,
   windowMs: number,
   scope = "quote",
+  cost = 1,
 ) {
+  if (!Number.isInteger(cost) || cost <= 0 || cost > limit) {
+    throw new Error("Invalid durable quote rate-limit cost.");
+  }
   const now = Date.now();
   const nowSeconds = Math.floor(now / 1_000);
   const cutoffSeconds = Math.floor((now - windowMs) / 1_000);
@@ -112,13 +132,13 @@ export async function takeDurableAgentQuoteLimit(
   const [bucket] = await db.insert(agentQuoteRateLimits).values({
     key,
     windowStartedAt: new Date(now),
-    count: 1,
+    count: cost,
     updatedAt: new Date(now),
   }).onConflictDoUpdate({
     target: agentQuoteRateLimits.key,
     set: {
       windowStartedAt: sql`CASE WHEN ${agentQuoteRateLimits.windowStartedAt} <= ${cutoffSeconds} THEN ${nowSeconds} ELSE ${agentQuoteRateLimits.windowStartedAt} END`,
-      count: sql`CASE WHEN ${agentQuoteRateLimits.windowStartedAt} <= ${cutoffSeconds} THEN 1 ELSE ${agentQuoteRateLimits.count} + 1 END`,
+      count: sql`CASE WHEN ${agentQuoteRateLimits.windowStartedAt} <= ${cutoffSeconds} THEN ${cost} ELSE ${agentQuoteRateLimits.count} + ${cost} END`,
       updatedAt: new Date(now),
     },
   }).returning({

@@ -28,11 +28,14 @@ HoodFlow indexes the official Virtuals Robinhood Chain launch feed and keeps bon
 
 ## Agent execution API
 
-HoodFlow exposes a public, read-only market resource and a bounded quote-preflight action for agents. The preflight reads the reviewed Robinhood Chain route and live oracle state, rejects excessive DEX/oracle deviation, and returns a short-lived handoff that preserves the asset, side, exact input, and slippage choice. It never submits a transaction or signs for the user; HoodFlow requests a fresh execution-bound quote before the connected wallet confirms anything.
+HoodFlow exposes public REST, OpenAPI 3.1.2, and stateless Streamable HTTP MCP surfaces for agents. Single-market and two-to-six-market basket preflights read reviewed Robinhood Chain routes and live oracle state, reject excessive DEX/oracle deviation, and return short-lived handoffs. They never submit a transaction or sign for the user; HoodFlow requests a fresh execution-bound quote before every connected-wallet confirmation.
 
 - [Open the Agents workspace](https://hoodflow.app/?view=agents)
 - [`GET /api/agents/markets`](https://hoodflow.app/api/agents/markets) — reviewed USDG markets and execution policy.
 - [`POST /api/agents/quote`](https://hoodflow.app/api/agents/quote) — indicative, rate-limited preflight with oracle-deviation protection.
+- [`POST /api/agents/basket`](https://hoodflow.app/api/agents/basket) — deterministic USDG allocation and a non-atomic, separately confirmed plan.
+- [`POST /mcp`](https://hoodflow.app/mcp) — MCP tools for market discovery, quote preflight, and basket planning.
+- [`GET /openapi.json`](https://hoodflow.app/openapi.json) — machine-readable REST contract.
 - [`GET /api/agents/hoodflow`](https://hoodflow.app/api/agents/hoodflow) — capability manifest and input schema.
 
 The API surface is ready for provider onboarding, but HoodFlow is not yet published as a live Virtuals ACP provider. Registry publication, commercial terms, and any future scoped agent signer remain separate release gates.

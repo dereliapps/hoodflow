@@ -47,7 +47,7 @@ test("server-renders the HoodFlow product shell", async () => {
 });
 
 test("ships a bounded, interactive Robinhood mainnet experience", async () => {
-  const [page, intro, layout, css, packageJson, priceRoute, priceLib, historyRoute, stockHistory, docs, community, rewards, referralRoute, referralQualification, communityMarketRoute, communityChartRoute, analyticsClient, agents, agentLib, agentManifest, agentMarkets, agentQuoteRoute, agentGuard, worker, oracleProtection] = await Promise.all([
+  const [page, intro, layout, css, packageJson, priceRoute, priceLib, historyRoute, stockHistory, docs, community, rewards, referralRoute, referralQualification, communityMarketRoute, communityChartRoute, analyticsClient, agents, agentLib, agentManifest, agentMarkets, agentQuoteRoute, agentGuard, worker, oracleProtection, basketLib, basketRoute, mcpLib, mcpHttp, mcpRoute, openApiLib, openApiRoute, apiCatalogRoute] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/robin-hood-intro.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -73,6 +73,14 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
     readFile(new URL("../lib/agent-api-guard.ts", import.meta.url), "utf8"),
     readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/oracle-protection.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/hoodflow-basket.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/agents/basket/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/hoodflow-mcp.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/hoodflow-mcp-http.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/mcp/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/hoodflow-openapi.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/openapi.json/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api-catalog/route.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /"use client"/);
@@ -146,7 +154,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(intro, /onKeyDown/);
   assert.match(intro, /setStep\("open"\)/);
   assert.match(page, /Automatic retries are active/);
-  assert.match(page, /Release 0\.10\.2/);
+  assert.match(page, /Release 0\.11\.0/);
   assert.match(page, /DCA command center/);
   assert.match(page, /TRACKED TRADE VOLUME/);
   assert.match(page, /price-skeleton/);
@@ -162,6 +170,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(page, /agentSide/);
   assert.match(page, /agentAmount/);
   assert.match(page, /agentSlippageBps/);
+  assert.match(page, /handleBasketPrepared/);
+  assert.match(page, /openBasketLeg/);
+  assert.match(page, /Fresh quote required for this leg/);
   assert.match(page, /ReferralRewards/);
   assert.match(page, /href="\/docs"/);
   assert.match(docs, /Buy a Stock Token with USDG/);
@@ -169,9 +180,12 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(docs, /Reference price versus execution quote/);
   assert.match(docs, /Common messages/);
   assert.match(docs, /Discover tokens by contract address/);
-  assert.match(docs, /Structured preflight, human-controlled execution/);
+  assert.match(docs, /Connect once, keep execution human-controlled/);
   assert.match(docs, /GET \/api\/agents\/markets/);
   assert.match(docs, /POST \/api\/agents\/quote/);
+  assert.match(docs, /POST \/api\/agents\/basket/);
+  assert.match(docs, /POST \/mcp/);
+  assert.match(docs, /GET \/openapi\.json/);
   assert.match(community, /Indexed live markets/);
   assert.match(community, /market-card-price/);
   assert.match(community, /market-card-metrics/);
@@ -223,6 +237,8 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(worker, /40,\s*50,\s*84/);
   assert.match(worker, /content-security-policy/);
   assert.match(worker, /max-age=31536000, immutable/);
+  assert.match(worker, /url\.pathname === "\/\.well-known\/api-catalog"/);
+  assert.match(worker, /internalUrl\.pathname = "\/api-catalog"/);
   assert.match(analyticsClient, /\| "settlement_selected"/);
   assert.match(agents, /HOODFLOW FOR AGENTS/);
   assert.match(agents, /Let an agent find the route/);
@@ -235,6 +251,10 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(agents, /Stock Tokens are not shares/);
   assert.doesNotMatch(agents, /Not affiliated with or endorsed by Robinhood Markets/);
   assert.match(agents, /dataExpiresAt/);
+  assert.match(agents, /ONE-COPY AGENT CONNECTOR/);
+  assert.match(agents, /DETERMINISTIC BASKET AGENT/);
+  assert.match(agents, /PREPARE_WEIGHTED_BASKET/);
+  assert.match(agents, /Build a basket/);
   assert.doesNotMatch(agents, /Agent pays|provider manifest|bounded quote job/i);
   assert.match(agentLib, /readLiveReference/);
   assert.match(agentLib, /point\.status !== "live"/);
@@ -248,22 +268,44 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(agentLib, /marketUrl: handoffUrl\.href/);
   assert.match(agentLib, /AGENT_DISABLED_MARKETS = new Set\(\["SGOV"\]\)/);
   assert.match(agentManifest, /preflightActions/);
+  assert.match(agentManifest, /streamable-http/);
+  assert.match(agentManifest, /prepare-stock-token-basket/);
   assert.match(agentManifest, /registryStatus: "not-published"/);
   assert.match(agentMarkets, /finalWalletConfirmationRequired: true/);
   assert.match(agentQuoteRoute, /RATE_LIMIT = 30/);
-  assert.match(agentQuoteRoute, /MAX_LOCAL_IN_FLIGHT = 6/);
+  assert.match(agentQuoteRoute, /acquireLocalAgentQuoteCapacity/);
   assert.match(agentQuoteRoute, /takeDurableAgentQuoteLimit/);
   assert.match(agentQuoteRoute, /Content-Type must be application\/json/);
   assert.match(agentQuoteRoute, /AgentApiBodyTimeoutError/);
   assert.match(agentGuard, /readCappedJson/);
   assert.match(agentGuard, /agentQuoteRateLimits/);
   assert.match(agentGuard, /RATE_LIMIT_ROW_TTL_MS/);
+  assert.match(agentGuard, /MAX_LOCAL_QUOTE_UNITS = 12/);
+  assert.match(agentGuard, /count: cost/);
   assert.match(agentGuard, /\.returning\(/);
+  assert.match(basketLib, /allocateUsdGBudget/);
+  assert.match(basketLib, /Promise\.allSettled/);
+  assert.match(basketLib, /failurePolicy: AgentBasketFailurePolicy/);
+  assert.match(basketLib, /atomic: false/);
+  assert.match(basketRoute, /basketRequest\.legs\.length/);
+  assert.match(mcpLib, /hoodflow_prepare_basket/);
+  assert.match(mcpLib, /hoodflow:\/\/execution-markets/);
+  assert.match(mcpHttp, /WebStandardStreamableHTTPServerTransport/);
+  assert.match(mcpHttp, /sessionIdGenerator: undefined/);
+  assert.match(mcpHttp, /basketQuoteCost/);
+  assert.match(mcpRoute, /handleHoodFlowMcpPost/);
+  assert.match(openApiLib, /openapi: HOODFLOW_OPENAPI_VERSION/);
+  assert.match(openApiLib, /"3\.1\.2"/);
+  assert.match(openApiRoute, /buildHoodFlowOpenApiDocument/);
+  assert.match(apiCatalogRoute, /application\/linkset\+json/);
   assert.match(communityMarketRoute, /Virtuals official/);
   assert.match(communityMarketRoute, /virtuals-bonding/);
   assert.match(css, /Authoritative responsive layout for the crypto workspace/);
   assert.match(css, /@media \(max-width: 1100px\)/);
   assert.match(css, /@media \(max-width: 700px\)/);
+  assert.match(css, /\.agents-connector/);
+  assert.match(css, /\.agents-basket-shell/);
+  assert.match(css, /\.basket-order-context/);
   assert.match(communityMarketRoute, /token-pairs\/v1\/robinhood/);
   assert.match(layout, /HoodFlow \| Crypto & Stock Token Markets/);
   assert.match(layout, /Instrument_Sans/);
