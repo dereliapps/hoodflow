@@ -32,7 +32,7 @@ export async function GET() {
     resourceUrl: `${origin}/api/agents/markets`,
     quoteEndpoint: `${origin}/api/agents/quote`,
     basketEndpoint: `${origin}/api/agents/basket`,
-    mcpEndpoint: `${origin}/mcp`,
+    mcpEndpoint: `${origin}/api/mcp`,
     openApiUrl: `${origin}/openapi.json`,
     fetchedAt: new Date().toISOString(),
   }, {

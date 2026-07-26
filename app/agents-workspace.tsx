@@ -76,7 +76,7 @@ const FALLBACK_MARKETS: Market[] = seoAssets.filter((asset) => asset.fullFill).m
 
 const priceFormatter = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 const CONNECTOR_ENDPOINTS: Record<ConnectorKind, string> = {
-  mcp: "https://hoodflow.app/mcp",
+  mcp: "https://hoodflow.app/api/mcp",
   openapi: "https://hoodflow.app/openapi.json",
   catalog: "https://hoodflow.app/.well-known/api-catalog",
 };

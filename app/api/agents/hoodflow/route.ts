@@ -22,7 +22,7 @@ export async function GET() {
       mcp: {
         transport: "streamable-http",
         protocolVersion: "2025-11-25",
-        endpoint: `${origin}/mcp`,
+        endpoint: `${origin}/api/mcp`,
       },
       openapi: {
         specification: "3.1.2",

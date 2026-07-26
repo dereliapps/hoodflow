@@ -34,7 +34,7 @@ HoodFlow exposes public REST, OpenAPI 3.1.2, and stateless Streamable HTTP MCP s
 - [`GET /api/agents/markets`](https://hoodflow.app/api/agents/markets) — reviewed USDG markets and execution policy.
 - [`POST /api/agents/quote`](https://hoodflow.app/api/agents/quote) — indicative, rate-limited preflight with oracle-deviation protection.
 - [`POST /api/agents/basket`](https://hoodflow.app/api/agents/basket) — deterministic USDG allocation and a non-atomic, separately confirmed plan.
-- [`POST /mcp`](https://hoodflow.app/mcp) — MCP tools for market discovery, quote preflight, and basket planning.
+- [`POST /api/mcp`](https://hoodflow.app/api/mcp) — MCP tools for market discovery, quote preflight, and basket planning.
 - [`GET /openapi.json`](https://hoodflow.app/openapi.json) — machine-readable REST contract.
 - [`GET /api/agents/hoodflow`](https://hoodflow.app/api/agents/hoodflow) — capability manifest and input schema.
 

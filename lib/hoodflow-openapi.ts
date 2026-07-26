@@ -386,7 +386,7 @@ export function buildHoodFlowOpenApiDocument() {
       },
     },
     "x-hoodflow-mcp": {
-      endpoint: `${origin}/mcp`,
+      endpoint: `${origin}/api/mcp`,
       transport: "streamable-http",
       sessionMode: "stateless",
       protocolVersion: HOODFLOW_MCP_PROTOCOL_VERSION,
@@ -427,7 +427,7 @@ export function buildHoodFlowApiCatalog() {
           title: "HoodFlow agent metadata",
         },
         {
-          href: `${origin}/mcp`,
+          href: `${origin}/api/mcp`,
           type: "application/json",
           title: "HoodFlow stateless Streamable HTTP MCP",
         },

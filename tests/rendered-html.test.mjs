@@ -77,7 +77,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
     readFile(new URL("../app/api/agents/basket/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/hoodflow-mcp.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/hoodflow-mcp-http.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/mcp/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/mcp/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/hoodflow-openapi.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/openapi.json/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api-catalog/route.ts", import.meta.url), "utf8"),
@@ -154,7 +154,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(intro, /onKeyDown/);
   assert.match(intro, /setStep\("open"\)/);
   assert.match(page, /Automatic retries are active/);
-  assert.match(page, /Release 0\.11\.0/);
+  assert.match(page, /Release 0\.11\.1/);
   assert.match(page, /DCA command center/);
   assert.match(page, /TRACKED TRADE VOLUME/);
   assert.match(page, /price-skeleton/);
@@ -184,7 +184,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(docs, /GET \/api\/agents\/markets/);
   assert.match(docs, /POST \/api\/agents\/quote/);
   assert.match(docs, /POST \/api\/agents\/basket/);
-  assert.match(docs, /POST \/mcp/);
+  assert.match(docs, /POST \/api\/mcp/);
   assert.match(docs, /GET \/openapi\.json/);
   assert.match(community, /Indexed live markets/);
   assert.match(community, /market-card-price/);

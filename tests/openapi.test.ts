@@ -132,7 +132,7 @@ test("advertises the stateless MCP connector and its exact public surface", () =
     };
   };
   assert.deepEqual(document["x-hoodflow-mcp"], {
-    endpoint: "https://hoodflow.app/mcp",
+    endpoint: "https://hoodflow.app/api/mcp",
     transport: "streamable-http",
     sessionMode: "stateless",
     protocolVersion: "2025-11-25",
@@ -162,7 +162,7 @@ test("discovers OpenAPI through the RFC 9727 API catalog", () => {
     title: "HoodFlow Agent Preflight OpenAPI",
   }]);
   assert.ok(catalog.linkset[0]["service-meta"].some(
-    (entry) => entry.href === "https://hoodflow.app/mcp",
+    (entry) => entry.href === "https://hoodflow.app/api/mcp",
   ));
 });
 

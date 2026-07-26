@@ -233,7 +233,7 @@ export function buildHoodFlowMarketDirectory(now = new Date()) {
     marketCount: markets.length,
     quoteEndpoint: `${origin}/api/agents/quote`,
     basketEndpoint: `${origin}/api/agents/basket`,
-    mcpEndpoint: `${origin}/mcp`,
+    mcpEndpoint: `${origin}/api/mcp`,
     fetchedAt: now.toISOString(),
   };
 }

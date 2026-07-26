@@ -140,7 +140,7 @@ const createTestServer = () => createHoodFlowMcpServer({
 });
 
 function mcpRequest(body: unknown, headers: Record<string, string> = {}) {
-  return new Request("https://hoodflow.app/mcp", {
+  return new Request("https://hoodflow.app/api/mcp", {
     method: "POST",
     headers: { ...DEFAULT_HEADERS, ...headers },
     body: typeof body === "string" ? body : JSON.stringify(body),
@@ -361,15 +361,15 @@ test("uses durable general, shared quote and basket rate-limit scopes", async ()
 });
 
 test("returns 405 for stateful stream methods and 204 for preflight", () => {
-  const get = new Request("https://hoodflow.app/mcp", {
+  const get = new Request("https://hoodflow.app/api/mcp", {
     method: "GET",
     headers: { origin: "https://hoodflow.app" },
   });
-  const remove = new Request("https://hoodflow.app/mcp", {
+  const remove = new Request("https://hoodflow.app/api/mcp", {
     method: "DELETE",
     headers: { origin: "https://hoodflow.app" },
   });
-  const options = new Request("https://hoodflow.app/mcp", {
+  const options = new Request("https://hoodflow.app/api/mcp", {
     method: "OPTIONS",
     headers: { origin: "https://hoodflow.app" },
   });
