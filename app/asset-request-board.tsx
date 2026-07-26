@@ -18,12 +18,13 @@ export default function AssetRequestBoard({ walletAddress, walletProvider, onWal
   const [busyTicker, setBusyTicker] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     try {
       const query = walletAddress ? `?wallet=${encodeURIComponent(walletAddress)}` : "";
-      const response = await fetch(`/api/asset-requests${query}`, { cache: "no-store" });
+      const response = await fetch(`/api/asset-requests${query}`, { cache: "no-store", signal });
       const payload = await response.json() as { candidates?: Candidate[]; walletVotes?: string[] };
       if (!response.ok || !Array.isArray(payload.candidates)) throw new Error("Market requests are temporarily unavailable.");
+      if (signal?.aborted) return;
       setCandidates(payload.candidates);
       setWalletVotes(Array.isArray(payload.walletVotes) ? payload.walletVotes : []);
     } catch {
@@ -34,11 +35,13 @@ export default function AssetRequestBoard({ walletAddress, walletProvider, onWal
   }, [walletAddress]);
 
   useEffect(() => {
-    const start = window.setTimeout(() => void load(), 0);
+    const controller = new AbortController();
+    const start = window.setTimeout(() => void load(controller.signal), 0);
     const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load();
+      if (document.visibilityState === "visible") void load(controller.signal);
     }, 30_000);
     return () => {
+      controller.abort();
       window.clearTimeout(start);
       window.clearInterval(timer);
     };

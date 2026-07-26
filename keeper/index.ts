@@ -7,6 +7,7 @@ import {
   isAddress,
 } from "ethers";
 import { createServer } from "node:http";
+import { buildScanWindow, evaluateReadiness } from "./reliability.js";
 
 try {
   process.loadEnvFile?.();
@@ -45,6 +46,18 @@ const quoterAddress = checkedAddress(required("HOODFLOW_V4_QUOTER"));
 const pollInterval = boundedInteger("KEEPER_POLL_INTERVAL_MS", 15_000, 3_000, 300_000);
 const confirmations = boundedInteger("KEEPER_CONFIRMATIONS", 1, 1, 20);
 const maxStrategies = boundedInteger("KEEPER_MAX_STRATEGIES", 500, 1, 10_000);
+const readinessMaxAge = boundedInteger(
+  "KEEPER_READINESS_MAX_AGE_MS",
+  Math.max(pollInterval * 3, 60_000),
+  pollInterval,
+  3_600_000,
+);
+const readinessFailureThreshold = boundedInteger(
+  "KEEPER_READINESS_FAILURE_THRESHOLD",
+  3,
+  1,
+  100,
+);
 const healthHost = process.env.KEEPER_HEALTH_HOST?.trim() || "127.0.0.1";
 const healthPort = boundedInteger("KEEPER_HEALTH_PORT", 8_787, 1_024, 65_535);
 const privateKey = process.env.HOODFLOW_KEEPER_PRIVATE_KEY?.trim();
@@ -56,20 +69,51 @@ const quoter = new Contract(quoterAddress, QUOTER_ABI, provider);
 const abiCoder = AbiCoder.defaultAbiCoder();
 
 let stopping = false;
+let nextStrategyId = 1n;
 const health = {
-  ready: false,
+  started: false,
   lastScanAt: null as string | null,
   lastSuccessAt: null as string | null,
   lastError: null as string | null,
+  lastScanDurationMs: null as number | null,
+  lastScanOutcome: "not_started" as "not_started" | "success" | "failure",
+  consecutiveFailures: 0,
+  nextStrategyId: nextStrategyId.toString(),
 };
 const healthServer = createServer((request, response) => {
-  if (request.method !== "GET" || request.url !== "/healthz") {
+  const pathname = request.url === undefined
+    ? ""
+    : new URL(request.url, "http://keeper.local").pathname;
+  if (request.method !== "GET" || (pathname !== "/healthz" && pathname !== "/livez")) {
     response.writeHead(404, { "content-type": "application/json" });
     response.end(JSON.stringify({ error: "not_found" }));
     return;
   }
-  const ready = health.ready && !stopping;
-  response.writeHead(ready ? 200 : 503, {
+
+  if (pathname === "/livez") {
+    const live = !stopping;
+    response.writeHead(live ? 200 : 503, {
+      "content-type": "application/json",
+      "cache-control": "no-store",
+    });
+    response.end(JSON.stringify({
+      live,
+      stopping,
+      mode: dryRun ? "dry-run" : "execute",
+      uptimeSeconds: Math.floor(process.uptime()),
+    }));
+    return;
+  }
+
+  const readiness = evaluateReadiness({
+    started: health.started,
+    stopping,
+    lastSuccessAt: health.lastSuccessAt,
+    consecutiveFailures: health.consecutiveFailures,
+    maxSuccessAgeMs: readinessMaxAge,
+    failureThreshold: readinessFailureThreshold,
+  });
+  response.writeHead(readiness.ready ? 200 : 503, {
     "content-type": "application/json",
     "cache-control": "no-store",
   });
@@ -78,16 +122,19 @@ const healthServer = createServer((request, response) => {
     chainId: chainId.toString(),
     contract: contractAddress,
     ...health,
-    ready,
+    stopping,
+    ready: readiness.ready,
+    readinessReason: readiness.reason,
+    successAgeMs: readiness.successAgeMs,
+    freshnessLimitMs: readinessMaxAge,
+    failureThreshold: readinessFailureThreshold,
   }));
 });
 process.once("SIGINT", () => {
   stopping = true;
-  health.ready = false;
 });
 process.once("SIGTERM", () => {
   stopping = true;
-  health.ready = false;
 });
 
 await main();
@@ -116,7 +163,7 @@ async function main() {
     healthServer.once("error", reject);
     healthServer.listen(healthPort, healthHost, () => resolve());
   });
-  health.ready = true;
+  health.started = true;
 
   log("keeper_started", {
     mode: dryRun ? "dry-run" : "execute",
@@ -126,22 +173,35 @@ async function main() {
     wallet: signer?.address ?? null,
     pollInterval,
     health: `http://${healthHost}:${healthPort}/healthz`,
+    liveness: `http://${healthHost}:${healthPort}/livez`,
+    readinessMaxAge,
+    readinessFailureThreshold,
   });
 
   do {
+    const scanStartedAt = Date.now();
+    health.lastScanAt = new Date().toISOString();
     try {
-      health.lastScanAt = new Date().toISOString();
       await scanOnce();
       health.lastSuccessAt = new Date().toISOString();
       health.lastError = null;
+      health.lastScanOutcome = "success";
+      health.consecutiveFailures = 0;
     } catch (error) {
       health.lastError = readableError(error);
-      log("scan_error", { error: health.lastError });
+      health.lastScanOutcome = "failure";
+      health.consecutiveFailures++;
+      log("scan_error", {
+        error: health.lastError,
+        consecutiveFailures: health.consecutiveFailures,
+      });
+    } finally {
+      health.lastScanDurationMs = Date.now() - scanStartedAt;
     }
     if (!stopping) await delay(pollInterval);
   } while (!stopping);
 
-  health.ready = false;
+  health.started = false;
   await new Promise<void>((resolve) => healthServer.close(() => resolve()));
   log("keeper_stopped", {});
 }
@@ -154,13 +214,13 @@ async function scanOnce() {
 
   const strategyCount = BigInt(await contract.strategyCount());
   const protocolFeeBps = BigInt(await contract.protocolFeeBps());
-  const scanThrough = Number(strategyCount > BigInt(maxStrategies)
-    ? BigInt(maxStrategies)
-    : strategyCount);
+  const scanWindow = buildScanWindow(strategyCount, maxStrategies, nextStrategyId);
+  nextStrategyId = scanWindow.nextStrategyId;
+  health.nextStrategyId = nextStrategyId.toString();
   let readyCount = 0;
   let routedCount = 0;
 
-  for (let strategyId = 1; strategyId <= scanThrough; strategyId++) {
+  for (const strategyId of scanWindow.strategyIds) {
     if (!(await contract.isStrategyReady(strategyId))) continue;
     readyCount++;
 
@@ -169,7 +229,7 @@ async function scanOnce() {
     const swapAmount = grossAmount - (grossAmount * protocolFeeBps) / BPS_DENOMINATOR;
     const routes = await quoteRoutes(strategy.tokenIn, strategy.tokenOut, swapAmount);
     if (routes.length === 0) {
-      log("strategy_skipped", { strategyId, reason: "no_quoted_v4_route" });
+      log("strategy_skipped", { strategyId: strategyId.toString(), reason: "no_quoted_v4_route" });
       continue;
     }
 
@@ -177,7 +237,7 @@ async function scanOnce() {
       const route = routes[0];
       routedCount++;
       log("route_quoted", {
-        strategyId,
+        strategyId: strategyId.toString(),
         fee: route.fee,
         tickSpacing: route.tickSpacing,
         quotedAmountOut: route.amountOut.toString(),
@@ -196,7 +256,7 @@ async function scanOnce() {
         break;
       } catch (error) {
         log("route_preflight_failed", {
-          strategyId,
+          strategyId: strategyId.toString(),
           fee: route.fee,
           tickSpacing: route.tickSpacing,
           error: readableError(error),
@@ -204,12 +264,15 @@ async function scanOnce() {
       }
     }
     if (!selectedRoute) {
-      log("strategy_skipped", { strategyId, reason: "all_quoted_routes_failed_preflight" });
+      log("strategy_skipped", {
+        strategyId: strategyId.toString(),
+        reason: "all_quoted_routes_failed_preflight",
+      });
       continue;
     }
     routedCount++;
     log("route_selected", {
-      strategyId,
+      strategyId: strategyId.toString(),
       fee: selectedRoute.fee,
       tickSpacing: selectedRoute.tickSpacing,
       quotedAmountOut: selectedRoute.amountOut.toString(),
@@ -220,21 +283,27 @@ async function scanOnce() {
       const tx = await contract.executeDCA(strategyId, selectedRoute.data, {
         gasLimit: (estimatedGas * 120n) / 100n,
       });
-      log("transaction_submitted", { strategyId, hash: tx.hash });
+      log("transaction_submitted", { strategyId: strategyId.toString(), hash: tx.hash });
       const receipt = await tx.wait(confirmations);
       log("transaction_confirmed", {
-        strategyId,
+        strategyId: strategyId.toString(),
         hash: tx.hash,
         blockNumber: receipt?.blockNumber ?? null,
       });
     } catch (error) {
-      log("strategy_failed", { strategyId, error: readableError(error) });
+      log("strategy_failed", {
+        strategyId: strategyId.toString(),
+        error: readableError(error),
+      });
     }
   }
 
   log("scan_complete", {
     strategyCount: strategyCount.toString(),
-    scanned: scanThrough,
+    scanned: scanWindow.strategyIds.length,
+    scanStartStrategyId: scanWindow.startStrategyId?.toString() ?? null,
+    scanEndStrategyId: scanWindow.endStrategyId?.toString() ?? null,
+    nextStrategyId: scanWindow.nextStrategyId.toString(),
     readyCount,
     routedCount,
   });

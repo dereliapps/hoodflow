@@ -25,7 +25,6 @@ HoodFlow indexes the official Virtuals Robinhood Chain launch feed and keeps bon
 - Contract-address lookup, native quote-asset detection, minimum output, bounded slippage, and self-custody settlement.
 - Durable referral profiles, verified first-trade points, and shareable links. Public Season 0 rankings are marked **Coming Soon** until the leaderboard opens.
 - Selectable USDG, VIRTUAL, and WETH settlement with atomic V2 routing through a market's native quote token when needed.
-- RAGRET 24-hour scenario receipts comparing the same hypothetical USDG notional across a Stock Token and one exact community-token contract, with shareable PNG output and no wallet or LLM dependency.
 
 ## Agent execution API
 
@@ -33,7 +32,6 @@ HoodFlow exposes a public, read-only market resource and a bounded quote-preflig
 
 - [Open the Agents workspace](https://hoodflow.app/?view=agents)
 - [`GET /api/agents/markets`](https://hoodflow.app/api/agents/markets) — reviewed USDG markets and execution policy.
-- [`POST /api/agents/ragret`](https://hoodflow.app/api/agents/ragret) — deterministic, rate-limited RAGRET scenario receipt. It does not inspect a wallet or claim to reproduce a transaction.
 - [`POST /api/agents/quote`](https://hoodflow.app/api/agents/quote) — indicative, rate-limited preflight with oracle-deviation protection.
 - [`GET /api/agents/hoodflow`](https://hoodflow.app/api/agents/hoodflow) — capability manifest and input schema.
 
