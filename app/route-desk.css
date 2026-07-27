@@ -145,20 +145,33 @@
 }
 
 .terminal-v2 .version-badge {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  min-height: 20px;
-  margin-left: 3px;
-  padding: 0 7px;
-  border: 1px solid rgba(55, 240, 138, 0.32);
-  border-radius: 3px;
-  color: var(--hf-green);
-  background: rgba(55, 240, 138, 0.07);
-  font-family: var(--hf-mono);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  line-height: 1;
+  min-height: 14px;
+  margin-left: 0;
+  padding: 0 0 0 13px;
+  border: 0;
+  border-radius: 0;
+  color: rgba(202, 213, 207, 0.62);
+  background: transparent;
+  box-shadow: none;
+  font: 600 8px/14px var(--hf-mono);
+  letter-spacing: 0.11em;
+  white-space: nowrap;
+}
+
+.terminal-v2 .version-badge::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--hf-green);
+  box-shadow:
+    0 0 0 3px rgba(55, 240, 138, 0.08),
+    0 0 6px rgba(55, 240, 138, 0.18);
 }
 
 .terminal-v2 .main-nav {
