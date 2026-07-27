@@ -19,7 +19,6 @@ type RouteDeskHomeProps = {
   networkBlock: string;
   priceStatus: string;
   connected: boolean;
-  walletAddress: string;
   walletUsdgBalance: string;
   walletEthBalance: string;
   onOpenMarkets: () => void;
@@ -29,11 +28,13 @@ type RouteDeskHomeProps = {
 };
 
 function MarketMark({ ticker }: { ticker: string }) {
-  return <span className="desk-market-mark">
-    {/* Dynamic registry paths are served directly; the Vinext image shim does not proxy them. */}
-    {/* eslint-disable-next-line @next/next/no-img-element */}
-    <img src={`/logos/${ticker}.png`} alt="" width={40} height={40} decoding="async" />
-  </span>;
+  return (
+    <span className="desk-market-mark">
+      {/* Dynamic registry paths are served directly; the Vinext image shim does not proxy them. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={`/logos/${ticker}.png`} alt="" width={40} height={40} decoding="async" />
+    </span>
+  );
 }
 
 export default function RouteDeskHome({
@@ -43,7 +44,6 @@ export default function RouteDeskHome({
   networkBlock,
   priceStatus,
   connected,
-  walletAddress,
   walletUsdgBalance,
   walletEthBalance,
   onOpenMarkets,
@@ -57,122 +57,144 @@ export default function RouteDeskHome({
     [markets, selectedTicker],
   );
 
-  return <section className="page overview-page route-home">
-    <header className="desk-intro">
-      <div className="desk-intro-copy">
-        <div className="desk-kicker"><span><i /> Robinhood Chain</span><b>Mainnet</b></div>
-        <h1>Stock Tokens, routed before you sign.</h1>
-        <p>Compare the onchain reference, executable pool route and protected minimum in one focused workspace. Your wallet keeps final control.</p>
-        <div className="desk-intro-actions">
-          <button type="button" className="hf-primary" onClick={onOpenMarkets}>Explore markets <span>&rarr;</span></button>
-          <button type="button" className="desk-text-action" onClick={onWallet}>{connected ? "View connected wallet" : "Connect wallet"}</button>
+  return (
+    <section className="page overview-page route-home">
+      <header className="terminal-hero">
+        <div className="terminal-hero-copy">
+          <p className="terminal-eyebrow"><i /> Robinhood Chain execution terminal</p>
+          <h1>Markets in focus.<br /><span>Routes in full view.</span></h1>
+          <p className="terminal-deck">
+            Discover Stock Token markets, inspect live liquidity and review a protected USDG quote
+            before your self-custody wallet signs.
+          </p>
+          <div className="terminal-hero-actions">
+            <button type="button" className="hf-primary" onClick={onOpenMarkets}>Explore markets</button>
+            <button type="button" className="hf-secondary" onClick={onWallet}>{connected ? "Wallet options" : "Connect wallet"}</button>
+          </div>
         </div>
-      </div>
-      <aside className="desk-status-panel" aria-label="HoodFlow network status">
-        <div><span>Execution routes</span><strong>{routeCount}</strong><small>reviewed and enabled</small></div>
-        <div><span>Price verification</span><strong>{priceStatus}</strong><small>automatic onchain checks</small></div>
-        <div><span>Current block</span><strong>#{networkBlock}</strong><small>Robinhood Chain</small></div>
-      </aside>
-    </header>
-
-    <MarketStatus />
-
-    <section className="route-board" aria-label="Live Stock Token routes">
-      <header className="route-board-head">
-        <div><span>Live route desk</span><h2>Choose a market</h2></div>
-        <p>Oracle values are references. Every order receives a fresh DEX quote for the exact amount entered.</p>
+        <div className="terminal-hero-readout" aria-label="Live HoodFlow status">
+          <div><span>Execution routes</span><strong>{routeCount}</strong><small>reviewed markets</small></div>
+          <div><span>Price verification</span><strong>{priceStatus}</strong><small>automatic checks</small></div>
+          <div><span>Current block</span><strong>#{networkBlock}</strong><small>mainnet / 4663</small></div>
+        </div>
       </header>
-      <div className="route-board-grid">
-        <div className="route-market-list" aria-label="Execution-enabled markets">
-          {markets.map((market) => <button
-            type="button"
-            aria-pressed={selected?.ticker === market.ticker}
-            className={`route-market-row ${selected?.ticker === market.ticker ? "selected" : ""}`}
-            key={market.ticker}
-            onClick={() => setSelectedTicker(market.ticker)}
-            onDoubleClick={() => onOpenAsset(market.ticker)}
-          >
-            <span className="route-market-identity"><MarketMark ticker={market.ticker} /><span><strong>{market.ticker}</strong><small>{market.name}</small></span></span>
-            <span className="route-market-venue"><strong>Uniswap {market.protocol}</strong><small>USDG route</small></span>
-            <span className="route-market-price"><strong>{market.price}</strong><small className={market.live ? "live" : ""}><i /> {market.age}</small></span>
-            <span className="route-market-open" aria-hidden="true">&rarr;</span>
-          </button>)}
+
+      <section className="market-terminal" aria-label="Live route desk">
+        <header className="market-terminal-bar">
+          <div>
+            <span className="terminal-live"><i /> Live route desk</span>
+            <b>{routeCount} executable / {indexedCount} indexed</b>
+          </div>
+          <MarketStatus compact />
+        </header>
+
+        <div className="market-terminal-grid">
+          <aside className="terminal-watchlist">
+            <header><span>Watchlist</span><button type="button" onClick={onOpenMarkets}>All markets</button></header>
+            <div className="terminal-watchlist-columns"><span>Market</span><span>Reference</span></div>
+            <div className="terminal-watchlist-list">
+              {markets.map((market) => (
+                <button
+                  type="button"
+                  aria-pressed={selected?.ticker === market.ticker}
+                  className={`terminal-watchlist-row ${selected?.ticker === market.ticker ? "selected" : ""}`}
+                  key={market.ticker}
+                  onClick={() => setSelectedTicker(market.ticker)}
+                  onDoubleClick={() => onOpenAsset(market.ticker)}
+                >
+                  <span className="terminal-market-id">
+                    <MarketMark ticker={market.ticker} />
+                    <span><strong>{market.ticker}</strong><small>{market.name}</small></span>
+                  </span>
+                  <span className="terminal-market-quote">
+                    <strong>{market.price}</strong>
+                    <small className={market.live ? "live" : "checking"}>{market.live ? market.age : "Checking"}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <footer><span>Route coverage</span><strong>{routeCount} live</strong></footer>
+          </aside>
+
+          {selected && (
+            <article className="terminal-instrument">
+              <header className="terminal-instrument-head">
+                <div className="terminal-market-id">
+                  <MarketMark ticker={selected.ticker} />
+                  <span><small>Selected market</small><strong>{selected.name} <em>{selected.ticker}</em></strong></span>
+                </div>
+                <span className={`terminal-state ${selected.live ? "live" : "checking"}`}><i /> {selected.live ? "Route ready" : "Verifying"}</span>
+              </header>
+
+              <div className="terminal-price">
+                <p><span>Onchain reference</span><strong>{selected.price}</strong></p>
+                <div><span>Oracle age</span><b>{selected.age}</b></div>
+                <div><span>Venue</span><b>Uniswap {selected.protocol}</b></div>
+              </div>
+
+              <div className="terminal-route-map" aria-label={`USDG to ${selected.ticker} execution route`}>
+                <div className="route-map-grid" aria-hidden="true" />
+                <div className="route-map-label"><span>Protected route</span><b>Exact input / short-lived permission</b></div>
+                <div className="route-map-flow">
+                  <div className="route-map-node start"><small>01 / PAY</small><strong>USDG</strong><span>Your wallet</span></div>
+                  <div className="route-map-line"><i /></div>
+                  <div className="route-map-node center"><small>02 / ROUTE</small><strong>{selected.protocol}</strong><span>Best reviewed pool</span></div>
+                  <div className="route-map-line"><i /></div>
+                  <div className="route-map-node end"><small>03 / RECEIVE</small><strong>{selected.ticker}</strong><span>Direct settlement</span></div>
+                </div>
+                <div className="route-map-proof">
+                  <span><i /> Oracle checked</span>
+                  <span><i /> Minimum enforced</span>
+                  <span><i /> User signature</span>
+                </div>
+              </div>
+
+              <div className="terminal-instrument-foot">
+                <p>The reference explains the market. Your fresh DEX quote determines execution.</p>
+                <button type="button" onClick={() => onOpenAsset(selected.ticker)}>Open market details</button>
+              </div>
+            </article>
+          )}
+
+          {selected && (
+            <aside className="terminal-ticket">
+              <header><div><span>Order ticket</span><strong>Buy {selected.ticker}</strong></div><b>Protected</b></header>
+              <div className="ticket-side"><button type="button" className="active">Buy</button><button type="button" onClick={() => onOpenAsset(selected.ticker)}>Sell</button></div>
+              <div className="ticket-field">
+                <span>You pay</span>
+                <div><strong>{connected ? walletUsdgBalance : "0.00"}</strong><b>USDG</b></div>
+                <small>{connected ? "Available balance" : "Connect to read balance"}</small>
+              </div>
+              <div className="ticket-flow" aria-hidden="true"><i /></div>
+              <div className="ticket-field receive">
+                <span>You receive</span>
+                <div><strong>Fresh quote</strong><b>{selected.ticker}</b></div>
+                <small>Calculated from the complete input</small>
+              </div>
+              <dl className="ticket-details">
+                <div><dt>Route</dt><dd>Uniswap {selected.protocol}</dd></div>
+                <div><dt>Permission</dt><dd>Exact amount</dd></div>
+                <div><dt>HoodFlow fee</dt><dd>0.00%</dd></div>
+                <div><dt>Gas balance</dt><dd>{connected ? `${walletEthBalance} ETH` : "Shown after connect"}</dd></div>
+              </dl>
+              <button type="button" className="ticket-submit" onClick={() => onQuote(selected.ticker)}>
+                {connected ? "Review live quote" : "Connect & review quote"}
+              </button>
+              <p>No order is submitted until you approve the final route in your wallet.</p>
+            </aside>
+          )}
         </div>
 
-        {selected && <aside className="route-inspector">
-          <div className="route-inspector-head">
-            <span className="route-market-identity"><MarketMark ticker={selected.ticker} /><span><small>Selected market</small><strong>{selected.name}</strong></span></span>
-            <b className={selected.live ? "live" : "checking"}><i /> {selected.live ? "Live" : "Checking"}</b>
-          </div>
-          <div className="route-inspector-price"><span>{selected.ticker} token reference</span><strong>{selected.price}</strong><small>{selected.age}</small></div>
-          <div className="route-path" aria-label={`USDG to ${selected.ticker} execution route`}>
-            <div className="route-node"><span>Pay</span><strong>USDG</strong></div>
-            <i className="route-line"><b /></i>
-            <div className="route-node router"><span>Route</span><strong>{selected.protocol}</strong></div>
-            <i className="route-line"><b /></i>
-            <div className="route-node"><span>Receive</span><strong>{selected.ticker}</strong></div>
-          </div>
-          <div className="route-inspector-facts">
-            <div><span>Permission</span><strong>Exact amount</strong></div>
-            <div><span>Expiry</span><strong>10 minutes</strong></div>
-            <div><span>Settlement</span><strong>Your wallet</strong></div>
-            <div><span>HoodFlow fee</span><strong>0.00%</strong></div>
-          </div>
-          <div className="route-inspector-actions">
-            <button type="button" onClick={() => onQuote(selected.ticker)}>Prepare quote</button>
-            <button type="button" onClick={() => onOpenAsset(selected.ticker)}>Market details</button>
-          </div>
-          <p>No transaction is submitted from this screen. The final route, minimum received and gas estimate appear before wallet confirmation.</p>
-        </aside>}
-      </div>
-    </section>
+        <footer className="market-terminal-foot">
+          <div><span>01</span><p><strong>Fresh quote</strong><small>Executable output, not a display estimate.</small></p></div>
+          <div><span>02</span><p><strong>Protected minimum</strong><small>The trade reverts below your floor.</small></p></div>
+          <div><span>03</span><p><strong>Direct settlement</strong><small>Purchased tokens stay in your wallet.</small></p></div>
+        </footer>
+      </section>
 
-    <section className="desk-metrics" aria-label="HoodFlow coverage">
-      <div><strong>{indexedCount}</strong><span>Canonical Stock Tokens indexed</span></div>
-      <div><strong>{routeCount}</strong><span>Execution-enabled USDG routes</span></div>
-      <div><strong>V3 + V4</strong><span>Reviewed liquidity paths</span></div>
-      <div><strong>10 min</strong><span>Maximum permit window</span></div>
+      <p className="terminal-risk-note">
+        Stock Tokens are not shares and may be restricted in your jurisdiction. Review eligibility and product risks before transacting.
+      </p>
     </section>
-
-    <section className="desk-lower">
-      <article className="desk-wallet">
-        <header><span><i /> {connected ? "Connected wallet" : "Execution wallet"}</span><b>Self-custody</b></header>
-        <div>
-          <strong>{connected ? `${walletUsdgBalance} USDG` : "Connect to see balances"}</strong>
-          <p>{connected ? `${walletEthBalance} ETH available for gas` : "HoodFlow never receives your seed phrase or takes custody of purchased tokens."}</p>
-        </div>
-        <footer><span>{connected ? walletAddress : "Robinhood Chain / 4663"}</span><button type="button" onClick={onWallet}>{connected ? "Wallet options" : "Connect wallet"}</button></footer>
-      </article>
-      <article className="desk-guide">
-        <header><span>One order, four checks</span><a href="/how-it-works">How it works &rarr;</a></header>
-        <ol>
-          <li><b>01</b><span><strong>Pick the market</strong><small>Only reviewed routes can open an order.</small></span></li>
-          <li><b>02</b><span><strong>Enter the amount</strong><small>The quote is calculated for the complete input.</small></span></li>
-          <li><b>03</b><span><strong>Review the floor</strong><small>Fees, slippage and minimum received stay visible.</small></span></li>
-          <li><b>04</b><span><strong>Confirm in wallet</strong><small>The token settles directly to your address.</small></span></li>
-        </ol>
-      </article>
-    </section>
-
-    <section className="desk-principles">
-      <header><span>Why HoodFlow</span><h2>Execution details should be visible, not decorative.</h2></header>
-      <div>
-        <article><b>Route</b><h3>Full-input liquidity checks</h3><p>A market stays watch-only until the configured route can fill the complete tested input.</p></article>
-        <article><b>Protection</b><h3>A minimum that lives onchain</h3><p>Your slippage setting becomes an output floor. Less than that amount means the trade reverts.</p></article>
-        <article><b>Ownership</b><h3>Direct wallet settlement</h3><p>Permit2 authorizes the selected amount for a short window. HoodFlow does not become custodian.</p></article>
-      </div>
-    </section>
-
-    <section className="desk-faq">
-      <header><span>Before you trade</span><h2>Clear answers, before a wallet prompt.</h2></header>
-      <div>
-        <details><summary>Are Stock Tokens shares?</summary><p>No. They provide economic exposure without shareholder rights and may be restricted in your jurisdiction.</p></details>
-        <details><summary>Does HoodFlow hold my assets?</summary><p>No. Your wallet signs the router transaction and received tokens remain at your address.</p></details>
-        <details><summary>Why are some markets watch-only?</summary><p>HoodFlow blocks an order until a reviewed route passes its complete-input execution checks.</p></details>
-        <details><summary>Has HoodFlow been independently audited?</summary><p>Not yet. Contract source, deployed addresses, automated checks and current limitations remain public on the Security page.</p></details>
-      </div>
-    </section>
-
-    <p className="desk-risk-note">Stock Tokens are not shares and may be restricted in your jurisdiction. Review eligibility and product risks before transacting.</p>
-  </section>;
+  );
 }

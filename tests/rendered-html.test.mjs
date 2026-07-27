@@ -24,20 +24,22 @@ test("server-renders the HoodFlow product shell", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>HoodFlow \| Route first\. Sign second\.<\/title>/i);
-  assert.match(html, /Stock Tokens, routed before you sign\./);
+  assert.match(html, /Markets in focus\./);
+  assert.match(html, /Routes in full view\./);
   assert.match(html, /Explore markets/);
   assert.match(html, /Live route desk/);
-  assert.match(html, /Choose a market/);
+  assert.match(html, /Selected market/);
   assert.match(html, /Execution routes/);
   assert.match(html, /Price verification/);
   assert.match(html, /Current block/);
   assert.match(html, /Robinhood Chain/i);
-  assert.match(html, /One order, four checks/);
-  assert.match(html, /Execution details should be visible, not decorative\./);
+  assert.match(html, /Fresh quote/);
+  assert.match(html, /Protected minimum/);
+  assert.match(html, /Direct settlement/);
   assert.doesNotMatch(html, /Independent interface built on Robinhood Chain/);
   assert.doesNotMatch(html, /Not affiliated with or endorsed by Robinhood Markets, Inc/);
   assert.match(html, /Stock Tokens are not shares/);
-  assert.match(html, /Prepare quote/);
+  assert.match(html, /review quote/i);
   assert.match(html, /Robinhood Chain/);
   assert.match(html, /og\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);

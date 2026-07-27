@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { IBM_Plex_Mono, Instrument_Sans } from "next/font/google";
 import { Analytics } from "./analytics";
 import "./globals.css";
-import "./route-desk.css";
 import "./community-redesign.css";
+import "./route-desk.css";
 
 const instrumentSans = Instrument_Sans({ variable: "--font-instrument-sans", subsets: ["latin"] });
 const ibmPlexMono = IBM_Plex_Mono({ variable: "--font-ibm-plex-mono", subsets: ["latin"], weight: ["400", "500", "600"] });

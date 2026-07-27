@@ -1120,7 +1120,7 @@ export default function Home() {
       throw new Error("Connect the engine owner wallet to activate recurring DCA.");
     }
     if (!engineOwner || walletAddress.toLowerCase() !== engineOwner.toLowerCase()) {
-      throw new Error(`Engine activation requires the owner wallet ${compactAddress(engineOwner || "0x0000000000000000000000000000000000000000")}.`);
+      throw new Error("Engine activation requires the configured controller wallet.");
     }
     const provider = new BrowserProvider(walletProvider, "any");
     const network = await provider.getNetwork();
@@ -2066,7 +2066,7 @@ export default function Home() {
   ];
 
   return (
-    <main className="app-shell route-desk">
+    <main className="app-shell route-desk terminal-v2">
       {PRIVY_CONFIGURED && privyRuntimeEnabled && <PrivyWalletRuntime onController={handlePrivyController} onWallet={activatePrivyWallet} onError={notify} />}
       <header className="topbar">
         <button className="brand" onClick={() => navigate("overview")} aria-label="HoodFlow home">
@@ -2110,7 +2110,6 @@ export default function Home() {
           networkBlock={String(networkBlock)}
           priceStatus={priceState === "live" ? `${priceCounts.live} live` : priceState === "error" ? "Retrying" : "Verifying"}
           connected={connected}
-          walletAddress={connected ? compactAddress(walletAddress) : ""}
           walletUsdgBalance={walletUsdgBalance}
           walletEthBalance={walletBalance}
           onOpenMarkets={() => navigate("assets")}
@@ -2265,7 +2264,7 @@ export default function Home() {
             <article className="control-card"><span>BUY & SELL</span><strong>{executionReadyAssetCount} verified routes</strong><p>Fresh quotes, maximum slippage protection, and exact short-lived order permissions.</p><b className="control-ok">LIVE</b></article>
             <article className="control-card dca-control"><span>RECURRING DCA</span><strong>{contractReady ? "Configured · pre-audit" : enginePaused && engineConfigured ? "Ready to activate" : engineChecking ? "Verifying engine" : engineConfigured ? "Verification delayed" : "Configuration review required"}</strong><p>{contractReady ? "The onchain engine is available, but independent audit, multisig ownership and keeper redundancy remain pending." : enginePaused && engineConfigured ? "Only the owner wallet can switch the verified DCA engine on." : contractStatus}</p><div><b className="control-ok warning">{contractReady ? "PRE-AUDIT" : engineChecking ? "CHECKING" : enginePaused && engineConfigured ? "OWNER ACTION" : engineConfigured ? "AUTO RETRY" : "BLOCKED"}</b>{!contractReady && !engineChecking && <button type="button" className="engine-retry" onClick={() => void refreshEngineStatus()}>Retry now</button>}</div></article>
             <article className="control-card"><span>RPC HEALTH</span><strong>{rpcHealth ? `${rpcHealth.endpoint} · ${rpcHealth.latencyMs} ms` : "Checking endpoints"}</strong><p>Server reads retry the configured RPC list automatically. Wallet transactions still use the endpoint selected inside your wallet.</p><b className="control-ok">{rpcHealth ? `${rpcHealth.configuredEndpoints} ENDPOINT${rpcHealth.configuredEndpoints === 1 ? "" : "S"}` : "CHECKING"}</b></article>
-            <article className="control-card"><span>ENGINE CONTROL</span><strong>{engineOwner ? `${compactAddress(engineOwner)} · ${engineOwnerType}` : "Reading owner"}</strong><p>{engineOwnerType === "EOA" ? "The current owner is a single externally owned wallet. A multisig or timelock is not verified." : engineOwnerType === "Contract" ? "The controller is a contract, but its multisig or timelock policy has not been independently verified." : "Controller type is still being checked."}</p><b className={`control-ok ${engineOwnerType === "EOA" ? "warning" : ""}`}>{engineOwnerType === "EOA" ? "CENTRALIZATION RISK" : "VERIFY ONCHAIN"}</b></article>
+            <article className="control-card"><span>ENGINE CONTROL</span><strong>{engineOwner ? engineOwnerType === "EOA" ? "Single-signature controller" : engineOwnerType === "Contract" ? "Contract controller" : "Controller detected" : "Verifying controller"}</strong><p>{engineOwnerType === "EOA" ? "Administration currently depends on one signer. A multisig or timelock is not verified." : engineOwnerType === "Contract" ? "A controller contract is present, but its multisig or timelock policy has not been independently verified." : "Controller type is still being checked."}</p><b className={`control-ok ${engineOwnerType === "EOA" ? "warning" : ""}`}>{engineOwnerType === "EOA" ? "SINGLE SIGNER" : "VERIFY ONCHAIN"}</b></article>
           </div>
           <div className="permissions-card">
             <div className="permissions-head"><div><p className="eyebrow">ONCHAIN ORDERS</p><h2>Strategy permissions</h2></div><span>{strategies.length} records</span></div>
