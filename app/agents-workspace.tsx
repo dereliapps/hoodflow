@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import Image from "next/image";
 import { formatTokenAmount } from "@/lib/format-display-number";
 
 import type {
@@ -403,7 +402,9 @@ export default function AgentsWorkspace({
           <h2>Ask HoodFlow<br />for a real route.</h2>
           <p>This calls the same reviewed Robinhood Chain quoters used by the product. If no executable pool answers, the request fails closed.</p>
           <div className="agents-selected-market">
-            <Image src={`/logos/${asset}.png`} alt="" width={50} height={50} />
+            {/* Dynamic registry logos bypass the Vinext image optimizer. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={`/logos/${asset}.png`} alt="" width={50} height={50} />
             <p><strong>{selectedMarket?.name}</strong><span>{asset} · {selectedMarket?.type}</span></p>
             <b className={referenceReady ? "live" : referenceState === "error" || referenceState === "degraded" ? "unavailable" : "checking"}>{referenceLabel}</b>
           </div>
@@ -419,16 +420,16 @@ export default function AgentsWorkspace({
             <label className="agents-field"><span>MAX SLIPPAGE</span><select value={slippageBps} onChange={(event) => { setSlippageBps(Number(event.target.value)); setQuote(null); setQuoteError(""); }}><option value={25}>0.25%</option><option value={50}>0.50%</option><option value={100}>1.00%</option><option value={200}>2.00%</option></select></label>
           </div>
 
-          {quote ? <div className={`agents-quote-result ${quoteExpired ? "expired" : ""}`}>
+          {quote ? <div className={`agents-quote-result ${quoteExpired ? "expired" : ""}`} role="status" aria-live="polite">
             <header><span>{quoteExpired ? "PREFLIGHT EXPIRED" : "INDICATIVE PREFLIGHT READY"}</span><b>{quoteExpired ? "REFRESH REQUIRED" : `${quoteSeconds}s`}</b></header>
             <div><span>Exact input</span><strong>{compactAmount(quote.pay.amount)} {quote.pay.ticker}</strong></div>
             <div><span>Estimated receive</span><strong>{compactAmount(quote.receive.estimatedAmount)} {quote.receive.ticker}</strong></div>
             <div><span>Indicative output floor</span><strong>{compactAmount(quote.receive.indicativeMinimumAmount)} {quote.receive.ticker}</strong></div>
             <div><span>Reviewed route</span><strong>{quote.route.protocol} · {(quote.route.feeBps / 100).toFixed(2)}%</strong></div>
             <footer><span><i /> NOT EXECUTION-BOUND · REQUOTE REQUIRED</span><button type="button" disabled={quoteExpired} onClick={() => onOpenMarket(asset, { side: quote.side, amount: quote.pay.amount, slippageBps: quote.protection.slippageBps })}>Prefill fresh wallet quote <b>→</b></button></footer>
-          </div> : <div className="agents-empty-quote"><div className="agents-pulse" /><strong>{quoteBusy ? "Checking reviewed liquidity…" : "No quote prepared yet"}</strong><span>{quoteBusy ? "The API is comparing the configured V3/V4 route." : "Choose the agent's instruction, then run a bounded preflight."}</span></div>}
+          </div> : <div className="agents-empty-quote" role="status" aria-live="polite"><div className="agents-pulse" /><strong>{quoteBusy ? "Checking reviewed liquidity…" : "No quote prepared yet"}</strong><span>{quoteBusy ? "The API is comparing the configured V3/V4 route." : "Choose the agent's instruction, then run a bounded preflight."}</span></div>}
 
-          {quoteError && <div className="agents-quote-error"><strong>Request stopped safely.</strong><span>{quoteError} No transaction or wallet permission was created.</span></div>}
+          {quoteError && <div className="agents-quote-error" role="alert"><strong>Request stopped safely.</strong><span>{quoteError} No transaction or wallet permission was created.</span></div>}
           <button className="agents-submit" type="submit" disabled={quoteBusy || !amount}>{quoteBusy ? "Verifying route + oracle…" : quoteExpired ? "Refresh safety preflight" : "Run safety preflight"}<span>→</span></button>
         </form>
       </section>
@@ -493,7 +494,8 @@ export default function AgentsWorkspace({
                   const isNext = nextBasketLeg?.index === leg.index;
                   return <li key={`${basketPlan.basketId}-${leg.index}`} className={`${status} ${isNext ? "next" : ""}`} aria-current={isNext ? "step" : undefined}>
                     <span className="agents-basket-step">{status === "confirmed" ? "✓" : status === "submitted" ? "…" : String(leg.index + 1).padStart(2, "0")}</span>
-                    <Image src={`/logos/${leg.asset}.png`} alt="" width={38} height={38} />
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`/logos/${leg.asset}.png`} alt="" width={38} height={38} />
                     <div><strong>{leg.asset} <small>{(leg.weightBps / 100).toFixed(2)}%</small></strong><span>{compactAmount(leg.allocation.amount)} USDG → ≈ {compactAmount(leg.quote.receive.estimatedAmount)} {leg.quote.receive.ticker}</span><em>{leg.quote.route.protocol} · {(leg.quote.route.feeBps / 100).toFixed(2)}% pool fee</em></div>
                     {status === "confirmed"
                       ? execution?.txHash ? <a href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${execution.txHash}`} target="_blank" rel="noreferrer">Receipt ↗</a> : <b>Confirmed</b>

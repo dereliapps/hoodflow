@@ -329,6 +329,9 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
         const payload = await response.json() as { markets?: CommunityMarket[]; updatedAt?: number; error?: string };
         if (!response.ok || !Array.isArray(payload.markets)) throw new Error(payload.error || "Market feed is temporarily unavailable.");
         setMarkets(payload.markets);
+        setActiveMarket((current) => current
+          ? payload.markets!.find((market) => market.address.toLowerCase() === current.address.toLowerCase()) ?? current
+          : current);
         setMarketsUpdatedAt(payload.updatedAt ?? Date.now());
         setMarketsError("");
       } catch (error) {
@@ -456,6 +459,7 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
 
   function invalidateQuote() {
     quoteRequestId.current += 1;
+    setQuoteBusy(false);
     setQuote(null);
     setQuoteUpdatedAt(null);
     setRouteError("");
@@ -687,127 +691,204 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
     invalidateQuote();
   }
 
-  return <section className="page inner-page community-page">
-    <div className="community-hero">
-      <div><p className="eyebrow">CRYPTO · ROBINHOOD CHAIN</p><h1>Indexed live markets.<br /><span>One execution screen.</span></h1><p>Discover active pools from supported market feeds, compare real liquidity and trade from your wallet. Meme coins, Virtuals launches and crypto markets appear in one clean live feed.</p></div>
-      <div className="community-hero-badge"><strong>24/7</strong><span>WHEN ONCHAIN<br />LIQUIDITY EXISTS</span></div>
-    </div>
-    <section className="market-pulse" aria-label="Robinhood Chain token market summary">
-      <div><span>LIVE MARKETS</span><strong>{marketsLoading ? "—" : markets.length}</strong><small>Deduplicated tokens</small></div>
-      <div><span>24H POOL VOLUME</span><strong>{marketsLoading ? "—" : compactMoney(marketStats.volume)}</strong><small>Deduplicated token leaders</small></div>
-      <div><span>TRACKED LIQUIDITY</span><strong>{marketsLoading ? "—" : compactMoney(marketStats.liquidity)}</strong><small>Best discovered pool per token</small></div>
-      <div><span>LIVE PRICES</span><strong>{marketsLoading ? "—" : `${pricedMarkets}/${markets.length}`}</strong><small>USD-valued now</small></div>
-    </section>
-
-    <section className="market-board">
-      <div className="market-board-head"><div><p className="eyebrow">LIVE MARKETS</p><h2>Explore crypto</h2><span>{marketsUpdatedAt ? `${filteredMarkets.length} markets · Updated ${new Date(marketsUpdatedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}` : "Connecting to market feeds"}</span></div><label><span>Q</span><input value={marketSearch} onChange={(event) => setMarketSearch(event.target.value)} placeholder="Search name, ticker or CA" aria-label="Search crypto markets" /></label></div>
-      <div className="market-rank-tabs" aria-label="Sort crypto markets">{MARKET_SORT_OPTIONS.map((option) => <button key={option.value} className={marketSort === option.value ? "active" : ""} onClick={() => setMarketSort(option.value)}>{option.label}</button>)}</div>
-      <div className="market-list-meta"><p><strong>{activeSort.label}</strong><span>{activeSort.description}</span></p><b>{marketsLoading ? "Loading" : `${visibleMarkets.length} shown`}</b></div>
-      <div className="market-card-grid">
-        {marketsLoading && <div className="market-loading"><i /><strong>Syncing Robinhood Chain pools…</strong><span>Top volume, trending, new pools and canonical RWA routes</span></div>}
-        {!marketsLoading && marketsError && !markets.length && <div className="market-loading error"><strong>Market feed temporarily unavailable</strong><span>{marketsError}</span></div>}
-        {!marketsLoading && visibleMarkets.map((market, index) => <article className="market-discovery-card" key={market.address}>
-          <button className="market-card-main" type="button" aria-label={`Open ${market.symbol} market`} onClick={() => inspectMarket(market)}>
-            <header><div className="market-card-identity">{market.imageUrl ? <img src={market.imageUrl} alt="" width={48} height={48} loading={index < 6 ? "eager" : "lazy"} /> : <b>{market.symbol.slice(0, 2).toUpperCase()}</b>}<p><span>#{String(index + 1).padStart(2, "0")}</span><strong>{market.symbol}</strong><small>{market.name}</small></p></div><strong className={`market-change ${market.priceChange24h === null ? "neutral" : market.priceChange24h >= 0 ? "up" : "down"}`}>{percent(market.priceChange24h)}</strong></header>
-            <div className="market-card-price"><span>PRICE</span><strong>{compactMoney(market.priceUsd, true)}</strong><small>{compact(market.address)}</small></div>
-            <div className="market-card-metrics"><div><span>24H VOLUME</span><strong>{compactMoney(market.volume24h > 0 ? market.volume24h : null)}</strong><small>{market.transactions24h ? `${market.transactions24h.toLocaleString("en-US")} trades` : "Not reported"}</small></div><div><span>LIQUIDITY</span><strong>{compactMoney(market.liquidityUsd > 0 ? market.liquidityUsd : null)}</strong><small>{market.liquidityUsd > 0 ? "Pool depth" : "Not reported"}</small></div><div><span>{market.marketCapUsd !== null ? "MARKET CAP" : "FDV"}</span><strong>{compactMoney(market.marketCapUsd ?? market.fdvUsd)}</strong><small>{market.marketCapUsd !== null ? "Reported cap" : market.fdvUsd !== null ? "Fully diluted" : "Not reported"}</small></div></div>
-            <div className="market-card-enter"><span><strong>{market.lifecycle === "bonding" ? "BONDING" : `${market.symbol}/${market.quoteSymbol}`}</strong><small>{market.dex} · {poolAge(market.poolCreatedAt)}</small></span><b>Open market →</b></div>
-          </button>
-          <footer><div>{market.canonical && <em>CANONICAL</em>}{market.launchpad === "virtuals" && <em className="virtuals">VIRTUALS</em>}{!market.canonical && market.launchpad !== "virtuals" && <span>COMMUNITY MARKET</span>}</div><a href={market.externalUrl || market.pairUrl} target="_blank" rel="noreferrer" aria-label={`Open ${market.symbol} source market`}>Source ↗</a></footer>
-        </article>)}
-        {!marketsLoading && !marketsError && !filteredMarkets.length && <div className="market-loading"><strong>No matching crypto market</strong><span>Try another ticker or paste the contract address.</span></div>}
+  return <section className="page inner-page community-page crypto-precision-page">
+    <header className="cp-page-head">
+      <div>
+        <p className="cp-kicker"><i /> ROBINHOOD CHAIN · LIVE MARKETS</p>
+        <h1>Crypto markets</h1>
+        <p>Compare active pools, inspect the contract and request a protected quote from one screen.</p>
       </div>
-      {!marketsLoading && filteredMarkets.length > visibleMarkets.length && <div className="market-load-more"><span>Showing {visibleMarkets.length} of {filteredMarkets.length} markets</span><button type="button" onClick={() => setMarketLimit((current) => current + INITIAL_MARKET_LIMIT)}>Show 20 more</button></div>}
-      <div className="market-data-note"><p><strong>Live, source-labeled data.</strong> Market cap appears only when a provider reports it; otherwise HoodFlow labels FDV or “not reported” instead of inventing a number.</p><span>{marketsError ? `Partial feed: ${marketsError}` : "Refreshes every 60 seconds"}</span></div>
+      <span className="cp-live-stamp"><i /> 24/7 ONCHAIN</span>
+    </header>
+
+    <section className="cp-metrics" aria-label="Robinhood Chain token market summary">
+      <article><span>Markets</span><strong>{marketsLoading ? "—" : markets.length}</strong><small>Deduplicated tokens</small></article>
+      <article><span>24h volume</span><strong>{marketsLoading ? "—" : compactMoney(marketStats.volume)}</strong><small>Across leading pools</small></article>
+      <article><span>Liquidity</span><strong>{marketsLoading ? "—" : compactMoney(marketStats.liquidity)}</strong><small>Best pool per token</small></article>
+      <article><span>Live prices</span><strong>{marketsLoading ? "—" : `${pricedMarkets}/${markets.length}`}</strong><small>USD-valued now</small></article>
     </section>
 
-    <div id="ca-import" className="ca-import-section"><div className="market-section-title"><div><p className="eyebrow">TOKEN WORKSPACE</p><h2>Chart, metrics and swap.</h2></div><p>Select a market above or open any Robinhood Chain contract address.</p></div>
-    <div className="token-safety-strip"><span>UNREVIEWED TOKEN MODE</span><p>A valid contract, price or rising chart is not proof of safety. Verify the CA, issuer, transfer behavior and liquidity yourself. HoodFlow never labels an imported community token as verified.</p></div>
-    <form className="ca-search" onSubmit={discover}><label>CONTRACT ADDRESS (CA)<input value={contractAddress} onChange={(event) => setContractAddress(event.target.value)} placeholder="0x… on Robinhood Chain" spellCheck={false} /></label><button disabled={busy || !contractAddress.trim()}>{busy ? "Checking…" : "Discover token →"}</button></form>
-    {token && <div className="community-terminal">
-      <header className="terminal-token-head">
-        <div className="terminal-token-mark">{activeMarket?.imageUrl ? <img src={activeMarket.imageUrl} alt="" /> : <span style={{ background: `linear-gradient(135deg,#${token.address.slice(2, 8)},#${token.address.slice(-6)})` }}>{token.symbol.slice(0, 2).toUpperCase()}</span>}</div>
-        <div><p>ROBINHOOD CHAIN · ERC-20</p><h2>{token.name} <em>{token.symbol}</em></h2><a href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/token/${token.address}`} target="_blank" rel="noreferrer">{compact(token.address)} ↗</a></div>
-        <div className="terminal-market-badges"><span>CRYPTO</span><strong>{activeMarket?.lifecycle === "bonding" ? "BONDING" : quote ? "LIVE QUOTE" : routeUnavailable ? "MARKET LINK" : "CHECKING"}</strong></div>
-      </header>
-      <div className="terminal-body">
-        <section className="terminal-market-card">
-          <p className="terminal-label">DISCOVERED MARKET</p>
-          <div className="terminal-price"><strong>{compactMoney(activeMarket?.priceUsd ?? null, true)}</strong><span className={(activeMarket?.priceChange24h ?? 0) >= 0 ? "up" : "down"}>{percent(activeMarket?.priceChange24h ?? null)}</span></div>
-          <div className="crypto-chart-toolbar"><span>ONCHAIN PRICE HISTORY</span><div>{(["1D", "7D", "30D"] as ChartRange[]).map((range) => <button type="button" key={range} className={chartRange === range ? "active" : ""} onClick={() => setChartRange(range)}>{range}</button>)}</div></div>
-          <div className="crypto-chart-canvas">
-            {chartLoading && <div className="crypto-chart-empty"><i /><span>Loading onchain price history…</span></div>}
-            {!chartLoading && chartGeometry && <><svg viewBox="0 0 1000 280" preserveAspectRatio="none" role="img" aria-label={`${token.symbol} ${chartRange} price chart`}><defs><linearGradient id="cryptoChartFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor={chartGeometry.positive ? "#35df88" : "#ff715f"} stopOpacity="0.26" /><stop offset="1" stopColor={chartGeometry.positive ? "#35df88" : "#ff715f"} stopOpacity="0" /></linearGradient></defs><path className="crypto-chart-area" d={`${chartGeometry.path} L1000,280 L0,280 Z`} fill="url(#cryptoChartFill)" /><path className={chartGeometry.positive ? "crypto-chart-line up" : "crypto-chart-line down"} d={chartGeometry.path} /></svg><div className="crypto-chart-range"><span>{compactMoney(chartGeometry.min, true)}</span><span>{compactMoney(chartGeometry.max, true)}</span></div></>}
-            {!chartLoading && !chartGeometry && <div className="crypto-chart-empty"><strong>{activeMarket?.lifecycle === "bonding" ? "Chart begins after DEX graduation" : "Price history unavailable"}</strong><span>{chartError || "This pool does not have enough historical candles yet."}</span></div>}
-          </div>
-          <div className="terminal-market-stats"><div><span>24H VOLUME</span><strong>{compactMoney(activeMarket?.volume24h ?? 0)}</strong></div><div><span>{activeMarket?.lifecycle === "bonding" ? "BONDED" : "LIQUIDITY"}</span><strong>{activeMarket?.lifecycle === "bonding" && activeMarket.bondedVirtual !== null ? `${activeMarket.bondedVirtual.toLocaleString("en-US")} VIRTUAL` : compactMoney(activeMarket?.liquidityUsd ?? 0)}</strong></div><div><span>PAIR</span><strong>{token.symbol}/{marketSettlement.symbol}</strong></div><div><span>VENUE</span><strong>{activeMarket?.dex ?? "Auto route"}</strong></div></div>
-          <p className="terminal-risk">Community tokens are unreviewed. Confirm the contract and pool before signing.</p>
-        </section>
-        <section className="community-trade-panel">
-          <div className="trade-panel-head">
-            <div className="community-tabs" aria-label="Trade direction">
-              <button className={side === "buy" ? "active" : ""} onClick={() => changeTradeSide("buy")} type="button">Buy</button>
-              <button className={side === "sell" ? "active" : ""} onClick={() => changeTradeSide("sell")} type="button">Sell</button>
-            </div>
-            <span className="trade-auto-route"><i /> AUTO ROUTE</span>
-          </div>
+    <section className="cp-directory">
+      <div className="cp-directory-head">
+        <div>
+          <p className="cp-kicker">MARKET DIRECTORY</p>
+          <h2>Discover and trade</h2>
+          <span>{marketsUpdatedAt ? `${filteredMarkets.length} markets · Updated ${new Date(marketsUpdatedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}` : "Connecting to market feeds"}</span>
+        </div>
+        <label className="cp-search">
+          <span aria-hidden="true">⌕</span>
+          <input value={marketSearch} onChange={(event) => setMarketSearch(event.target.value)} placeholder="Search token, ticker or contract" aria-label="Search crypto markets" />
+        </label>
+      </div>
 
-          <div className="swap-stack">
-            <section className="asset-amount-card">
-              <header><span>YOU PAY</span>{side === "buy" && settlementBalance ? <em>Balance {settlementBalance}</em> : null}</header>
-              <div className="asset-amount-row">
-                <input aria-label="Trade amount" type="number" min="0" step="any" value={amount} onChange={(event) => { setAmount(event.target.value); invalidateQuote(); }} />
-                {side === "buy" ? <span className="settlement-picker">
-                  <button type="button" className="settlement-trigger" aria-expanded={settlementMenu} onClick={() => setSettlementMenu((open) => !open)}>
-                    <b>{settlement.symbol.slice(0, 2)}</b><span><strong>{settlement.symbol}</strong><small>Wallet asset</small></span><i>⌄</i>
-                  </button>
-                  {settlementMenu && <span className="settlement-menu" role="menu">{settlementOptions.map((option) => <button type="button" role="menuitem" className={option.address === settlement.address ? "selected" : ""} key={option.address} onClick={() => chooseSettlement(option)}><b>{option.symbol.slice(0, 2)}</b><span><strong>{option.symbol}</strong><small>{option.address === marketSettlement.address ? "Native market route" : "Pay from wallet"}</small></span>{option.address === settlement.address && <i>✓</i>}</button>)}</span>}
-                </span> : <span className="trade-asset-chip"><b>{token.symbol.slice(0, 2)}</b><span><strong>{token.symbol}</strong><small>{token.name}</small></span></span>}
+      <div className="cp-sortbar" aria-label="Sort crypto markets">
+        {MARKET_SORT_OPTIONS.map((option) => <button type="button" key={option.value} aria-pressed={marketSort === option.value} className={marketSort === option.value ? "active" : ""} onClick={() => setMarketSort(option.value)}>{option.label}</button>)}
+      </div>
+
+      <div id="ca-import" className="cp-workspace-anchor">
+        <form className="cp-contract-search" onSubmit={discover}>
+          <label>
+            <span>Open any contract</span>
+            <input value={contractAddress} onChange={(event) => setContractAddress(event.target.value)} placeholder="0x… on Robinhood Chain" spellCheck={false} aria-label="Contract address" />
+          </label>
+          <button type="submit" disabled={busy || !contractAddress.trim()}>{busy ? "Checking…" : "Inspect token"}</button>
+        </form>
+
+        {token && <section className="cp-workspace" aria-label={`${token.symbol} market workspace`}>
+          <div className="cp-market-pane">
+            <header className="cp-selected-head">
+              <div className="cp-selected-identity">
+                <span className="cp-token-mark">{activeMarket?.imageUrl ? <img src={activeMarket.imageUrl} alt="" /> : <b style={{ background: `linear-gradient(135deg,#${token.address.slice(2, 8)},#${token.address.slice(-6)})` }}>{token.symbol.slice(0, 2).toUpperCase()}</b>}</span>
+                <div><p>SELECTED MARKET</p><h2>{token.name} <em>{token.symbol}</em></h2><a href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/token/${token.address}`} target="_blank" rel="noreferrer">{compact(token.address)} ↗</a></div>
               </div>
-            </section>
-
-            <button className="swap-direction" type="button" onClick={() => changeTradeSide(side === "buy" ? "sell" : "buy")} aria-label={`Switch to ${side === "buy" ? "sell" : "buy"}`}>⇅</button>
-
-            <section className="asset-amount-card receive">
-              <header><span>YOU RECEIVE</span><em>ESTIMATED</em></header>
-              <div className="asset-amount-row">
-                <strong className="trade-output-amount">{outputAmount}</strong>
-                {side === "sell" ? <span className="settlement-picker">
-                  <button type="button" className="settlement-trigger" aria-expanded={settlementMenu} onClick={() => setSettlementMenu((open) => !open)}>
-                    <b>{settlement.symbol.slice(0, 2)}</b><span><strong>{settlement.symbol}</strong><small>Wallet asset</small></span><i>⌄</i>
-                  </button>
-                  {settlementMenu && <span className="settlement-menu receive-menu" role="menu">{settlementOptions.map((option) => <button type="button" role="menuitem" className={option.address === settlement.address ? "selected" : ""} key={option.address} onClick={() => chooseSettlement(option)}><b>{option.symbol.slice(0, 2)}</b><span><strong>{option.symbol}</strong><small>{option.address === marketSettlement.address ? "Native market route" : "Receive in wallet"}</small></span>{option.address === settlement.address && <i>✓</i>}</button>)}</span>}
-                </span> : <span className="trade-asset-chip"><b>{token.symbol.slice(0, 2)}</b><span><strong>{token.symbol}</strong><small>{token.name}</small></span></span>}
+              <div className="cp-selected-badges">
+                <span>{activeMarket?.canonical ? "Canonical" : activeMarket?.launchpad === "virtuals" ? "Virtuals" : "Community"}</span>
+                <strong className={quote ? "live" : routeUnavailable ? "warning" : ""}><i /> {activeMarket?.lifecycle === "bonding" ? "Bonding" : quote ? "Live quote" : routeUnavailable ? "Source only" : "Checking route"}</strong>
               </div>
+            </header>
+
+            <section className="cp-chart-card">
+              <div className="cp-price-head">
+                <div><span>Market price</span><strong>{compactMoney(activeMarket?.priceUsd ?? null, true)}</strong></div>
+                <b className={(activeMarket?.priceChange24h ?? 0) >= 0 ? "up" : "down"}>{percent(activeMarket?.priceChange24h ?? null)}</b>
+              </div>
+              <div className="cp-chart-toolbar">
+                <span>Onchain price history</span>
+                <div>{(["1D", "7D", "30D"] as ChartRange[]).map((range) => <button type="button" key={range} className={chartRange === range ? "active" : ""} onClick={() => setChartRange(range)}>{range}</button>)}</div>
+              </div>
+              <div className="cp-chart">
+                {chartLoading && <div className="cp-chart-empty" role="status"><i /><span>Loading price history…</span></div>}
+                {!chartLoading && chartGeometry && <><svg viewBox="0 0 1000 280" preserveAspectRatio="none" role="img" aria-label={`${token.symbol} ${chartRange} price chart`}><defs><linearGradient id="cpChartFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor={chartGeometry.positive ? "#2bcf78" : "#df6659"} stopOpacity="0.22" /><stop offset="1" stopColor={chartGeometry.positive ? "#2bcf78" : "#df6659"} stopOpacity="0" /></linearGradient></defs><path className="cp-chart-area" d={`${chartGeometry.path} L1000,280 L0,280 Z`} fill="url(#cpChartFill)" /><path className={chartGeometry.positive ? "cp-chart-line up" : "cp-chart-line down"} d={chartGeometry.path} /></svg><div className="cp-chart-range"><span>{compactMoney(chartGeometry.min, true)}</span><span>{compactMoney(chartGeometry.max, true)}</span></div></>}
+                {!chartLoading && !chartGeometry && <div className="cp-chart-empty"><strong>{activeMarket?.lifecycle === "bonding" ? "Chart starts after DEX graduation" : "Price history unavailable"}</strong><span>{chartError || "This pool does not have enough historical candles yet."}</span></div>}
+              </div>
+              <div className="cp-market-facts">
+                <div><span>24h volume</span><strong>{compactMoney(activeMarket?.volume24h ?? 0)}</strong></div>
+                <div><span>{activeMarket?.lifecycle === "bonding" ? "Bonded" : "Liquidity"}</span><strong>{activeMarket?.lifecycle === "bonding" && activeMarket.bondedVirtual !== null ? `${activeMarket.bondedVirtual.toLocaleString("en-US")} VIRTUAL` : compactMoney(activeMarket?.liquidityUsd ?? 0)}</strong></div>
+                <div><span>Pair</span><strong>{token.symbol}/{marketSettlement.symbol}</strong></div>
+                <div><span>Venue</span><strong>{activeMarket?.dex ?? "Auto route"}</strong></div>
+              </div>
+              <p className="cp-risk-note"><i /> Community tokens are unreviewed. Confirm the contract and pool before signing.</p>
             </section>
           </div>
 
-          <section className="execution-summary">
-            <header><div><i /><span><small>BEST ROUTE</small><strong>{quote ? routeName(quote) : activeMarket?.lifecycle === "bonding" ? "Virtuals bonding market" : routeUnavailable ? "External pool only" : "Finding best pool…"}</strong></span></div><b>{quoteBusy && quote ? "REFRESHING" : quote ? "LIVE" : routeUnavailable ? "UNAVAILABLE" : "CHECKING"}</b></header>
-            <div className="execution-summary-grid">
-              <span><small>Pool fee</small><strong>{poolFee}</strong></span>
-              <span><small>HoodFlow fee</small><strong>0.00%</strong></span>
-              <span><small>Network gas</small><strong>Shown in wallet</strong></span>
-              <label><small>Max slippage</small><span><input type="number" min="0.1" max="5" step="0.1" value={slippage} onChange={(event) => setSlippage(event.target.value)} />%</span></label>
+          <aside className="cp-ticket">
+            <header><div><p>TRADE TICKET</p><h3>{token.symbol} swap</h3></div><span><i /> Auto route</span></header>
+            <div className="cp-side-tabs" aria-label="Trade direction">
+              <button aria-pressed={side === "buy"} className={side === "buy" ? "active" : ""} onClick={() => changeTradeSide("buy")} type="button">Buy</button>
+              <button aria-pressed={side === "sell"} className={side === "sell" ? "active" : ""} onClick={() => changeTradeSide("sell")} type="button">Sell</button>
             </div>
-          </section>
 
-          {step && (busy || routeUnavailable || !quote) && <p className={`community-step ${routeUnavailable ? "notice" : ""}`}><i />{step}</p>}
-          {routeError && <p className="community-error">{routeError}</p>}
+            <div className="cp-swap-stack">
+              <section className="cp-amount-card">
+                <header><span>You pay</span>{side === "buy" && settlementBalance ? <em>Balance {settlementBalance}</em> : null}</header>
+                <div>
+                  <input aria-label="Trade amount" type="number" min="0" step="any" value={amount} onChange={(event) => { setAmount(event.target.value); invalidateQuote(); }} />
+                  {side === "buy" ? <span className="cp-settlement-picker">
+                    <button type="button" className="cp-asset-button" aria-label={`Choose pay asset. Current ${settlement.symbol}`} aria-expanded={settlementMenu} onClick={() => setSettlementMenu((open) => !open)}>
+                      <b>{settlement.symbol.slice(0, 2)}</b><span><strong>{settlement.symbol}</strong><small>Wallet asset</small></span><i>⌄</i>
+                    </button>
+                    {settlementMenu && <span className="cp-settlement-menu" role="menu">{settlementOptions.map((option) => <button type="button" role="menuitem" className={option.address === settlement.address ? "selected" : ""} key={option.address} onClick={() => chooseSettlement(option)}><b>{option.symbol.slice(0, 2)}</b><span><strong>{option.symbol}</strong><small>{option.address === marketSettlement.address ? "Native market route" : "Pay from wallet"}</small></span>{option.address === settlement.address && <i>✓</i>}</button>)}</span>}
+                  </span> : <span className="cp-asset-chip"><b>{token.symbol.slice(0, 2)}</b><span><strong>{token.symbol}</strong><small>{token.name}</small></span></span>}
+                </div>
+              </section>
 
-          <div className={`trade-quote-status ${quote ? "live" : routeUnavailable ? "unavailable" : ""}`} aria-live="polite">
-            <div><i /><span><strong>{activeMarket?.executionVenue === "virtuals-bonding" ? "Bonding route" : quoteBusy && quote ? "Refreshing live quote" : quote ? "Live quote ready" : quoteBusy ? "Checking liquidity" : "Waiting for route"}</strong><small>{quoteUpdatedAt ? `Updated ${new Date(quoteUpdatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · refreshes every 12s` : "Automatic quotes · no refresh button"}</small></span></div>
-            <b>{quote ? "AUTO-REFRESH" : routeUnavailable ? "SOURCE ONLY" : "PREPARING"}</b>
-          </div>
-          {routeUnavailable && (activeMarket?.externalUrl || activeMarket?.pairUrl)
-            ? <a className="trade-submit" href={activeMarket.externalUrl || activeMarket.pairUrl} target="_blank" rel="noreferrer">{activeMarket?.lifecycle === "bonding" ? "Trade on Virtuals ↗" : "Open live pool ↗"}</a>
-            : <button className="trade-submit" type="button" onClick={() => void trade()} disabled={busy || !quote}>{busy ? "Preparing wallet confirmation…" : !walletAddress ? "Connect wallet" : quote ? `${side === "buy" ? "Buy" : "Sell"} ${token.symbol}` : quoteBusy ? "Finding best route…" : "Route unavailable"}</button>}
-        </section>
+              <button className="cp-swap-direction" type="button" onClick={() => changeTradeSide(side === "buy" ? "sell" : "buy")} aria-label={`Switch to ${side === "buy" ? "sell" : "buy"}`}>↓</button>
+
+              <section className="cp-amount-card cp-receive-card">
+                <header><span>You receive</span><em>Estimated</em></header>
+                <div>
+                  <strong className="cp-output">{outputAmount}</strong>
+                  {side === "sell" ? <span className="cp-settlement-picker">
+                    <button type="button" className="cp-asset-button" aria-label={`Choose receive asset. Current ${settlement.symbol}`} aria-expanded={settlementMenu} onClick={() => setSettlementMenu((open) => !open)}>
+                      <b>{settlement.symbol.slice(0, 2)}</b><span><strong>{settlement.symbol}</strong><small>Wallet asset</small></span><i>⌄</i>
+                    </button>
+                    {settlementMenu && <span className="cp-settlement-menu receive-menu" role="menu">{settlementOptions.map((option) => <button type="button" role="menuitem" className={option.address === settlement.address ? "selected" : ""} key={option.address} onClick={() => chooseSettlement(option)}><b>{option.symbol.slice(0, 2)}</b><span><strong>{option.symbol}</strong><small>{option.address === marketSettlement.address ? "Native market route" : "Receive in wallet"}</small></span>{option.address === settlement.address && <i>✓</i>}</button>)}</span>}
+                  </span> : <span className="cp-asset-chip"><b>{token.symbol.slice(0, 2)}</b><span><strong>{token.symbol}</strong><small>{token.name}</small></span></span>}
+                </div>
+              </section>
+            </div>
+
+            <section className="cp-route-summary">
+              <header><div><i /><span><small>Best route</small><strong>{quote ? routeName(quote) : activeMarket?.lifecycle === "bonding" ? "Virtuals bonding market" : routeUnavailable ? "External pool only" : "Finding best pool…"}</strong></span></div><b>{quoteBusy && quote ? "Refreshing" : quote ? "Live" : routeUnavailable ? "Unavailable" : "Checking"}</b></header>
+              <div>
+                <span><small>Pool fee</small><strong>{poolFee}</strong></span>
+                <span><small>HoodFlow fee</small><strong>0.00%</strong></span>
+                <span><small>Network gas</small><strong>In wallet</strong></span>
+                <label><small>Max slippage</small><span><input aria-label="Max slippage percentage" type="number" min="0.1" max="5" step="0.1" value={slippage} onChange={(event) => setSlippage(event.target.value)} />%</span></label>
+              </div>
+            </section>
+
+            {step && (busy || routeUnavailable || !quote) && <p className={`cp-step ${routeUnavailable ? "notice" : ""}`}><i />{step}</p>}
+            {routeError && <p className="cp-error">{routeError}</p>}
+
+            <div className={`cp-quote-status ${quote ? "live" : routeUnavailable ? "unavailable" : ""}`} aria-live="polite">
+              <i /><span><strong>{activeMarket?.executionVenue === "virtuals-bonding" ? "Bonding route" : quoteBusy && quote ? "Refreshing quote" : quote ? "Live quote ready" : quoteBusy ? "Checking liquidity" : "Waiting for route"}</strong><small>{quoteUpdatedAt ? `Updated ${new Date(quoteUpdatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · refreshes every 12s` : "Automatic quotes · no refresh button"}</small></span>
+            </div>
+            {routeUnavailable && (activeMarket?.externalUrl || activeMarket?.pairUrl)
+              ? <a className="cp-submit" href={activeMarket.externalUrl || activeMarket.pairUrl} target="_blank" rel="noreferrer">{activeMarket?.lifecycle === "bonding" ? "Trade on Virtuals ↗" : "Open live pool ↗"}</a>
+              : <button className="cp-submit" type="button" onClick={() => void trade()} disabled={busy || !quote}>{busy ? "Preparing wallet…" : !walletAddress ? "Connect wallet" : quote ? `${side === "buy" ? "Buy" : "Sell"} ${token.symbol}` : quoteBusy ? "Finding route…" : "Route unavailable"}</button>}
+            <p className="cp-ticket-foot">Fresh quote and minimum output are checked again before signing.</p>
+          </aside>
+        </section>}
       </div>
-    </div>}
-    {!token && <div className="community-empty"><div>CA</div><h2>Select a market or paste a contract.</h2><p>HoodFlow detects the market&apos;s native quote asset and probes executable Uniswap V2, V3 and V4 pools.</p></div>}
-    </div>
-    <section className="recent-tokens"><div><p className="eyebrow">THIS DEVICE</p><h2>Recent discoveries</h2></div>{recent.length ? <div className="recent-token-grid">{recent.map((item) => <button key={item.address} onClick={() => loadRecent(item)}><span>{item.symbol.slice(0, 2)}</span><p><strong>{item.symbol}</strong><small>{compact(item.address)}</small></p><b>{item.route}</b></button>)}</div> : <p className="recent-empty">Imported contracts will appear here. HoodFlow does not publish a paid or fabricated “trending” list.</p>}</section>
-    <div className="community-method"><article><span>01</span><h3>Contract check</h3><p>Confirms bytecode and standard ERC-20 metadata on chain 4663.</p></article><article><span>02</span><h3>Native pair routing</h3><p>Uses USDG, WETH or the listed pool&apos;s quote asset across Uniswap V2, V3 and V4.</p></article><article><span>03</span><h3>Protected execution</h3><p>Uses an exact token permission, minimum output and direct self-custody settlement.</p></article></div>
+
+      <div className="cp-list-meta">
+        <p><strong>{activeSort.label}</strong><span>{activeSort.description}</span></p>
+        <b>{marketsLoading ? "Loading" : `${visibleMarkets.length} shown`}</b>
+      </div>
+
+      <div className="cp-table-shell">
+        <div className="cp-market-table" role="table" aria-label="Crypto markets">
+          <div className="cp-table-head" role="row">
+            <span role="columnheader">Token</span>
+            <span role="columnheader">Price</span>
+            <span role="columnheader">24h</span>
+            <span role="columnheader">Volume</span>
+            <span role="columnheader">Liquidity</span>
+            <span role="columnheader">Mcap / FDV</span>
+            <span role="columnheader">Venue</span>
+            <span role="columnheader" aria-label="Open market" />
+          </div>
+          <div role="rowgroup">
+            {marketsLoading && <div className="cp-table-state" role="status"><i /><strong>Loading live pools</strong><span>Fetching volume, liquidity and verified source data.</span></div>}
+            {!marketsLoading && marketsError && !markets.length && <div className="cp-table-state error"><strong>Market feed temporarily unavailable</strong><span>{marketsError}</span></div>}
+            {!marketsLoading && visibleMarkets.map((market, index) => {
+              const marketValue = market.marketCapUsd ?? market.fdvUsd;
+              const marketValueLabel = market.marketCapUsd !== null ? "Market cap" : market.fdvUsd !== null ? "FDV" : "Not reported";
+              return <div className={`cp-market-row ${activeMarket?.address === market.address ? "selected" : ""}`} role="row" key={market.address}>
+                <div className="cp-token-cell" role="cell">
+                  <button type="button" aria-label={`Open ${market.symbol} market`} onClick={() => inspectMarket(market)}>
+                    <span className="cp-row-mark">{market.imageUrl ? <img src={market.imageUrl} alt="" width={40} height={40} loading={index < 8 ? "eager" : "lazy"} /> : <b>{market.symbol.slice(0, 2).toUpperCase()}</b>}</span>
+                    <span><strong>{market.symbol}</strong><small>{market.name}</small><em>{compact(market.address)}</em></span>
+                  </button>
+                  <div className="cp-row-tags">{market.canonical && <span>Canonical</span>}{market.launchpad === "virtuals" && <span>Virtuals</span>}{!market.canonical && market.launchpad !== "virtuals" && <span>Community</span>}</div>
+                </div>
+                <div className="cp-data-cell cp-price-cell" role="cell" data-label="Price"><strong>{compactMoney(market.priceUsd, true)}</strong><small>{market.priceUsd === null ? "Not reported" : "USD"}</small></div>
+                <div className="cp-data-cell cp-change-cell" role="cell" data-label="24h"><strong className={market.priceChange24h === null ? "neutral" : market.priceChange24h >= 0 ? "up" : "down"}>{percent(market.priceChange24h)}</strong></div>
+                <div className="cp-data-cell" role="cell" data-label="24h volume"><strong>{compactMoney(market.volume24h > 0 ? market.volume24h : null)}</strong><small>{market.transactions24h ? `${market.transactions24h.toLocaleString("en-US")} trades` : "Not reported"}</small></div>
+                <div className="cp-data-cell" role="cell" data-label="Liquidity"><strong>{compactMoney(market.liquidityUsd > 0 ? market.liquidityUsd : null)}</strong><small>{market.liquidityUsd > 0 ? "Pool depth" : "Not reported"}</small></div>
+                <div className="cp-data-cell" role="cell" data-label={marketValueLabel}><strong>{compactMoney(marketValue)}</strong><small>{marketValueLabel}</small></div>
+                <div className="cp-data-cell cp-venue-cell" role="cell" data-label="Venue"><strong>{market.lifecycle === "bonding" ? "Bonding" : `${market.symbol}/${market.quoteSymbol}`}</strong><small>{market.dex} · {poolAge(market.poolCreatedAt)}</small></div>
+                <div className="cp-open-cell" role="cell"><button type="button" onClick={() => inspectMarket(market)} aria-label={`Open ${market.symbol} workspace`}>Open <span>→</span></button><a href={market.externalUrl || market.pairUrl} target="_blank" rel="noreferrer" aria-label={`Open ${market.symbol} source market`}>Source ↗</a></div>
+              </div>;
+            })}
+            {!marketsLoading && !marketsError && !filteredMarkets.length && <div className="cp-table-state"><strong>No matching market</strong><span>Try another ticker or paste the contract address above.</span></div>}
+          </div>
+        </div>
+      </div>
+
+      {!marketsLoading && filteredMarkets.length > visibleMarkets.length && <div className="cp-load-more"><span>Showing {visibleMarkets.length} of {filteredMarkets.length}</span><button type="button" onClick={() => setMarketLimit((current) => current + INITIAL_MARKET_LIMIT)}>Show 20 more</button></div>}
+      <div className="cp-data-note"><p><strong>Source-labeled data.</strong> Market cap appears only when a provider reports it; otherwise the table shows FDV or “not reported”.</p><span>{marketsError ? `Partial feed: ${marketsError}` : "Refreshes every 60 seconds"}</span></div>
+    </section>
+
+    <section className="cp-recent">
+      <header><div><p className="cp-kicker">THIS DEVICE</p><h2>Recent contracts</h2></div><p>Local shortcuts only. Nothing here is an endorsement.</p></header>
+      {recent.length ? <div>{recent.map((item) => <button type="button" key={item.address} onClick={() => loadRecent(item)}><span>{item.symbol.slice(0, 2)}</span><p><strong>{item.symbol}</strong><small>{compact(item.address)}</small></p><b>{item.route}</b></button>)}</div> : <p className="cp-recent-empty">Contracts you inspect will appear here.</p>}
+    </section>
+
+    <details className="cp-method">
+      <summary>How HoodFlow checks a community token</summary>
+      <div><p><strong>Contract</strong><span>Confirms bytecode and standard ERC-20 metadata on chain 4663.</span></p><p><strong>Route</strong><span>Checks the native pool quote across configured Uniswap venues.</span></p><p><strong>Execution</strong><span>Uses a minimum output and an exact, short-lived wallet permission.</span></p></div>
+    </details>
   </section>;
 }

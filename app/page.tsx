@@ -60,10 +60,9 @@ import { ROBINHOOD_PRICE_FEEDS } from "@/config/robinhood-price-feeds";
 import { track } from "@/lib/analytics-client";
 import { seoAssets } from "@/lib/seo-assets";
 import { calculateOracleDeviation } from "@/lib/oracle-protection";
-import MarketStatus from "./market-status";
+import RouteDeskHome from "./route-desk-home";
 import type { PrivyWalletController } from "./privy-wallet-bridge";
 import { PRIVY_CONFIGURED } from "./privy-config";
-import RobinHoodIntro from "./robin-hood-intro";
 import type {
   BasketExecutionProgress,
   BasketHandoffLeg,
@@ -379,10 +378,6 @@ async function readPriceHistoryApi(ticker: string, signal: AbortSignal) {
     throw new Error(payload.error || "History request failed");
   }
   return payload.points;
-}
-
-function Hint({ label, children }: { label: string; children: React.ReactNode }) {
-  return <span className="term-hint" tabIndex={0}><span>{label}</span><b aria-hidden="true">?</b><span className="term-tooltip" role="tooltip">{children}</span></span>;
 }
 
 function isStoredStrategy(value: unknown): value is Strategy {
@@ -2071,12 +2066,11 @@ export default function Home() {
   ];
 
   return (
-    <main className="app-shell">
-      <RobinHoodIntro />
+    <main className="app-shell route-desk">
       {PRIVY_CONFIGURED && privyRuntimeEnabled && <PrivyWalletRuntime onController={handlePrivyController} onWallet={activatePrivyWallet} onError={notify} />}
       <header className="topbar">
         <button className="brand" onClick={() => navigate("overview")} aria-label="HoodFlow home">
-          <span className="brand-mark"><i /><i /><i /></span><span>hoodflow</span><b className="version-badge">MAINNET BETA</b>
+          <span className="brand-mark"><i /><i /><i /></span><span className="brand-name">hoodflow</span><b className="version-badge">MAINNET BETA</b>
         </button>
         <nav className="main-nav" aria-label="Main navigation">
           {navigation.map((item) => <button key={item.view} className={view === item.view || (item.view === "assets" && view === "asset") ? "active" : ""} onClick={() => navigate(item.view)}>{item.label}</button>)}
@@ -2094,61 +2088,36 @@ export default function Home() {
       </div>
 
       {view === "overview" && (
-        <section className="page overview-page hf-home">
-          <div className="hf-announcement"><span><i /> ROBINHOOD CHAIN MAINNET</span><strong>{executionReadyAssetCount} reviewed Stock Token routes are execution-enabled.</strong><button onClick={() => navigate("assets")}>See markets →</button></div>
-          <MarketStatus />
-
-          <section className="hf-hero">
-            <div className="hf-hero-copy">
-              <p className="eyebrow">THE EXECUTION LAYER FOR STOCK TOKENS</p>
-              <h1>Find the route.<br /><em>Keep the upside.</em></h1>
-              <p className="hf-hero-lede">HoodFlow finds a live route for your exact amount, blocks unsafe fills and sends the purchased Stock Token directly to your wallet.</p>
-              <div className="hf-term-strip"><Hint label="Route">The path and liquidity pool used to exchange one token for another.</Hint><Hint label="Oracle">A reference price used as a safety check, not the price your swap is guaranteed to receive.</Hint><Hint label="Permit">A short-lived wallet signature allowing only the amount shown in your order.</Hint></div>
-              <div className="hf-hero-actions"><button className="hf-primary" onClick={() => navigate("assets")}>Compare live routes <span>→</span></button><a href="/how-it-works">How execution works</a></div>
-              <p className="hf-risk-line">Stock Tokens are not shares and may be restricted in your jurisdiction. <a href="https://robinhood.com/eu/en/support/articles/about-stock-tokens/" target="_blank" rel="noreferrer">Review product risks ↗</a></p>
-            </div>
-            <aside className="hf-execution-card">
-              <div className="hf-window-head"><span><i /> LIVE ROUTE DESK</span><b>BLOCK #{networkBlock}</b></div>
-              <div className="hf-window-title"><p>Reviewed execution markets</p><strong>{priceState === "loading" ? `${executionReadyAssetCount} routes ready · live feed connecting` : priceState === "error" ? "Routes ready · price check retrying" : `${priceCounts.live} oracle references ready`}</strong></div>
-              <div className="hf-route-list">
-                {["AAPL", "NVDA", "SPY"].map((ticker) => <button key={ticker} onClick={() => openAsset(ticker)}><Mark ticker={ticker} small /><span><strong>{ticker} / USDG</strong><small>{isV3RoutedAsset(ticker) ? "Uniswap V3" : "Uniswap V4"} · full-fill verified</small></span><b>{priceBook[ticker]?.price ? formatPrice(priceBook[ticker].price) : <span className="price-skeleton route" aria-label="Live price loading" />}</b><i>→</i></button>)}
-              </div>
-              <div className="hf-window-foot"><span><b>01</b> Fresh quote</span><span><b>02</b> Protected minimum</span><span><b>03</b> Direct settlement</span></div>
-            </aside>
-          </section>
-
-          <div className="hf-proof-rail"><div><strong>25</strong><span>CANONICAL ASSETS INDEXED</span></div><div><strong>{executionReadyAssetCount}</strong><span>FULL-FILL ROUTES READY</span></div><div><strong>V3 + V4</strong><span>REVIEWED LIQUIDITY</span></div><div><strong>10 MIN</strong><span>EXACT PERMIT WINDOW</span></div></div>
-
-          <section className="hf-thesis">
-            <div><p className="eyebrow">WHY HOODFLOW</p><h2>A swap quote is easy.<br /><em>An executable route is harder.</em></h2></div>
-            <p>Thin liquidity, partial fills and stale references can turn a clean interface into a bad order. HoodFlow makes the route, protection and permission visible before you sign.</p>
-          </section>
-          <div className="hf-value-grid">
-            <article><span>01 / ROUTE</span><h3>Reviewed liquidity, not a mystery pool.</h3><p>HoodFlow requests a fresh executable quote from the configured V3 or V4 route for your exact input.</p></article>
-            <article><span>02 / PROTECTION</span><h3>Less than the minimum means no trade.</h3><p>Your slippage choice becomes an onchain output floor. The order reverts instead of silently accepting less.</p></article>
-            <article><span>03 / OWNERSHIP</span><h3>Tokens land in your wallet.</h3><p>Permit2 authorizes only the selected amount for a short window. HoodFlow never becomes your custodian.</p></article>
-          </div>
-
-          <section className="hf-compare">
-            <div className="hf-compare-copy"><p className="eyebrow">BUILT FOR EXECUTION</p><h2>Know what the router will do.</h2><p>HoodFlow separates the onchain oracle reference from the actual DEX execution quote and shows the boundaries that protect the order.</p><a href="/security">Read Security & Transparency →</a></div>
-            <div className="hf-compare-table"><div className="head"><span>ORDER CHECK</span><span>BASIC SWAP VIEW</span><span>HOODFLOW</span></div><div><strong>Route readiness</strong><span>Often implicit</span><b>Full-fill status</b></div><div><strong>Oracle vs execution</strong><span>Easy to confuse</span><b>Clearly separated</b></div><div><strong>Permission</strong><span>Varies by interface</span><b>Exact amount / 10 min</b></div><div><strong>Settlement</strong><span>Wallet</span><b>Wallet</b></div></div>
-          </section>
-
-          <div className="price-tape-head"><span>ONCHAIN ORACLE REFERENCES</span><button onClick={() => navigate("assets")}>Explore all 25 <b>→</b></button></div>
-          <div className="price-tape">
-            {priceSpotlight.map((ticker) => <button key={ticker} onClick={() => openAsset(ticker)}><Mark ticker={ticker} small /><p><span>{ticker}</span><strong>{priceBook[ticker]?.price ? formatPrice(priceBook[ticker].price) : <span className="price-skeleton compact" aria-label="Live price loading" />}</strong></p><small className={priceBook[ticker]?.status ?? "loading"}><i />{priceBook[ticker]?.status === "live" ? formatPriceAge(priceBook[ticker].updatedAt) : priceState === "error" ? "Auto-retrying" : "Connecting live feed"}</small></button>)}
-          </div>
-          <p className="hf-market-note">Oracle references can remain unchanged while underlying markets are closed. Every Buy or Sell requests a fresh DEX execution quote before your wallet signs.</p>
-
-          <div className="overview-grid hf-wallet-grid">
-            <article className="balance-card dark-card"><div className="card-label"><span>{connected ? "CONNECTED WALLET" : "YOUR EXECUTION WALLET"}</span><span className="live-label"><i /> MAINNET</span></div><div className="balance-line"><strong>{connected ? `${walletUsdgBalance} USDG` : "— USDG"}</strong><span>{connected ? `${walletBalance} ETH gas · ${compactAddress(walletAddress)}` : "Connect to view balances and sign protected orders"}</span></div><div className="wallet-facts"><div><span>CHAIN</span><strong>Robinhood / 4663</strong></div><div><span>ROUTER</span><strong>Universal Router</strong></div><div><span>PERMISSION</span><strong>Exact / 10 min</strong></div><div><span>CUSTODY</span><strong>Your wallet</strong></div></div><button className="wallet-card-action" onClick={handleWalletButton}>{connected ? "Disconnect wallet" : "Connect wallet to trade"}</button></article>
-            <article className="hf-first-order"><span>YOUR FIRST ROUTE</span><h2>Start with a quote.<br />Signing comes later.</h2><p>Choose a market and amount. HoodFlow checks the executable route before asking for any token permission.</p><button onClick={() => openComposer("Buy", "AAPL")}>Quote an AAPL buy →</button><small>No custody · no account · wallet confirmation required</small></article>
-          </div>
-
-          <section className="hf-final-cta"><div><p className="eyebrow">ROBINHOOD CHAIN / MAINNET BETA</p><h2>Trade the route,<br /><em>not the promise.</em></h2></div><div><p>{assetRegistry.length} canonical markets are indexed. {executionReadyAssetCount} are execution-enabled. The rest stay visible and blocked until their routes pass.</p><button onClick={() => navigate("assets")}>Open the market directory →</button></div></section>
-
-          <section className="hf-faq"><p className="eyebrow">QUESTIONS BEFORE YOU SIGN</p><details><summary>Does HoodFlow custody my assets?</summary><p>No. The connected wallet signs the router transaction and received tokens remain in that wallet.</p></details><details><summary>Are Stock Tokens actual shares?</summary><p>No. Stock Tokens provide economic exposure without shareholder rights and may be restricted in your jurisdiction.</p></details><details><summary>Why are only {executionReadyAssetCount} markets trade-enabled?</summary><p>HoodFlow keeps a token watch-only until a reviewed route completes a full-input fork execution and a fresh quote is available.</p></details><details><summary>Is HoodFlow independently audited?</summary><p>Not yet. Until a public final report exists, HoodFlow exposes its contract source, onchain addresses, automated checks, known limitations and a private responsible-disclosure channel on the <a href="/security">Security page</a>.</p></details></section>
-        </section>
+        <RouteDeskHome
+          markets={priceSpotlight.map((ticker) => {
+            const asset = assetRegistry.find((item) => item.ticker === ticker)!;
+            const point = priceBook[ticker];
+            return {
+              ticker,
+              name: asset.name,
+              price: point?.price ? formatPrice(point.price) : "Checking",
+              age: point?.status === "live"
+                ? formatPriceAge(point.updatedAt)
+                : priceState === "error"
+                  ? "Feed retrying"
+                  : "Verifying price",
+              protocol: isV3RoutedAsset(ticker) ? ("V3" as const) : ("V4" as const),
+              live: point?.status === "live",
+            };
+          })}
+          routeCount={executionReadyAssetCount}
+          indexedCount={assetRegistry.length}
+          networkBlock={String(networkBlock)}
+          priceStatus={priceState === "live" ? `${priceCounts.live} live` : priceState === "error" ? "Retrying" : "Verifying"}
+          connected={connected}
+          walletAddress={connected ? compactAddress(walletAddress) : ""}
+          walletUsdgBalance={walletUsdgBalance}
+          walletEthBalance={walletBalance}
+          onOpenMarkets={() => navigate("assets")}
+          onOpenAsset={openAsset}
+          onQuote={(ticker) => openComposer("Buy", ticker)}
+          onWallet={handleWalletButton}
+        />
       )}
 
       {view === "strategies" && (
@@ -2171,7 +2140,7 @@ export default function Home() {
       {view === "assets" && (
         <section className="page inner-page assets-page">
           <div className="asset-hero">
-            <div><p className="eyebrow">ROBINHOOD ASSET MATRIX</p><h1>Twenty-five assets.<br /><span>Priced onchain.</span></h1><p>Every canonical Robinhood stock token and ETF is indexed with its real brand mark and multiplier-adjusted Chainlink token price. HoodFlow only enables assets that completed a full-input fork swap; everything else stays safely watch-only.</p></div>
+            <div><p className="eyebrow">STOCK TOKEN DIRECTORY</p><h1>Stock Token markets</h1><p>Compare canonical Robinhood Chain Stock Tokens, their onchain reference prices and execution status. A market remains watch-only until its complete-input route passes.</p></div>
             <div className="asset-totals"><div><strong>{assetRegistry.length}</strong><span>INDEXED TOKENS</span></div><div><strong>{executionReadyAssetCount}</strong><span>FULL-FILL READY</span></div><div><strong>{assetRegistry.length - executionReadyAssetCount}</strong><span>WATCH-ONLY</span></div></div>
           </div>
           <div className="asset-logo-cloud" aria-label="All supported brands">{assetRegistry.map((asset) => <Mark key={asset.ticker} ticker={asset.ticker} small />)}<span>20 stocks + 5 ETFs</span></div>
@@ -2182,7 +2151,7 @@ export default function Home() {
           </div>
           <div className="route-explainer"><div><b className="route-ready"><i />READY</b><p><strong>Can be bought with USDG</strong><span>A full-input fork swap passed. All reviewed pools are quoted again before every mainnet order.</span></p></div><div><b className="route-watch"><i />WATCH</b><p><strong>Visible, never forced</strong><span>No order is enabled until a full-fill route passes. MSFT stays blocked after a deterministic-fork partial fill, even when a live quote appears.</span></p></div></div>
           <div className="asset-toolbar">
-            <div>{(["all", "routed", "registry"] as const).map((scope) => <button key={scope} className={assetScope === scope ? "selected" : ""} onClick={() => setAssetScope(scope)}>{scope === "all" ? "All 25" : scope === "routed" ? "Full-fill ready" : "Watch-only"}</button>)}</div>
+            <div>{(["all", "routed", "registry"] as const).map((scope) => <button key={scope} aria-pressed={assetScope === scope} className={assetScope === scope ? "selected" : ""} onClick={() => setAssetScope(scope)}>{scope === "all" ? "All 25" : scope === "routed" ? "Full-fill ready" : "Watch-only"}</button>)}</div>
             <label><span>Q</span><input aria-label="Search assets" placeholder="Ticker or company" value={assetSearch} onChange={(event) => setAssetSearch(event.target.value)} /></label>
           </div>
           <p className="result-count">Showing {visibleAssets.length} of 25 assets</p>
