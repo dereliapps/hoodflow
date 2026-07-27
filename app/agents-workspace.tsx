@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import { formatTokenAmount } from "@/lib/format-display-number";
 
 import type {
   AgentBasketFailurePolicy,
@@ -88,9 +89,7 @@ const INITIAL_BASKET_LEGS: BasketDraftLeg[] = [
 ];
 
 function compactAmount(value: string) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return value;
-  return number.toLocaleString("en-US", { maximumFractionDigits: number >= 1 ? 6 : 10 });
+  return formatTokenAmount(value);
 }
 
 export default function AgentsWorkspace({

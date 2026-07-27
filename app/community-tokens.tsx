@@ -41,6 +41,11 @@ import {
   type PoolCandidate,
 } from "@/lib/hoodflow-mainnet";
 import { track } from "@/lib/analytics-client";
+import {
+  formatPercentage,
+  formatTokenAmount,
+  formatUsd,
+} from "@/lib/format-display-number";
 import { ROBINHOOD_VIRTUAL_ADDRESS } from "@/lib/launchpads/virtuals";
 
 type Token = { address: string; name: string; symbol: string; decimals: number };
@@ -165,25 +170,15 @@ function compact(value: string) {
 }
 
 function prettyAmount(value: bigint, decimals: number) {
-  const formatted = formatUnits(value, decimals);
-  const numeric = Number(formatted);
-  if (!Number.isFinite(numeric)) return formatted;
-  if (numeric === 0) return "0";
-  if (numeric < 0.0001) return numeric.toExponential(3);
-  return numeric.toLocaleString("en-US", { maximumFractionDigits: 6 });
+  return formatTokenAmount(formatUnits(value, decimals));
 }
 
 function compactMoney(value: number | null, price = false) {
-  if (value === null || !Number.isFinite(value)) return "—";
-  if (price && value > 0 && value < 0.0001) return `$${value.toExponential(2)}`;
-  if (price && value < 1) return `$${value.toLocaleString("en-US", { maximumFractionDigits: 6 })}`;
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: value >= 10_000 ? "compact" : "standard", maximumFractionDigits: value >= 1_000 ? 1 : 2 }).format(value);
+  return formatUsd(value, { compact: !price, price });
 }
 
 function percent(value: number | null) {
-  if (value === null || !Number.isFinite(value)) return "—";
-  const bounded = Math.max(-99.99, Math.min(999_999, value));
-  return `${bounded >= 0 ? "+" : ""}${bounded.toLocaleString("en-US", { maximumFractionDigits: 2 })}%`;
+  return formatPercentage(value);
 }
 
 function poolAge(value: string | null) {
@@ -419,9 +414,9 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
     return { path, min, max, positive: closes.at(-1)! >= closes[0] };
   }, [chartPoints]);
 
-  const outputLabel = useMemo(() => {
+  const outputAmount = useMemo(() => {
     if (!token || !quote) return "—";
-    return side === "buy" ? `${prettyAmount(quote.amountOut, token.decimals)} ${token.symbol}` : `${prettyAmount(quote.amountOut, settlement.decimals)} ${settlement.symbol}`;
+    return side === "buy" ? prettyAmount(quote.amountOut, token.decimals) : prettyAmount(quote.amountOut, settlement.decimals);
   }, [quote, settlement, side, token]);
   const poolFee = quote
     ? quote.protocol === "V2" ? `${(quote.feeBps / 100).toFixed(2)}%` : quote.protocol === "V3" ? `${(quote.fee / 10_000).toFixed(2)}%` : `${(quote.route.fee / 10_000).toFixed(2)}%`
@@ -683,6 +678,15 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
     track("settlement_selected", { symbol: option.symbol });
   }
 
+  function changeTradeSide(nextSide: "buy" | "sell") {
+    setSide(nextSide);
+    setAmount(nextSide === "buy"
+      ? settlement.symbol === "WETH" ? "0.01" : settlement.symbol === "USDG" ? "20" : "10"
+      : "1");
+    setSettlementMenu(false);
+    invalidateQuote();
+  }
+
   return <section className="page inner-page community-page">
     <div className="community-hero">
       <div><p className="eyebrow">CRYPTO · ROBINHOOD CHAIN</p><h1>Indexed live markets.<br /><span>One execution screen.</span></h1><p>Discover active pools from supported market feeds, compare real liquidity and trade from your wallet. Meme coins, Virtuals launches and crypto markets appear in one clean live feed.</p></div>
@@ -740,14 +744,64 @@ export default function CommunityTokens({ walletAddress, walletProvider, onWalle
           <p className="terminal-risk">Community tokens are unreviewed. Confirm the contract and pool before signing.</p>
         </section>
         <section className="community-trade-panel">
-          <div className="community-tabs"><button className={side === "buy" ? "active" : ""} onClick={() => { setSide("buy"); setAmount(settlement.symbol === "WETH" ? "0.01" : settlement.symbol === "USDG" ? "20" : "10"); invalidateQuote(); }} type="button">Buy</button><button className={side === "sell" ? "active" : ""} onClick={() => { setSide("sell"); setAmount("1"); invalidateQuote(); }} type="button">Sell</button></div>
-          <div className="terminal-amount"><span>YOU PAY {side === "buy" && settlementBalance ? <em>Balance {settlementBalance}</em> : null}</span><div><input aria-label="Trade amount" type="number" min="0" step="any" value={amount} onChange={(event) => { setAmount(event.target.value); invalidateQuote(); }} />{side === "buy" ? <span className="settlement-picker"><button type="button" className="settlement-trigger" aria-expanded={settlementMenu} onClick={() => setSettlementMenu((open) => !open)}>{settlement.symbol}<i>⌄</i></button>{settlementMenu && <span className="settlement-menu" role="menu">{settlementOptions.map((option) => <button type="button" role="menuitem" className={option.address === settlement.address ? "selected" : ""} key={option.address} onClick={() => chooseSettlement(option)}><b>{option.symbol.slice(0, 2)}</b><span><strong>{option.symbol}</strong><small>{option.address === marketSettlement.address ? "Native market route" : "Pay from wallet"}</small></span>{option.address === settlement.address && <i>✓</i>}</button>)}</span>}</span> : <b>{token.symbol}</b>}</div></div>
-          <div className="terminal-swap-arrow">↓</div>
-          <div className="terminal-receive"><div><span>YOU RECEIVE · ESTIMATED</span><strong>{outputLabel}</strong></div>{side === "sell" && <span className="settlement-picker"><button type="button" className="settlement-trigger" aria-expanded={settlementMenu} onClick={() => setSettlementMenu((open) => !open)}>{settlement.symbol}<i>⌄</i></button>{settlementMenu && <span className="settlement-menu receive-menu" role="menu">{settlementOptions.map((option) => <button type="button" role="menuitem" className={option.address === settlement.address ? "selected" : ""} key={option.address} onClick={() => chooseSettlement(option)}><b>{option.symbol.slice(0, 2)}</b><span><strong>{option.symbol}</strong><small>{option.address === marketSettlement.address ? "Native market route" : "Receive in wallet"}</small></span>{option.address === settlement.address && <i>✓</i>}</button>)}</span>}</span>}</div>
-          <div className="terminal-route-line"><div><span>EXECUTION</span><strong>{quote ? routeName(quote) : activeMarket?.lifecycle === "bonding" ? "Virtuals bonding market" : routeUnavailable ? "External pool" : "Finding best pool…"}</strong></div><label>SLIPPAGE <span><input type="number" min="0.1" max="5" step="0.1" value={slippage} onChange={(event) => setSlippage(event.target.value)} />%</span></label></div>
-          <div className="community-fees"><span><small>POOL FEE</small><strong>{poolFee}</strong></span><span><small>HOODFLOW FEE</small><strong>0.00%</strong></span><span><small>NETWORK GAS</small><strong>Shown in wallet</strong></span></div>
-          {step && <p className={`community-step ${routeUnavailable ? "notice" : ""}`}><i />{step}</p>}{routeError && <p className="community-error">{routeError}</p>}
-          <div className="community-actions"><div className={`quote-auto-state ${quote ? "live" : routeUnavailable ? "unavailable" : ""}`}><i /><span><strong>{activeMarket?.executionVenue === "virtuals-bonding" ? "Bonding route" : quoteBusy ? "Updating quote…" : quote ? "Live quote" : "Waiting for route"}</strong><small>{quoteUpdatedAt ? `Updated ${new Date(quoteUpdatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · every 12s` : "Automatic · no refresh needed"}</small></span></div>{routeUnavailable && (activeMarket?.externalUrl || activeMarket?.pairUrl) ? <a href={activeMarket.externalUrl || activeMarket.pairUrl} target="_blank" rel="noreferrer">{activeMarket?.lifecycle === "bonding" ? "Trade on Virtuals ↗" : "Open live pool ↗"}</a> : <button type="button" onClick={() => void trade()} disabled={busy || quoteBusy || !quote}>{!walletAddress ? "Connect wallet" : quote ? `${side === "buy" ? "Buy" : "Sell"} ${token.symbol}` : quoteBusy ? "Finding best route…" : "Route unavailable"}</button>}</div>
+          <div className="trade-panel-head">
+            <div className="community-tabs" aria-label="Trade direction">
+              <button className={side === "buy" ? "active" : ""} onClick={() => changeTradeSide("buy")} type="button">Buy</button>
+              <button className={side === "sell" ? "active" : ""} onClick={() => changeTradeSide("sell")} type="button">Sell</button>
+            </div>
+            <span className="trade-auto-route"><i /> AUTO ROUTE</span>
+          </div>
+
+          <div className="swap-stack">
+            <section className="asset-amount-card">
+              <header><span>YOU PAY</span>{side === "buy" && settlementBalance ? <em>Balance {settlementBalance}</em> : null}</header>
+              <div className="asset-amount-row">
+                <input aria-label="Trade amount" type="number" min="0" step="any" value={amount} onChange={(event) => { setAmount(event.target.value); invalidateQuote(); }} />
+                {side === "buy" ? <span className="settlement-picker">
+                  <button type="button" className="settlement-trigger" aria-expanded={settlementMenu} onClick={() => setSettlementMenu((open) => !open)}>
+                    <b>{settlement.symbol.slice(0, 2)}</b><span><strong>{settlement.symbol}</strong><small>Wallet asset</small></span><i>⌄</i>
+                  </button>
+                  {settlementMenu && <span className="settlement-menu" role="menu">{settlementOptions.map((option) => <button type="button" role="menuitem" className={option.address === settlement.address ? "selected" : ""} key={option.address} onClick={() => chooseSettlement(option)}><b>{option.symbol.slice(0, 2)}</b><span><strong>{option.symbol}</strong><small>{option.address === marketSettlement.address ? "Native market route" : "Pay from wallet"}</small></span>{option.address === settlement.address && <i>✓</i>}</button>)}</span>}
+                </span> : <span className="trade-asset-chip"><b>{token.symbol.slice(0, 2)}</b><span><strong>{token.symbol}</strong><small>{token.name}</small></span></span>}
+              </div>
+            </section>
+
+            <button className="swap-direction" type="button" onClick={() => changeTradeSide(side === "buy" ? "sell" : "buy")} aria-label={`Switch to ${side === "buy" ? "sell" : "buy"}`}>⇅</button>
+
+            <section className="asset-amount-card receive">
+              <header><span>YOU RECEIVE</span><em>ESTIMATED</em></header>
+              <div className="asset-amount-row">
+                <strong className="trade-output-amount">{outputAmount}</strong>
+                {side === "sell" ? <span className="settlement-picker">
+                  <button type="button" className="settlement-trigger" aria-expanded={settlementMenu} onClick={() => setSettlementMenu((open) => !open)}>
+                    <b>{settlement.symbol.slice(0, 2)}</b><span><strong>{settlement.symbol}</strong><small>Wallet asset</small></span><i>⌄</i>
+                  </button>
+                  {settlementMenu && <span className="settlement-menu receive-menu" role="menu">{settlementOptions.map((option) => <button type="button" role="menuitem" className={option.address === settlement.address ? "selected" : ""} key={option.address} onClick={() => chooseSettlement(option)}><b>{option.symbol.slice(0, 2)}</b><span><strong>{option.symbol}</strong><small>{option.address === marketSettlement.address ? "Native market route" : "Receive in wallet"}</small></span>{option.address === settlement.address && <i>✓</i>}</button>)}</span>}
+                </span> : <span className="trade-asset-chip"><b>{token.symbol.slice(0, 2)}</b><span><strong>{token.symbol}</strong><small>{token.name}</small></span></span>}
+              </div>
+            </section>
+          </div>
+
+          <section className="execution-summary">
+            <header><div><i /><span><small>BEST ROUTE</small><strong>{quote ? routeName(quote) : activeMarket?.lifecycle === "bonding" ? "Virtuals bonding market" : routeUnavailable ? "External pool only" : "Finding best pool…"}</strong></span></div><b>{quoteBusy && quote ? "REFRESHING" : quote ? "LIVE" : routeUnavailable ? "UNAVAILABLE" : "CHECKING"}</b></header>
+            <div className="execution-summary-grid">
+              <span><small>Pool fee</small><strong>{poolFee}</strong></span>
+              <span><small>HoodFlow fee</small><strong>0.00%</strong></span>
+              <span><small>Network gas</small><strong>Shown in wallet</strong></span>
+              <label><small>Max slippage</small><span><input type="number" min="0.1" max="5" step="0.1" value={slippage} onChange={(event) => setSlippage(event.target.value)} />%</span></label>
+            </div>
+          </section>
+
+          {step && (busy || routeUnavailable || !quote) && <p className={`community-step ${routeUnavailable ? "notice" : ""}`}><i />{step}</p>}
+          {routeError && <p className="community-error">{routeError}</p>}
+
+          <div className={`trade-quote-status ${quote ? "live" : routeUnavailable ? "unavailable" : ""}`} aria-live="polite">
+            <div><i /><span><strong>{activeMarket?.executionVenue === "virtuals-bonding" ? "Bonding route" : quoteBusy && quote ? "Refreshing live quote" : quote ? "Live quote ready" : quoteBusy ? "Checking liquidity" : "Waiting for route"}</strong><small>{quoteUpdatedAt ? `Updated ${new Date(quoteUpdatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · refreshes every 12s` : "Automatic quotes · no refresh button"}</small></span></div>
+            <b>{quote ? "AUTO-REFRESH" : routeUnavailable ? "SOURCE ONLY" : "PREPARING"}</b>
+          </div>
+          {routeUnavailable && (activeMarket?.externalUrl || activeMarket?.pairUrl)
+            ? <a className="trade-submit" href={activeMarket.externalUrl || activeMarket.pairUrl} target="_blank" rel="noreferrer">{activeMarket?.lifecycle === "bonding" ? "Trade on Virtuals ↗" : "Open live pool ↗"}</a>
+            : <button className="trade-submit" type="button" onClick={() => void trade()} disabled={busy || !quote}>{busy ? "Preparing wallet confirmation…" : !walletAddress ? "Connect wallet" : quote ? `${side === "buy" ? "Buy" : "Sell"} ${token.symbol}` : quoteBusy ? "Finding best route…" : "Route unavailable"}</button>}
         </section>
       </div>
     </div>}
