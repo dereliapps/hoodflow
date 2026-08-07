@@ -399,8 +399,14 @@ async function fetchOfficialJson(url: string, fetchImpl: typeof fetch, timeoutMs
     const response = await Promise.race([
       fetchImpl(url, {
         method: "GET",
-        headers: { accept: "application/json" },
-        cache: "no-store",
+        // Keep this compatible with edge runtimes whose compatibility date
+        // predates Request.cache support. HoodFlow's bounded in-memory cache
+        // below controls reuse, while these headers request revalidation.
+        headers: {
+          accept: "application/json",
+          "cache-control": "no-cache",
+          pragma: "no-cache",
+        },
         redirect: "error",
         signal: controller.signal,
       }),
