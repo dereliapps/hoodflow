@@ -97,6 +97,7 @@ type EvidenceEnvelope<T> = {
   source: string;
   fetchedAt: string;
   value: T | null;
+  diagnostic?: "timeout" | "http-4xx" | "http-5xx" | "invalid-response" | "network-unavailable";
 };
 
 export type OfficialActionLockEvidence = {
@@ -404,8 +405,10 @@ async function fetchOfficialJson(url: string, fetchImpl: typeof fetch, timeoutMs
         // below controls reuse, while these headers request revalidation.
         headers: {
           accept: "application/json",
+          "accept-language": "en-US,en;q=0.9",
           "cache-control": "no-cache",
           pragma: "no-cache",
+          "user-agent": "HoodFlow-ActionLock/1.0 (+https://hoodflow.app)",
         },
         redirect: "error",
         signal: controller.signal,
@@ -459,8 +462,18 @@ function envelope<T>(
   source: string,
   fetchedAt: string,
   value: T | null,
+  diagnostic?: EvidenceEnvelope<T>["diagnostic"],
 ): EvidenceEnvelope<T> {
-  return { status, source, fetchedAt, value };
+  return { status, source, fetchedAt, value, ...(diagnostic ? { diagnostic } : {}) };
+}
+
+function evidenceDiagnostic(reason: unknown): NonNullable<EvidenceEnvelope<unknown>["diagnostic"]> {
+  const message = reason instanceof Error ? reason.message.toLowerCase() : "";
+  if (message.includes("timed out")) return "timeout";
+  if (/returned 4\d\d/.test(message)) return "http-4xx";
+  if (/returned 5\d\d/.test(message)) return "http-5xx";
+  if (message.includes("invalid") || message.includes("json")) return "invalid-response";
+  return "network-unavailable";
 }
 
 function canonicalAddressFor(asset: string) {
@@ -581,16 +594,16 @@ export async function fetchOfficialActionLockEvidence(
 
   return {
     asset: assetsResult.status === "rejected"
-      ? envelope<OfficialActionLockAsset>("unavailable", OFFICIAL_ASSETS_URL, observedAt, null)
+      ? envelope<OfficialActionLockAsset>("unavailable", OFFICIAL_ASSETS_URL, observedAt, null, evidenceDiagnostic(assetsResult.reason))
       : envelope<OfficialActionLockAsset>(officialAsset ? "available" : "missing", OFFICIAL_ASSETS_URL, observedAt, officialAsset),
     price: pricesResult.status === "rejected"
-      ? envelope<OfficialActionLockPrice>("unavailable", priceUrl, observedAt, null)
+      ? envelope<OfficialActionLockPrice>("unavailable", priceUrl, observedAt, null, evidenceDiagnostic(pricesResult.reason))
       : envelope<OfficialActionLockPrice>(officialPrice ? "available" : "missing", priceUrl, observedAt, officialPrice),
     corporateActions: actionsResult.status === "rejected"
-      ? envelope<OfficialCorporateAction[]>("unavailable", OFFICIAL_CORPORATE_ACTIONS_URL, observedAt, null)
+      ? envelope<OfficialCorporateAction[]>("unavailable", OFFICIAL_CORPORATE_ACTIONS_URL, observedAt, null, evidenceDiagnostic(actionsResult.reason))
       : envelope<OfficialCorporateAction[]>("available", OFFICIAL_CORPORATE_ACTIONS_URL, observedAt, corporateActions ?? []),
     onchainMultiplier: onchainMultiplierResult.status === "rejected"
-      ? envelope<OnchainMultiplierState>("unavailable", "Robinhood Chain ERC-8056", observedAt, null)
+      ? envelope<OnchainMultiplierState>("unavailable", "Robinhood Chain ERC-8056", observedAt, null, evidenceDiagnostic(onchainMultiplierResult.reason))
       : envelope<OnchainMultiplierState>("available", "Robinhood Chain ERC-8056", observedAt, onchainMultiplierResult.value),
   };
 }

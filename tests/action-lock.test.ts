@@ -348,3 +348,22 @@ test("fetches fixed official endpoints and reuses successful conservative cache 
   ]);
   clearActionLockCache();
 });
+
+test("exposes only bounded diagnostics when an official source is unavailable", async () => {
+  clearActionLockCache();
+  const evidence = await fetchOfficialActionLockEvidence("AAPL", {
+    fetchImpl: (async () => new Response(null, { status: 403 })) as typeof fetch,
+    now: () => new Date(OBSERVED_AT),
+    timeoutMs: 50,
+    useCache: false,
+    readOnchainMultiplier: async () => ({
+      currentMultiplier: "1.0",
+      pendingMultiplier: "1.0",
+      effectiveAt: null,
+    }),
+  });
+  assert.equal(evidence.asset.diagnostic, "http-4xx");
+  assert.equal(evidence.price.diagnostic, "http-4xx");
+  assert.equal(evidence.corporateActions.diagnostic, "http-4xx");
+  assert.equal(evidence.onchainMultiplier.diagnostic, undefined);
+});
