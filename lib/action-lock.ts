@@ -98,7 +98,14 @@ type EvidenceEnvelope<T> = {
   fetchedAt: string;
   value: T | null;
   diagnostic?: "timeout" | "http-4xx" | "http-5xx" | "invalid-response" | "network-unavailable";
+  diagnosticDetail?: string;
 };
+
+class OfficialPayloadShapeError extends Error {
+  constructor(readonly shape: string) {
+    super("Official source returned an unexpected JSON shape.");
+  }
+}
 
 export type OfficialActionLockEvidence = {
   asset: EvidenceEnvelope<OfficialActionLockAsset>;
@@ -211,6 +218,19 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function boundedPayloadShape(value: unknown) {
+  const record = asRecord(value);
+  if (record) {
+    const keys = Object.keys(record)
+      .filter((key) => /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(key))
+      .slice(0, 8);
+    return `json-keys:${keys.length ? keys.join("|") : "none"}`;
+  }
+  if (Array.isArray(value)) return "json-type:array";
+  if (value === null) return "json-type:null";
+  return `json-type:${typeof value}`;
+}
+
 function boundedString(value: unknown, maxLength = 256): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
@@ -298,7 +318,7 @@ function parseAsset(value: unknown): OfficialActionLockAsset | null {
 
 function parseAssetPayload(value: unknown): OfficialActionLockAsset[] {
   const record = asRecord(value);
-  if (!record || !Array.isArray(record.assets)) throw new Error("Invalid official asset payload.");
+  if (!record || !Array.isArray(record.assets)) throw new OfficialPayloadShapeError(boundedPayloadShape(value));
   return record.assets.slice(0, 5_000).map(parseAsset).filter((item): item is OfficialActionLockAsset => Boolean(item));
 }
 
@@ -319,7 +339,7 @@ function parsePrice(value: unknown): OfficialActionLockPrice | null {
 
 function parsePricePayload(value: unknown): OfficialActionLockPrice[] {
   const record = asRecord(value);
-  if (!record || !Array.isArray(record.quotes)) throw new Error("Invalid official price payload.");
+  if (!record || !Array.isArray(record.quotes)) throw new OfficialPayloadShapeError(boundedPayloadShape(value));
   return record.quotes.slice(0, 100).map(parsePrice).filter((item): item is OfficialActionLockPrice => Boolean(item));
 }
 
@@ -386,7 +406,7 @@ function parseCorporateAction(value: unknown): OfficialCorporateAction | null {
 
 function parseCorporateActionPayload(value: unknown): OfficialCorporateAction[] {
   const record = asRecord(value);
-  if (!record || !Array.isArray(record.corpActions)) throw new Error("Invalid official corporate-action payload.");
+  if (!record || !Array.isArray(record.corpActions)) throw new OfficialPayloadShapeError(boundedPayloadShape(value));
   return record.corpActions
     .slice(0, 5_000)
     .map(parseCorporateAction)
@@ -405,6 +425,7 @@ async function fetchOfficialJson(url: string, fetchImpl: typeof fetch, timeoutMs
         // below controls reuse, while these headers request revalidation.
         headers: {
           accept: "application/json",
+          "accept-encoding": "identity",
           "accept-language": "en-US,en;q=0.9",
           "cache-control": "no-cache",
           pragma: "no-cache",
@@ -463,8 +484,16 @@ function envelope<T>(
   fetchedAt: string,
   value: T | null,
   diagnostic?: EvidenceEnvelope<T>["diagnostic"],
+  diagnosticDetail?: string,
 ): EvidenceEnvelope<T> {
-  return { status, source, fetchedAt, value, ...(diagnostic ? { diagnostic } : {}) };
+  return {
+    status,
+    source,
+    fetchedAt,
+    value,
+    ...(diagnostic ? { diagnostic } : {}),
+    ...(diagnosticDetail ? { diagnosticDetail } : {}),
+  };
 }
 
 function evidenceDiagnostic(reason: unknown): NonNullable<EvidenceEnvelope<unknown>["diagnostic"]> {
@@ -474,6 +503,12 @@ function evidenceDiagnostic(reason: unknown): NonNullable<EvidenceEnvelope<unkno
   if (/returned 5\d\d/.test(message)) return "http-5xx";
   if (message.includes("invalid") || message.includes("json")) return "invalid-response";
   return "network-unavailable";
+}
+
+function evidenceDiagnosticDetail(reason: unknown): string | undefined {
+  if (reason instanceof OfficialPayloadShapeError) return reason.shape;
+  if (reason instanceof SyntaxError) return "json-parse";
+  return undefined;
 }
 
 function canonicalAddressFor(asset: string) {
@@ -594,16 +629,16 @@ export async function fetchOfficialActionLockEvidence(
 
   return {
     asset: assetsResult.status === "rejected"
-      ? envelope<OfficialActionLockAsset>("unavailable", OFFICIAL_ASSETS_URL, observedAt, null, evidenceDiagnostic(assetsResult.reason))
+      ? envelope<OfficialActionLockAsset>("unavailable", OFFICIAL_ASSETS_URL, observedAt, null, evidenceDiagnostic(assetsResult.reason), evidenceDiagnosticDetail(assetsResult.reason))
       : envelope<OfficialActionLockAsset>(officialAsset ? "available" : "missing", OFFICIAL_ASSETS_URL, observedAt, officialAsset),
     price: pricesResult.status === "rejected"
-      ? envelope<OfficialActionLockPrice>("unavailable", priceUrl, observedAt, null, evidenceDiagnostic(pricesResult.reason))
+      ? envelope<OfficialActionLockPrice>("unavailable", priceUrl, observedAt, null, evidenceDiagnostic(pricesResult.reason), evidenceDiagnosticDetail(pricesResult.reason))
       : envelope<OfficialActionLockPrice>(officialPrice ? "available" : "missing", priceUrl, observedAt, officialPrice),
     corporateActions: actionsResult.status === "rejected"
-      ? envelope<OfficialCorporateAction[]>("unavailable", OFFICIAL_CORPORATE_ACTIONS_URL, observedAt, null, evidenceDiagnostic(actionsResult.reason))
+      ? envelope<OfficialCorporateAction[]>("unavailable", OFFICIAL_CORPORATE_ACTIONS_URL, observedAt, null, evidenceDiagnostic(actionsResult.reason), evidenceDiagnosticDetail(actionsResult.reason))
       : envelope<OfficialCorporateAction[]>("available", OFFICIAL_CORPORATE_ACTIONS_URL, observedAt, corporateActions ?? []),
     onchainMultiplier: onchainMultiplierResult.status === "rejected"
-      ? envelope<OnchainMultiplierState>("unavailable", "Robinhood Chain ERC-8056", observedAt, null, evidenceDiagnostic(onchainMultiplierResult.reason))
+      ? envelope<OnchainMultiplierState>("unavailable", "Robinhood Chain ERC-8056", observedAt, null, evidenceDiagnostic(onchainMultiplierResult.reason), evidenceDiagnosticDetail(onchainMultiplierResult.reason))
       : envelope<OnchainMultiplierState>("available", "Robinhood Chain ERC-8056", observedAt, onchainMultiplierResult.value),
   };
 }
