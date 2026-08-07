@@ -107,6 +107,12 @@ class OfficialPayloadShapeError extends Error {
   }
 }
 
+class OfficialResponseBodyError extends Error {
+  constructor(readonly detail: "empty-body" | "body-too-large" | "json-parse") {
+    super("Official source response body was invalid.");
+  }
+}
+
 export type OfficialActionLockEvidence = {
   asset: EvidenceEnvelope<OfficialActionLockAsset>;
   price: EvidenceEnvelope<OfficialActionLockPrice>;
@@ -444,11 +450,17 @@ async function fetchOfficialJson(url: string, fetchImpl: typeof fetch, timeoutMs
     if (!response.ok) throw new Error(`Official source returned ${response.status}.`);
     const contentLength = Number(response.headers.get("content-length") ?? "0");
     if (Number.isFinite(contentLength) && contentLength > MAX_OFFICIAL_RESPONSE_CHARS) {
-      throw new Error("Official source response was too large.");
+      throw new OfficialResponseBodyError("body-too-large");
     }
-    const text = await response.text();
-    if (!text || text.length > MAX_OFFICIAL_RESPONSE_CHARS) throw new Error("Official source response was invalid.");
-    return JSON.parse(text) as unknown;
+    const body = await response.arrayBuffer();
+    if (body.byteLength === 0) throw new OfficialResponseBodyError("empty-body");
+    if (body.byteLength > MAX_OFFICIAL_RESPONSE_CHARS) throw new OfficialResponseBodyError("body-too-large");
+    const text = new TextDecoder().decode(body);
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      throw new OfficialResponseBodyError("json-parse");
+    }
   } finally {
     if (timeout) clearTimeout(timeout);
   }
@@ -507,6 +519,7 @@ function evidenceDiagnostic(reason: unknown): NonNullable<EvidenceEnvelope<unkno
 
 function evidenceDiagnosticDetail(reason: unknown): string | undefined {
   if (reason instanceof OfficialPayloadShapeError) return reason.shape;
+  if (reason instanceof OfficialResponseBodyError) return reason.detail;
   if (reason instanceof SyntaxError) return "json-parse";
   return undefined;
 }
