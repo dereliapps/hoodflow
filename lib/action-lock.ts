@@ -426,18 +426,9 @@ async function fetchOfficialJson(url: string, fetchImpl: typeof fetch, timeoutMs
     const response = await Promise.race([
       fetchImpl(url, {
         method: "GET",
-        // Keep this compatible with edge runtimes whose compatibility date
-        // predates Request.cache support. HoodFlow's bounded in-memory cache
-        // below controls reuse, while these headers request revalidation.
-        headers: {
-          accept: "application/json",
-          "accept-encoding": "identity",
-          "accept-language": "en-US,en;q=0.9",
-          "cache-control": "no-cache",
-          pragma: "no-cache",
-          "user-agent": "HoodFlow-ActionLock/1.0 (+https://hoodflow.app)",
-        },
-        redirect: "error",
+        // Keep the subrequest deliberately minimal for portable edge runtimes.
+        // HoodFlow's bounded in-memory cache below controls response reuse.
+        headers: { accept: "application/json" },
         signal: controller.signal,
       }),
       new Promise<never>((_, reject) => {
