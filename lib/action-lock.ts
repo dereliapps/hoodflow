@@ -16,7 +16,10 @@ const OFFICIAL_SOURCE_LABEL = "Robinhood Stock Token APIs";
 const OFFICIAL_ISSUER_NAME = "Robinhood Stock Token API";
 const POLICY_ID = "hoodflow-action-lock" as const;
 const POLICY_VERSION = "1.0.0" as const;
-const DEFAULT_TIMEOUT_MS = 3_500;
+// Robinhood's public issuer endpoints can take several seconds from edge runtimes
+// on a cold connection. Keep the request bounded, but leave enough room for the
+// first production verification instead of downgrading healthy evidence to WATCH.
+const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_OFFICIAL_RESPONSE_CHARS = 2_000_000;
 const ASSETS_CACHE_MS = 5 * 60_000;
 const PRICES_CACHE_MS = 15_000;
