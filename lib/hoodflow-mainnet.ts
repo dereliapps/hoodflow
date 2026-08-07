@@ -33,6 +33,21 @@ export const USDG_DECIMALS = 6;
 export const WETH_ADDRESS = getAddress("0x0bd7d308f8e1639fab988df18a8011f41eacad73");
 export const WETH_DECIMALS = 18;
 export const STOCK_TOKEN_DECIMALS = 18;
+export const UI_MULTIPLIER_SCALE = 10n ** 18n;
+
+export const SCALED_UI_AMOUNT_ABI = [
+  "function uiMultiplier() view returns (uint256)",
+] as const;
+
+export function toUiAmount(rawAmount: bigint, multiplier: bigint) {
+  if (rawAmount < 0n || multiplier <= 0n) throw new Error("Invalid ERC-8056 amount or multiplier.");
+  return rawAmount * multiplier / UI_MULTIPLIER_SCALE;
+}
+
+export function fromUiAmount(uiAmount: bigint, multiplier: bigint) {
+  if (uiAmount < 0n || multiplier <= 0n) throw new Error("Invalid ERC-8056 amount or multiplier.");
+  return uiAmount * UI_MULTIPLIER_SCALE / multiplier;
+}
 
 export const V4_POOL_CANDIDATES = [
   { fee: 500, tickSpacing: 10 },

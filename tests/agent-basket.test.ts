@@ -66,6 +66,12 @@ function quoteFor(request: AgentQuoteRequest, expiresAt = NOW + 60_000): AgentQu
       heartbeat: 86_400,
       oraclePaused: false,
     },
+    uiScaling: {
+      standard: "ERC-8056",
+      multiplier: "1.0",
+      multiplierRaw: "1000000000000000000",
+      rawOperations: true,
+    },
     custody: "self-custody",
     requiresUserSignature: true,
     executionHandoff: {

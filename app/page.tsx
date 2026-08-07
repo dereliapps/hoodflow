@@ -25,6 +25,7 @@ import {
   PERMIT2_TYPES,
   ROBINHOOD_MAINNET,
   ROBINHOOD_TOKENS,
+  SCALED_UI_AMOUNT_ABI,
   STOCK_TOKEN_DECIMALS,
   UNIVERSAL_ROUTER_ABI,
   UNIVERSAL_ROUTER_ADDRESS,
@@ -43,9 +44,11 @@ import {
   buildV3ExactInputCalldata,
   buildExactInputQuoteParams,
   friendlyExecutionError,
+  fromUiAmount,
   isDcaEnabledAsset,
   isRoutedAsset,
   isV3RoutedAsset,
+  toUiAmount,
   type PoolCandidate,
   type PermitSingle,
 } from "@/lib/hoodflow-mainnet";
@@ -75,11 +78,12 @@ function WorkspaceLoader({ label }: { label: string }) {
 
 const CommunityTokens = dynamic(() => import("./community-tokens"), { ssr: false, loading: () => <WorkspaceLoader label="Loading crypto markets" /> });
 const AgentsWorkspace = dynamic(() => import("./agents-workspace"), { ssr: false, loading: () => <WorkspaceLoader label="Loading agent execution" /> });
+const ActionLockWorkspace = dynamic(() => import("./action-lock-workspace"), { ssr: false, loading: () => <WorkspaceLoader label="Loading ActionLock" /> });
 const AssetRequestBoard = dynamic(() => import("./asset-request-board"), { ssr: false, loading: () => <WorkspaceLoader label="Loading asset requests" /> });
 const ReferralRewards = dynamic(() => import("./referral-rewards"), { ssr: false, loading: () => <WorkspaceLoader label="Loading rewards" /> });
 const PrivyWalletRuntime = dynamic(() => import("./privy-wallet-runtime"), { ssr: false });
 
-type View = "overview" | "strategies" | "assets" | "asset" | "community" | "agents" | "portfolio" | "rewards" | "marketplace" | "activity" | "controls";
+type View = "overview" | "strategies" | "assets" | "asset" | "community" | "agents" | "action-lock" | "portfolio" | "rewards" | "marketplace" | "activity" | "controls";
 type StrategyKind = "Buy" | "Sell" | "DCA";
 type StrategyStatus = "Prepared" | "Paused" | "Confirmed" | "Cancelled";
 type MarketplaceSort = "featured" | "cadence" | "risk";
@@ -102,6 +106,31 @@ type InjectedWalletProvider = HoodFlowWalletProvider & {
 };
 type InjectedWalletPreference = "rabby" | "metamask" | "okx" | "browser";
 type WalletConnectConfig = { enabled: boolean; projectId: string | null };
+type ActionLockGate = {
+  decision: "clear" | "watch" | "blocked";
+  fingerprint: string;
+  intent: { asset: string; side: "buy" | "sell"; amount: string; slippageBps: number };
+  issuerState: { currentMultiplier: string | null };
+  policy: { validUntil: string };
+  quote: {
+    asset: string;
+    side: "buy" | "sell";
+    pay: { ticker: string; address: string; amount: string; rawAmount: string; decimals: number };
+    receive: {
+      ticker: string;
+      address: string;
+      estimatedAmount: string;
+      indicativeMinimumAmount: string;
+      rawEstimatedAmount: string;
+      rawIndicativeMinimumAmount: string;
+      decimals: number;
+    };
+    route: { protocol: "Uniswap V3" | "Uniswap V4"; fee: number; tickSpacing: number | null };
+    protection: { slippageBps: number; dataExpiresAt: string };
+    uiScaling: { standard: "ERC-8056"; multiplier: string; multiplierRaw: string; rawOperations: true };
+  };
+  checks: Array<{ code: string; label: string; status: "pass" | "watch" | "block"; detail: string }>;
+};
 
 type Strategy = {
   id: number;
@@ -116,6 +145,7 @@ type Strategy = {
   createdAt: number;
   walletAddress: string;
   txHash?: string;
+  actionLockFingerprint?: string;
   chainStrategyId?: string;
   inputAmount?: number;
   outputAmount?: number;
@@ -793,7 +823,7 @@ export default function Home() {
         setView("community");
       } else if (params.get("ref")) {
         setView("rewards");
-      } else if (requestedView && ["overview", "strategies", "assets", "community", "agents", "portfolio", "rewards", "marketplace", "activity", "controls"].includes(requestedView)) {
+      } else if (requestedView && ["overview", "strategies", "assets", "community", "agents", "action-lock", "portfolio", "rewards", "marketplace", "activity", "controls"].includes(requestedView)) {
         setView(requestedView);
       } else if (view === "asset") {
         setView("assets");
@@ -1041,33 +1071,40 @@ export default function Home() {
       const provider = new JsonRpcProvider(ROBINHOOD_MAINNET.rpcUrls[0], ROBINHOOD_MAINNET.chainIdNumber, { staticNetwork: true });
       quoteProvider = provider;
       const tokenAddress = ROBINHOOD_TOKENS[draftAsset];
+      const multiplierContract = new Contract(tokenAddress, SCALED_UI_AMOUNT_ABI, provider);
+      const uiMultiplier = BigInt((await multiplierContract.uiMultiplier()).toString());
+      if (uiMultiplier <= 0n) throw new Error("The ERC-8056 UI multiplier is invalid.");
+      const executionAmountIn = kind === "Buy" ? amountIn : fromUiAmount(amountIn, uiMultiplier);
+      if (executionAmountIn <= 0n) throw new Error("The ERC-8056 raw input amount rounds to zero.");
       const tokenIn = kind === "Buy" ? USDG_ADDRESS : tokenAddress;
       const tokenOut = kind === "Buy" ? tokenAddress : USDG_ADDRESS;
       const route = isV3RoutedAsset(draftAsset)
         ? await (async () => {
             const fee = V3_ROUTE_FEES[draftAsset];
             const quoter = new Contract(V3_QUOTER_ADDRESS, V3_QUOTER_ABI, provider);
-            const result = await quoter.quoteExactInputSingle.staticCall({ tokenIn, tokenOut, amountIn, fee, sqrtPriceLimitX96: 0 }) as readonly [bigint, bigint, bigint, bigint];
+            const result = await quoter.quoteExactInputSingle.staticCall({ tokenIn, tokenOut, amountIn: executionAmountIn, fee, sqrtPriceLimitX96: 0 }) as readonly [bigint, bigint, bigint, bigint];
             return { protocol: "V3" as const, amountOut: BigInt(result[0]), feeBps: fee / 100 };
           })()
-        : await getBestV4Quote(provider, tokenIn, tokenOut, amountIn).then((result) => ({ protocol: "V4" as const, amountOut: result.amountOut, feeBps: result.route.fee / 100 }));
+        : await getBestV4Quote(provider, tokenIn, tokenOut, executionAmountIn).then((result) => ({ protocol: "V4" as const, amountOut: result.amountOut, feeBps: result.route.fee / 100 }));
       if (route.amountOut <= 0n) throw new Error("No live route is available for this amount.");
+      const displayAmountOut = kind === "Buy" ? toUiAmount(route.amountOut, uiMultiplier) : route.amountOut;
       calculateOracleDeviation({
         side: kind === "Buy" ? "buy" : "sell",
         inputAmount: formatUnits(amountIn, kind === "Buy" ? USDG_DECIMALS : STOCK_TOKEN_DECIMALS),
-        outputAmount: formatUnits(route.amountOut, kind === "Buy" ? STOCK_TOKEN_DECIMALS : USDG_DECIMALS),
+        outputAmount: formatUnits(displayAmountOut, kind === "Buy" ? STOCK_TOKEN_DECIMALS : USDG_DECIMALS),
         oraclePrice: priceBook[draftAsset]?.price ?? 0,
       });
       const slippageBps = Math.max(1, Math.min(500, Math.round(Number(draftSlippage || 0.5) * 100)));
       const minimum = route.amountOut * BigInt(10_000 - slippageBps) / 10_000n;
+      const displayMinimum = kind === "Buy" ? toUiAmount(minimum, uiMultiplier) : minimum;
       const decimals = kind === "Buy" ? STOCK_TOKEN_DECIMALS : USDG_DECIMALS;
       if (requestId !== composerQuoteRequestRef.current) return;
       composerQuoteKeyRef.current = requestKey;
       setComposerQuote({
         protocol: route.protocol,
         feeBps: route.feeBps,
-        amountOut: formatUnits(route.amountOut, decimals),
-        minimumOut: formatUnits(minimum, decimals),
+        amountOut: formatUnits(displayAmountOut, decimals),
+        minimumOut: formatUnits(displayMinimum, decimals),
         updatedAt: Date.now(),
       });
       setComposerQuoteError("");
@@ -1080,6 +1117,120 @@ export default function Home() {
       if (requestId === composerQuoteRequestRef.current) setComposerQuoteBusy(false);
     }
   }, [composerOpen, connected, draftAmount, draftAsset, draftSlippage, kind, priceBook, walletChainId]);
+
+  async function runActionLockGate(intent: ActionLockGate["intent"]) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 12_000);
+    setTransactionStep("ActionLock is checking issuer state and corporate actions…");
+    try {
+      const response = await fetch("/api/action-lock", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify(intent),
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      const payload = await response.json() as Partial<ActionLockGate> & { error?: string };
+      if (
+        !response.ok
+        || !payload.decision
+        || !payload.fingerprint
+        || !/^sha256:[0-9a-f]{64}$/.test(payload.fingerprint)
+        || !Array.isArray(payload.checks)
+        || !payload.intent
+        || !payload.quote
+        || !payload.policy
+      ) {
+        throw new Error(payload.error || "ActionLock could not verify the current issuer state.");
+      }
+      if (payload.decision === "blocked") {
+        const blocked = payload.checks.find((check) => check.status === "block");
+        throw new Error(`ActionLock blocked this order: ${blocked?.detail || "the Stock Token state changed"}`);
+      }
+      if (payload.decision !== "clear") {
+        const watch = payload.checks.find((check) => check.status === "watch");
+        throw new Error(`ActionLock needs review before trading: ${watch?.detail || "required issuer evidence is incomplete"}`);
+      }
+
+      const gate = payload as ActionLockGate;
+      if (
+        gate.intent.asset !== intent.asset
+        || gate.intent.side !== intent.side
+        || gate.intent.amount !== intent.amount
+        || gate.intent.slippageBps !== intent.slippageBps
+        || gate.quote.asset !== intent.asset
+        || gate.quote.side !== intent.side
+        || gate.quote.protection.slippageBps !== intent.slippageBps
+      ) {
+        throw new Error("ActionLock returned a passport for a different order intent.");
+      }
+
+      const tokenAddress = ROBINHOOD_TOKENS[intent.asset];
+      const expectedPayAddress = intent.side === "buy" ? USDG_ADDRESS : tokenAddress;
+      const expectedReceiveAddress = intent.side === "buy" ? tokenAddress : USDG_ADDRESS;
+      if (
+        gate.quote.pay.address.toLowerCase() !== expectedPayAddress.toLowerCase()
+        || gate.quote.receive.address.toLowerCase() !== expectedReceiveAddress.toLowerCase()
+        || gate.quote.pay.ticker !== (intent.side === "buy" ? "USDG" : intent.asset)
+        || gate.quote.receive.ticker !== (intent.side === "buy" ? intent.asset : "USDG")
+      ) {
+        throw new Error("ActionLock returned a quote with unexpected settlement assets.");
+      }
+
+      let rawAmountIn: bigint;
+      let rawEstimatedOut: bigint;
+      let rawMinimumOut: bigint;
+      let multiplierRaw: bigint;
+      try {
+        rawAmountIn = BigInt(gate.quote.pay.rawAmount);
+        rawEstimatedOut = BigInt(gate.quote.receive.rawEstimatedAmount);
+        rawMinimumOut = BigInt(gate.quote.receive.rawIndicativeMinimumAmount);
+        multiplierRaw = BigInt(gate.quote.uiScaling.multiplierRaw);
+      } catch {
+        throw new Error("ActionLock returned malformed raw execution amounts.");
+      }
+      if (rawAmountIn <= 0n || rawEstimatedOut <= 0n || rawMinimumOut <= 0n || rawMinimumOut > rawEstimatedOut || multiplierRaw <= 0n) {
+        throw new Error("ActionLock returned invalid execution bounds.");
+      }
+      const displayAmount = parseUnits(intent.amount, intent.side === "buy" ? USDG_DECIMALS : STOCK_TOKEN_DECIMALS);
+      const expectedRawAmount = intent.side === "buy" ? displayAmount : fromUiAmount(displayAmount, multiplierRaw);
+      if (rawAmountIn !== expectedRawAmount) {
+        throw new Error("ActionLock raw input does not match the ERC-8056 display amount.");
+      }
+      try {
+        if (!gate.issuerState.currentMultiplier || parseUnits(gate.issuerState.currentMultiplier, 18) !== multiplierRaw) {
+          throw new Error("mismatch");
+        }
+      } catch {
+        throw new Error("ActionLock multiplier sources are not bound to this quote.");
+      }
+
+      if (isV3RoutedAsset(intent.asset)) {
+        if (gate.quote.route.protocol !== "Uniswap V3" || gate.quote.route.fee !== V3_ROUTE_FEES[intent.asset] || gate.quote.route.tickSpacing !== null) {
+          throw new Error("ActionLock returned an unexpected V3 route.");
+        }
+      } else if (
+        gate.quote.route.protocol !== "Uniswap V4"
+        || !V4_POOL_CANDIDATES.some((route) => route.fee === gate.quote.route.fee && route.tickSpacing === gate.quote.route.tickSpacing)
+      ) {
+        throw new Error("ActionLock returned an unreviewed V4 route.");
+      }
+
+      const expiresAt = Date.parse(gate.quote.protection.dataExpiresAt);
+      if (!Number.isFinite(expiresAt) || expiresAt !== Date.parse(gate.policy.validUntil) || expiresAt <= Date.now() + 5_000) {
+        throw new Error("ActionLock quote expired before wallet handoff.");
+      }
+      setTransactionStep(`ActionLock clear · ${gate.fingerprint.slice(0, 22)}…`);
+      return gate;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw new Error("ActionLock timed out. The order is paused before any permission is requested.");
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
 
   useEffect(() => {
     if (!composerOpen || (kind !== "Buy" && kind !== "Sell")) return;
@@ -1146,9 +1297,16 @@ export default function Home() {
         const entries: Array<readonly [string, number]> = [];
         for (let index = 0; index < assetRegistry.length; index += 5) {
           const batch = await Promise.allSettled(assetRegistry.slice(index, index + 5).map(async (asset) => {
-            const token = new Contract(ROBINHOOD_TOKENS[asset.ticker], ERC20_ABI, provider);
-            const balance = await token.balanceOf(address) as bigint;
-            return [asset.ticker, Number(formatUnits(balance, STOCK_TOKEN_DECIMALS))] as const;
+            const tokenAddress = ROBINHOOD_TOKENS[asset.ticker];
+            const token = new Contract(tokenAddress, ERC20_ABI, provider);
+            const scaledToken = new Contract(tokenAddress, SCALED_UI_AMOUNT_ABI, provider);
+            const [balance, multiplierValue] = await Promise.all([
+              token.balanceOf(address) as Promise<bigint>,
+              scaledToken.uiMultiplier(),
+            ]);
+            const multiplier = BigInt(multiplierValue.toString());
+            const uiBalance = toUiAmount(balance, multiplier);
+            return [asset.ticker, Number(formatUnits(uiBalance, STOCK_TOKEN_DECIMALS))] as const;
           }));
           entries.push(...batch.flatMap((result) => result.status === "fulfilled" ? [result.value] : []));
         }
@@ -1384,6 +1542,15 @@ export default function Home() {
     url.searchParams.set("asset", ticker);
     window.history.pushState({}, "", `${url.pathname}${url.search}`);
     window.scrollTo({ top: 0, behavior: "auto" });
+  }
+
+  function openActionLock(ticker = "AAPL") {
+    setView("action-lock");
+    const url = new URL("/", window.location.origin);
+    url.searchParams.set("view", "action-lock");
+    if (isRoutedAsset(ticker)) url.searchParams.set("lockAsset", ticker);
+    window.history.pushState({}, "", `${url.pathname}${url.search}`);
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
   }
 
   function navigate(nextView: View) {
@@ -1622,32 +1789,13 @@ export default function Home() {
     if (gasBalance === 0n) throw new Error("A small ETH balance is required for Robinhood Chain gas.");
 
     track("quote_requested", { ticker: draftAsset, side: "buy", amount: draftAmount });
-    setTransactionStep("Finding the best live verified quote…");
-    const quote = isV3RoutedAsset(draftAsset)
-      ? await (async () => {
-          const quoter = new Contract(V3_QUOTER_ADDRESS, V3_QUOTER_ABI, provider);
-          const fee = V3_ROUTE_FEES[draftAsset];
-          const result = await quoter.quoteExactInputSingle.staticCall({
-            tokenIn: USDG_ADDRESS,
-            tokenOut: tokenOutAddress,
-            amountIn,
-            fee,
-            sqrtPriceLimitX96: 0,
-          }) as readonly [bigint, bigint, bigint, bigint];
-          const amountOut = BigInt(result[0]);
-          if (amountOut <= 0n) throw new Error("No live full-fill V3 quote is available for this amount.");
-          return { protocol: "V3" as const, fee, amountOut };
-        })()
-      : await getBestV4Quote(provider, USDG_ADDRESS, tokenOutAddress, amountIn).then((result) => ({ protocol: "V4" as const, ...result }));
-    const minAmountOut = quote.amountOut * BigInt(10_000 - slippageBps) / 10_000n;
-    if (minAmountOut <= 0n) throw new Error("The protected output is zero.");
-    calculateOracleDeviation({
+    const actionLockIntent: ActionLockGate["intent"] = {
+      asset: draftAsset,
       side: "buy",
-      inputAmount: formatUnits(amountIn, USDG_DECIMALS),
-      outputAmount: formatUnits(quote.amountOut, STOCK_TOKEN_DECIMALS),
-      oraclePrice: priceBook[draftAsset]?.price ?? 0,
-    });
-    track("quote_received", { ticker: draftAsset, side: "buy", protocol: quote.protocol });
+      amount: draftAmount,
+      slippageBps,
+    };
+    let actionLock = await runActionLockGate(actionLockIntent);
 
     const currentAllowance = BigInt(await usdG.allowance(address, PERMIT2_ADDRESS));
     if (currentAllowance < amountIn) {
@@ -1656,6 +1804,7 @@ export default function Home() {
       setTransactionStep("Waiting for USDG approval confirmation…");
       const approvalReceipt = await approval.wait();
       if (!approvalReceipt || approvalReceipt.status !== 1) throw new Error("USDG approval was not confirmed.");
+      actionLock = await runActionLockGate(actionLockIntent);
     }
 
     const permit2 = new Contract(PERMIT2_ADDRESS, PERMIT2_ABI, provider);
@@ -1673,13 +1822,20 @@ export default function Home() {
       PERMIT2_TYPES,
       permit,
     );
-    const calldata = quote.protocol === "V3"
+    actionLock = await runActionLockGate(actionLockIntent);
+    const executionQuote = actionLock.quote;
+    const quotedAmountIn = BigInt(executionQuote.pay.rawAmount);
+    const minAmountOut = BigInt(executionQuote.receive.rawIndicativeMinimumAmount);
+    if (quotedAmountIn !== amountIn) throw new Error("ActionLock input changed before signing.");
+    track("quote_received", { ticker: draftAsset, side: "buy", protocol: executionQuote.route.protocol });
+    const executionDeadline = Math.floor(Date.now() / 1_000) + 300;
+    const calldata = executionQuote.route.protocol === "Uniswap V3"
       ? buildV3DirectBuyCalldata({
           tokenOut: tokenOutAddress,
           recipient: address,
           amountIn,
           minAmountOut,
-          fee: quote.fee,
+          fee: executionQuote.route.fee,
           permit,
           signature,
         })
@@ -1687,17 +1843,17 @@ export default function Home() {
           tokenOut: tokenOutAddress,
           amountIn,
           minAmountOut,
-          route: quote.route as PoolCandidate,
+          route: { fee: executionQuote.route.fee, tickSpacing: executionQuote.route.tickSpacing! } as PoolCandidate,
           permit,
           signature,
         });
 
     const router = new Contract(UNIVERSAL_ROUTER_ADDRESS, UNIVERSAL_ROUTER_ABI, signer);
     setTransactionStep("Simulating the protected buy…");
-    await router.execute.staticCall(calldata.commands, calldata.inputs, now + 300);
+    await router.execute.staticCall(calldata.commands, calldata.inputs, executionDeadline);
     track("transaction_started", { ticker: draftAsset, side: "buy" });
     setTransactionStep(`Confirm the ${draftAsset} buy in your wallet…`);
-    const transaction = await router.execute(calldata.commands, calldata.inputs, now + 300);
+    const transaction = await router.execute(calldata.commands, calldata.inputs, executionDeadline);
     recordBasketLeg("submitted", transaction.hash);
     if (basketLegInFlight) {
       const persisted = writePendingBasketTransaction({
@@ -1759,7 +1915,7 @@ export default function Home() {
       id: strategyId, name: draftName, kind: "Buy", asset: draftAsset,
       rule: `Buy once with ${draftAmount} USDG`, detail: "Receipt confirmed · balance reconciliation pending", status: "Confirmed",
       budget: `${Number(draftAmount).toFixed(2)} USDG`, expires: "Completed", createdAt: Date.now(), txHash: receipt.hash,
-      walletAddress: address.toLowerCase(), inputAmount: Number(draftAmount),
+      walletAddress: address.toLowerCase(), inputAmount: Number(draftAmount), actionLockFingerprint: actionLock.fingerprint,
     }, ...current]);
     setComposerOpen(false);
     track("transaction_confirmed", { ticker: draftAsset, side: "buy" });
@@ -1770,7 +1926,8 @@ export default function Home() {
         const outputAfter = BigInt(await outputToken.balanceOf(address));
         const received = outputAfter - outputBefore;
         if (received > 0n) {
-          const outputAmount = Number(formatUnits(received, STOCK_TOKEN_DECIMALS));
+          const uiReceived = toUiAmount(received, BigInt(actionLock.quote.uiScaling.multiplierRaw));
+          const outputAmount = Number(formatUnits(uiReceived, STOCK_TOKEN_DECIMALS));
           setStrategies((current) => current.map((strategy) => strategy.id === strategyId
             ? { ...strategy, detail: `${outputAmount.toFixed(6)} ${draftAsset} received`, outputAmount }
             : strategy));
@@ -1799,8 +1956,8 @@ export default function Home() {
   async function executeDirectSell(provider: BrowserProvider, address: string) {
     if (!isRoutedAsset(draftAsset)) throw new Error(`${draftAsset} is watch-only until a full-fill route passes.`);
     if (priceBook[draftAsset]?.status !== "live") throw new Error(`${draftAsset} oracle is not live. The sell is blocked.`);
-    const amountIn = parseUnits(draftAmount, STOCK_TOKEN_DECIMALS);
-    if (amountIn <= 0n || amountIn > MAX_UINT128) throw new Error(`Enter a valid ${draftAsset} amount.`);
+    const displayAmountIn = parseUnits(draftAmount, STOCK_TOKEN_DECIMALS);
+    if (displayAmountIn <= 0n || displayAmountIn > MAX_UINT128) throw new Error(`Enter a valid ${draftAsset} amount.`);
     const slippageBps = Math.round(Number(draftSlippage) * 100);
     if (!Number.isInteger(slippageBps) || slippageBps < 1 || slippageBps > 500) throw new Error("Slippage must be between 0.01% and 5.00%.");
 
@@ -1813,36 +1970,21 @@ export default function Home() {
       provider.getBalance(address),
       usdG.balanceOf(address) as Promise<bigint>,
     ]);
-    if (tokenBalance < amountIn) throw new Error(`Wallet balance is ${formatUnits(tokenBalance, STOCK_TOKEN_DECIMALS)} ${draftAsset}.`);
     if (gasBalance === 0n) throw new Error("A small ETH balance is required for Robinhood Chain gas.");
 
     track("quote_requested", { ticker: draftAsset, side: "sell", amount: draftAmount });
-    setTransactionStep("Finding the best live verified sell quote…");
-    const quote = isV3RoutedAsset(draftAsset)
-      ? await (async () => {
-          const quoter = new Contract(V3_QUOTER_ADDRESS, V3_QUOTER_ABI, provider);
-          const fee = V3_ROUTE_FEES[draftAsset];
-          const result = await quoter.quoteExactInputSingle.staticCall({
-            tokenIn: tokenInAddress,
-            tokenOut: USDG_ADDRESS,
-            amountIn,
-            fee,
-            sqrtPriceLimitX96: 0,
-          }) as readonly [bigint, bigint, bigint, bigint];
-          const amountOut = BigInt(result[0]);
-          if (amountOut <= 0n) throw new Error("No live full-fill V3 sell quote is available for this amount.");
-          return { protocol: "V3" as const, fee, amountOut };
-        })()
-      : await getBestV4Quote(provider, tokenInAddress, USDG_ADDRESS, amountIn).then((result) => ({ protocol: "V4" as const, ...result }));
-    const minAmountOut = quote.amountOut * BigInt(10_000 - slippageBps) / 10_000n;
-    if (minAmountOut <= 0n) throw new Error("The protected USDG output is zero.");
-    calculateOracleDeviation({
+    const actionLockIntent: ActionLockGate["intent"] = {
+      asset: draftAsset,
       side: "sell",
-      inputAmount: formatUnits(amountIn, STOCK_TOKEN_DECIMALS),
-      outputAmount: formatUnits(quote.amountOut, USDG_DECIMALS),
-      oraclePrice: priceBook[draftAsset]?.price ?? 0,
-    });
-    track("quote_received", { ticker: draftAsset, side: "sell", protocol: quote.protocol });
+      amount: draftAmount,
+      slippageBps,
+    };
+    let actionLock = await runActionLockGate(actionLockIntent);
+    const amountIn = BigInt(actionLock.quote.pay.rawAmount);
+    const uiTokenBalance = toUiAmount(tokenBalance, BigInt(actionLock.quote.uiScaling.multiplierRaw));
+    if (tokenBalance < amountIn) {
+      throw new Error(`Wallet balance is ${formatUnits(uiTokenBalance, STOCK_TOKEN_DECIMALS)} ${draftAsset} (ERC-8056 display amount).`);
+    }
 
     const currentAllowance = BigInt(await inputToken.allowance(address, PERMIT2_ADDRESS));
     if (currentAllowance < amountIn) {
@@ -1850,6 +1992,10 @@ export default function Home() {
       const approval = await inputToken.approve(PERMIT2_ADDRESS, amountIn);
       const approvalReceipt = await approval.wait();
       if (!approvalReceipt || approvalReceipt.status !== 1) throw new Error(`${draftAsset} approval was not confirmed.`);
+      actionLock = await runActionLockGate(actionLockIntent);
+      if (BigInt(actionLock.quote.pay.rawAmount) !== amountIn) {
+        throw new Error("The ERC-8056 raw input changed after approval. Run the sell again.");
+      }
     }
 
     const permit2 = new Contract(PERMIT2_ADDRESS, PERMIT2_ABI, provider);
@@ -1866,16 +2012,32 @@ export default function Home() {
       PERMIT2_TYPES,
       permit,
     );
-    const calldata = quote.protocol === "V3"
-      ? buildV3ExactInputCalldata({ tokenIn: tokenInAddress, tokenOut: USDG_ADDRESS, recipient: address, amountIn, minAmountOut, fee: quote.fee, permit, signature })
-      : buildV4ExactInputCalldata({ tokenIn: tokenInAddress, tokenOut: USDG_ADDRESS, amountIn, minAmountOut, route: quote.route as PoolCandidate, permit, signature });
+    actionLock = await runActionLockGate(actionLockIntent);
+    const executionQuote = actionLock.quote;
+    if (BigInt(executionQuote.pay.rawAmount) !== amountIn) {
+      throw new Error("The ERC-8056 raw input changed before execution. Run the sell again.");
+    }
+    const minAmountOut = BigInt(executionQuote.receive.rawIndicativeMinimumAmount);
+    track("quote_received", { ticker: draftAsset, side: "sell", protocol: executionQuote.route.protocol });
+    const executionDeadline = Math.floor(Date.now() / 1_000) + 300;
+    const calldata = executionQuote.route.protocol === "Uniswap V3"
+      ? buildV3ExactInputCalldata({ tokenIn: tokenInAddress, tokenOut: USDG_ADDRESS, recipient: address, amountIn, minAmountOut, fee: executionQuote.route.fee, permit, signature })
+      : buildV4ExactInputCalldata({
+          tokenIn: tokenInAddress,
+          tokenOut: USDG_ADDRESS,
+          amountIn,
+          minAmountOut,
+          route: { fee: executionQuote.route.fee, tickSpacing: executionQuote.route.tickSpacing! } as PoolCandidate,
+          permit,
+          signature,
+        });
 
     const router = new Contract(UNIVERSAL_ROUTER_ADDRESS, UNIVERSAL_ROUTER_ABI, signer);
     setTransactionStep("Simulating the protected sell…");
-    await router.execute.staticCall(calldata.commands, calldata.inputs, now + 300);
+    await router.execute.staticCall(calldata.commands, calldata.inputs, executionDeadline);
     track("transaction_started", { ticker: draftAsset, side: "sell" });
     setTransactionStep(`Confirm the ${draftAsset} sell in your wallet…`);
-    const transaction = await router.execute(calldata.commands, calldata.inputs, now + 300);
+    const transaction = await router.execute(calldata.commands, calldata.inputs, executionDeadline);
     setTransactionStep("Waiting for mainnet confirmation…");
     const receipt = await transaction.wait();
     if (!receipt || receipt.status !== 1) throw new Error("The sell was not confirmed.");
@@ -1889,7 +2051,7 @@ export default function Home() {
       rule: `Sell ${draftAmount} ${draftAsset}`, detail: `${Number(formatUnits(received, USDG_DECIMALS)).toFixed(2)} USDG received`, status: "Confirmed",
       budget: `${draftAmount} ${draftAsset}`, expires: "Completed", createdAt: Date.now(), txHash: receipt.hash,
       walletAddress: address.toLowerCase(),
-      inputAmount: Number(draftAmount), outputAmount: Number(formatUnits(received, USDG_DECIMALS)),
+      inputAmount: Number(draftAmount), outputAmount: Number(formatUnits(received, USDG_DECIMALS)), actionLockFingerprint: actionLock.fingerprint,
     }, ...current]);
     await refreshWalletBalances(address, provider);
     setComposerOpen(false);
@@ -2056,6 +2218,7 @@ export default function Home() {
   const navigation: Array<{ view: View; label: string }> = [
     { view: "overview", label: "Home" },
     { view: "assets", label: "Stock Tokens" },
+    { view: "action-lock", label: "ActionLock" },
     { view: "community", label: "Crypto" },
     { view: "agents", label: "Agents" },
     { view: "portfolio", label: "Portfolio" },
@@ -2113,6 +2276,7 @@ export default function Home() {
           walletUsdgBalance={walletUsdgBalance}
           walletEthBalance={walletBalance}
           onOpenMarkets={() => navigate("assets")}
+          onOpenActionLock={openActionLock}
           onOpenAsset={openAsset}
           onQuote={(ticker) => openComposer("Buy", ticker)}
           onWallet={handleWalletButton}
@@ -2184,6 +2348,7 @@ export default function Home() {
               <p>{selectedAsset.fullFill ? `Buy with USDG or sell ${selectedAsset.ticker} back to USDG through ${isV3RoutedAsset(selectedAsset.ticker) ? "the verified Uniswap V3 pool" : "the best reviewed Uniswap V4 pool"}. Every order uses an exact short-lived permission.` : selectedAsset.ticker === "MSFT" ? "A quote exists, but the full router fork test detected a partial fill. HoodFlow blocks the order until complete-input execution is verified." : "No reviewed USDG pool can currently fill the complete input. The asset remains indexed and monitored without exposing your wallet to a forced route."}</p>
               <div className="trade-route-facts"><div><span>NETWORK</span><strong>Robinhood Chain / 4663</strong></div><div><span>PAY</span><strong>USDG</strong></div><div><span>RECEIVE</span><strong>{selectedAsset.ticker} token</strong></div><div><span>ROUTE</span><strong>{selectedAsset.fullFill ? `${isV3RoutedAsset(selectedAsset.ticker) ? "V3" : "V4"} full-fill verified` : "Blocked"}</strong></div></div>
               <div className="asset-trade-actions"><button className="primary-action asset-trade-action" onClick={() => openComposer("Buy", selectedAsset.ticker)} disabled={!selectedAsset.fullFill || priceBook[selectedAsset.ticker]?.status !== "live"}>{selectedAsset.fullFill ? priceBook[selectedAsset.ticker]?.status === "live" ? `Buy ${selectedAsset.ticker}` : "Waiting for oracle" : "No safe route"}</button><button className="asset-sell-action" onClick={() => openComposer("Sell", selectedAsset.ticker)} disabled={!selectedAsset.fullFill || priceBook[selectedAsset.ticker]?.status !== "live"}>Sell to USDG</button></div>
+              {selectedAsset.fullFill && <button className="asset-action-lock" onClick={() => openActionLock(selectedAsset.ticker)}>Run ActionLock before connecting →</button>}
               {!connected && selectedAsset.fullFill && <button className="connect-inline" onClick={handleWalletButton}>Connect wallet first</button>}
             </aside>
           </div>
@@ -2198,6 +2363,8 @@ export default function Home() {
       )}
 
       {view === "community" && <CommunityTokens walletAddress={walletAddress} walletProvider={walletProvider} onWallet={handleWalletButton} notify={notify} onTradeConfirmed={qualifyReferral} />}
+
+      {view === "action-lock" && <ActionLockWorkspace />}
 
       {view === "agents" && <AgentsWorkspace
         onOpenMarket={openAgentMarket}
@@ -2275,7 +2442,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Release 0.11.1</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("agents")}>Agents</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Release 0.12.0</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("action-lock")}>ActionLock</button><button onClick={() => navigate("agents")}>Agents</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) closeComposer(); }}>
@@ -2310,7 +2477,7 @@ export default function Home() {
           <div className="composer-head"><div><p className="eyebrow">MAINNET ORDER</p><h2>{selectedStrategy.name}</h2></div><button onClick={() => setSelectedStrategy(null)} disabled={onchainBusy}>x</button></div>
           <div className="order-status-hero"><Mark ticker={selectedStrategy.asset} /><div><strong>{selectedStrategy.status}</strong><span>{selectedStrategy.detail}</span></div></div>
           <div className="health-checks"><div><span>Network</span><strong>Robinhood Chain <b>4663</b></strong></div><div><span>Order type</span><strong>{selectedStrategy.kind} <b>ONCHAIN</b></strong></div><div><span>Asset</span><strong>{selectedStrategy.asset} <b>ONLY</b></strong></div><div><span>Created</span><strong>{new Date(selectedStrategy.createdAt).toLocaleString()}</strong></div></div>
-          <div className="permission-summary"><p><span>Rule</span><strong>{selectedStrategy.rule}</strong></p><p><span>Spending cap</span><strong>{selectedStrategy.budget}</strong></p><p><span>Permission expires</span><strong>{selectedStrategy.expires}</strong></p></div>
+          <div className="permission-summary"><p><span>Rule</span><strong>{selectedStrategy.rule}</strong></p><p><span>Spending cap</span><strong>{selectedStrategy.budget}</strong></p><p><span>Permission expires</span><strong>{selectedStrategy.expires}</strong></p>{selectedStrategy.actionLockFingerprint ? <p><span>ActionLock passport</span><strong>{selectedStrategy.actionLockFingerprint}</strong></p> : null}</div>
           {selectedStrategy.txHash ? <a className="drawer-action receipt-link" href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${selectedStrategy.txHash}`} target="_blank" rel="noreferrer">View mainnet receipt ↗</a> : null}
           {selectedStrategy.kind === "DCA" && selectedStrategy.chainStrategyId && selectedStrategy.status !== "Cancelled" && <button type="button" className="drawer-action" onClick={() => void cancelOnchainStrategy(selectedStrategy.id)} disabled={onchainBusy}>{onchainBusy ? "Cancelling…" : "Cancel strategy onchain"}</button>}
         </section>

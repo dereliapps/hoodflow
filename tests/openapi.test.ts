@@ -43,6 +43,7 @@ test("publishes a complete OpenAPI 3.1.2 read/preflight contract", () => {
 
   const paths = document.paths as JsonObject;
   assert.deepEqual(Object.keys(paths).sort(), [
+    "/api/action-lock",
     "/api/agents/basket",
     "/api/agents/hoodflow",
     "/api/agents/markets",
@@ -51,7 +52,7 @@ test("publishes a complete OpenAPI 3.1.2 read/preflight contract", () => {
   assert.ok(Object.keys(paths).every((path) => !/execute|sign|submit|send|swap/i.test(path)));
 
   const operationIds = collectValuesForKey(paths, "operationId");
-  assert.equal(operationIds.length, 4);
+  assert.equal(operationIds.length, 5);
   assert.equal(new Set(operationIds).size, operationIds.length);
 
   const safety = document["x-hoodflow-safety"] as JsonObject;
@@ -64,6 +65,40 @@ test("publishes a complete OpenAPI 3.1.2 read/preflight contract", () => {
   assert.doesNotMatch(
     serialized,
     /"(?:privateKey|private_key|calldata|signedTransaction|sendTransaction)"\s*:/i,
+  );
+});
+
+test("publishes ActionLock as a bounded read/preflight endpoint", () => {
+  const document = buildHoodFlowOpenApiDocument() as never as {
+    paths: {
+      "/api/action-lock": {
+        post: {
+          requestBody: { content: { "application/json": { schema: { $ref: string } } } };
+          responses: { "200": { content: { "application/json": { schema: { $ref: string } } } } };
+          "x-hoodflow-safety": Record<string, unknown>;
+        };
+      };
+    };
+    components: { schemas: { ActionLockPassport: Record<string, unknown> } };
+  };
+
+  const actionLock = document.paths["/api/action-lock"].post;
+  assert.equal(
+    actionLock.requestBody.content["application/json"].schema.$ref,
+    "#/components/schemas/QuoteRequest",
+  );
+  assert.equal(
+    actionLock.responses["200"].content["application/json"].schema.$ref,
+    "#/components/schemas/ActionLockPassport",
+  );
+  assert.equal(actionLock["x-hoodflow-safety"].custody, false);
+  assert.equal(actionLock["x-hoodflow-safety"].signing, false);
+  assert.equal(actionLock["x-hoodflow-safety"].submission, false);
+  assert.equal(actionLock["x-hoodflow-safety"].executionBinding, "none-preflight-only");
+  assert.equal(document.components.schemas.ActionLockPassport.additionalProperties, false);
+  assert.deepEqual(
+    (document.components.schemas.ActionLockPassport.properties as { decision: { enum: string[] } }).decision.enum,
+    ["clear", "watch", "blocked"],
   );
 });
 

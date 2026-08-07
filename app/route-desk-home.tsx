@@ -22,6 +22,7 @@ type RouteDeskHomeProps = {
   walletUsdgBalance: string;
   walletEthBalance: string;
   onOpenMarkets: () => void;
+  onOpenActionLock: (ticker: string) => void;
   onOpenAsset: (ticker: string) => void;
   onQuote: (ticker: string) => void;
   onWallet: () => void;
@@ -47,6 +48,7 @@ export default function RouteDeskHome({
   walletUsdgBalance,
   walletEthBalance,
   onOpenMarkets,
+  onOpenActionLock,
   onOpenAsset,
   onQuote,
   onWallet,
@@ -78,6 +80,13 @@ export default function RouteDeskHome({
           <div><span>Current block</span><strong>#{networkBlock}</strong><small>mainnet / 4663</small></div>
         </div>
       </header>
+
+      <button type="button" className="action-lock-home" onClick={() => onOpenActionLock(selected?.ticker ?? "AAPL")}>
+        <span><i /> NEW / ACTIONLOCK</span>
+        <strong>If the token changes, the quote dies.</strong>
+        <p>Check corporate actions, multiplier windows, trading halts, canonical deployment and route safety in one portable passport with a content checksum.</p>
+        <b>Run a wallet-free preflight <em>→</em></b>
+      </button>
 
       <section className="market-terminal" aria-label="Live route desk">
         <header className="market-terminal-bar">

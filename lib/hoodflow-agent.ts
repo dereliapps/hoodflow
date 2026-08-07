@@ -4,6 +4,7 @@ import {
   ROBINHOOD_MAINNET,
   ROBINHOOD_TOKENS,
   ROUTED_ASSETS,
+  SCALED_UI_AMOUNT_ABI,
   STOCK_TOKEN_DECIMALS,
   USDG_ADDRESS,
   USDG_DECIMALS,
@@ -14,7 +15,9 @@ import {
   V4_QUOTER_ABI,
   V4_QUOTER_ADDRESS,
   buildExactInputQuoteParams,
+  fromUiAmount,
   isV3RoutedAsset,
+  toUiAmount,
 } from "@/lib/hoodflow-mainnet";
 import {
   buildRobinhoodPriceRequests,
@@ -61,6 +64,12 @@ export type AgentQuote = {
   route: { protocol: "Uniswap V3" | "Uniswap V4"; fee: number; feeBps: number; tickSpacing: number | null; gasEstimate: string | null };
   protection: { slippageBps: number; dataExpiresAt: string; executionBinding: "none-requote-required" };
   reference: { status: "live"; price: number; impliedDexPrice: number; deviationBps: number; maxDeviationBps: number; updatedAt: number; heartbeat: number; oraclePaused: false };
+  uiScaling: {
+    standard: "ERC-8056";
+    multiplier: string;
+    multiplierRaw: string;
+    rawOperations: true;
+  };
   custody: "self-custody";
   requiresUserSignature: true;
   executionHandoff: { marketPath: string; marketUrl: string; intent: AgentQuoteRequest; instruction: string };
@@ -235,6 +244,13 @@ async function readLiveReference(provider: JsonRpcProvider, asset: string): Prom
   return { ...point, status: "live", price: point.price, updatedAt: point.updatedAt, oraclePaused: false };
 }
 
+async function readUiMultiplier(provider: JsonRpcProvider, asset: string) {
+  const token = new Contract(ROBINHOOD_TOKENS[asset], SCALED_UI_AMOUNT_ABI, provider);
+  const multiplier = BigInt((await withTimeout(token.uiMultiplier())).toString());
+  if (multiplier <= 0n) throw new AgentQuoteUnavailableError("The ERC-8056 UI multiplier is invalid.");
+  return multiplier;
+}
+
 async function readRouteQuote(provider: JsonRpcProvider, request: AgentQuoteRequest, amountIn: bigint): Promise<RouteQuote> {
   const tokenAddress = ROBINHOOD_TOKENS[request.asset];
   const tokenIn = request.side === "buy" ? USDG_ADDRESS : tokenAddress;
@@ -281,17 +297,26 @@ export async function prepareAgentQuote(request: AgentQuoteRequest): Promise<Age
   const tokenAddress = ROBINHOOD_TOKENS[request.asset];
   const inputDecimals = request.side === "buy" ? USDG_DECIMALS : STOCK_TOKEN_DECIMALS;
   const outputDecimals = request.side === "buy" ? STOCK_TOKEN_DECIMALS : USDG_DECIMALS;
-  const amountIn = parseUnits(request.amount, inputDecimals);
+  const displayAmountIn = parseUnits(request.amount, inputDecimals);
+  let amountIn: bigint | null = null;
+  let uiMultiplier: bigint | null = null;
   let routeQuote: RouteQuote | null = null;
   let liveReference: Awaited<ReturnType<typeof readLiveReference>> | null = null;
 
   for (const rpcUrl of configuredRpcUrls().slice(0, 3)) {
     const provider = new JsonRpcProvider(rpcUrl, ROBINHOOD_MAINNET.chainIdNumber, { staticNetwork: true });
     try {
+      const candidateMultiplier = await readUiMultiplier(provider, request.asset);
+      const candidateAmountIn = request.side === "buy"
+        ? displayAmountIn
+        : fromUiAmount(displayAmountIn, candidateMultiplier);
+      if (candidateAmountIn <= 0n) throw new AgentQuoteUnavailableError("The ERC-8056 raw input amount rounds to zero.");
       [routeQuote, liveReference] = await Promise.all([
-        readRouteQuote(provider, request, amountIn),
+        readRouteQuote(provider, request, candidateAmountIn),
         readLiveReference(provider, request.asset),
       ]);
+      amountIn = candidateAmountIn;
+      uiMultiplier = candidateMultiplier;
       break;
     } catch {
       // Continue to the next configured endpoint. A public error never exposes RPC credentials.
@@ -299,14 +324,24 @@ export async function prepareAgentQuote(request: AgentQuoteRequest): Promise<Age
       provider.destroy();
     }
   }
-  if (!routeQuote || !liveReference) throw new AgentQuoteUnavailableError("A fresh onchain route is temporarily unavailable.");
+  if (!routeQuote || !liveReference || amountIn === null || uiMultiplier === null) {
+    throw new AgentQuoteUnavailableError("A fresh onchain route is temporarily unavailable.");
+  }
 
   const minimumOut = routeQuote.amountOut * BigInt(10_000 - request.slippageBps) / 10_000n;
   if (minimumOut <= 0n) throw new AgentQuoteUnavailableError("The protected minimum output is zero.");
-  const estimatedAmount = formatUnits(routeQuote.amountOut, outputDecimals);
+  const displayEstimatedOut = request.side === "buy"
+    ? toUiAmount(routeQuote.amountOut, uiMultiplier)
+    : routeQuote.amountOut;
+  const displayMinimumOut = request.side === "buy"
+    ? toUiAmount(minimumOut, uiMultiplier)
+    : minimumOut;
+  const estimatedAmount = formatUnits(displayEstimatedOut, outputDecimals);
   const referenceCheck = evaluateOracleDeviation({
     side: request.side,
-    inputAmount: formatUnits(amountIn, inputDecimals),
+    inputAmount: request.side === "buy"
+      ? formatUnits(amountIn, inputDecimals)
+      : formatUnits(displayAmountIn, inputDecimals),
     outputAmount: estimatedAmount,
     oraclePrice: liveReference.price,
   });
@@ -324,12 +359,18 @@ export async function prepareAgentQuote(request: AgentQuoteRequest): Promise<Age
     chain: { id: 4663, name: "Robinhood Chain" },
     asset: request.asset,
     side: request.side,
-    pay: { ticker: payTicker, address: payAddress, amount: formatUnits(amountIn, inputDecimals), rawAmount: amountIn.toString(), decimals: inputDecimals },
+    pay: {
+      ticker: payTicker,
+      address: payAddress,
+      amount: request.side === "buy" ? formatUnits(amountIn, inputDecimals) : formatUnits(displayAmountIn, inputDecimals),
+      rawAmount: amountIn.toString(),
+      decimals: inputDecimals,
+    },
     receive: {
       ticker: receiveTicker,
       address: receiveAddress,
       estimatedAmount,
-      indicativeMinimumAmount: formatUnits(minimumOut, outputDecimals),
+      indicativeMinimumAmount: formatUnits(displayMinimumOut, outputDecimals),
       rawEstimatedAmount: routeQuote.amountOut.toString(),
       rawIndicativeMinimumAmount: minimumOut.toString(),
       decimals: outputDecimals,
@@ -351,6 +392,12 @@ export async function prepareAgentQuote(request: AgentQuoteRequest): Promise<Age
       updatedAt: liveReference.updatedAt,
       heartbeat: liveReference.heartbeat,
       oraclePaused: false,
+    },
+    uiScaling: {
+      standard: "ERC-8056",
+      multiplier: formatUnits(uiMultiplier, 18),
+      multiplierRaw: uiMultiplier.toString(),
+      rawOperations: true,
     },
     custody: "self-custody",
     requiresUserSignature: true,

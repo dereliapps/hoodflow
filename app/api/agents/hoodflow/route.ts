@@ -55,6 +55,30 @@ export async function GET() {
           output: "Indicative route check plus an exact-intent HoodFlow handoff. HoodFlow requotes before final wallet confirmation.",
         },
         {
+          id: "hoodflow.prepare-action-lock",
+          name: "ActionLock",
+          description: "Inspect canonical token identity, corporate-action and multiplier risk, plus available halt or pause signals. This read-only preflight never signs or submits.",
+          method: "POST",
+          endpoint: `${origin}/api/action-lock`,
+          inputSchema: {
+            type: "object",
+            required: ["asset", "side", "amount"],
+            properties: {
+              asset: { type: "string", description: "Route-reviewed HoodFlow ticker, for example AAPL." },
+              side: { type: "string", enum: ["buy", "sell"] },
+              amount: { type: "string", description: "USDG for buys; Stock Token units for sells." },
+              slippageBps: { type: "integer", minimum: 1, maximum: 500, default: 50 },
+            },
+          },
+          checks: [
+            "canonical-token-address",
+            "corporate-action-status",
+            "token-multiplier",
+            "halt-and-pause-signals",
+          ],
+          output: "A downloadable ActionLock passport with explicit pass, block or unknown checks. It is not proof of execution or settlement.",
+        },
+        {
           id: "hoodflow.prepare-stock-token-basket",
           description: "Allocate one USDG budget across two to six reviewed markets and preflight every leg. The plan is non-atomic and never auto-submits.",
           method: "POST",
@@ -94,6 +118,7 @@ export async function GET() {
       preflightDataTtlSeconds: 75,
       maxOracleDeviationBps: MAX_ORACLE_DEVIATION_BPS,
       note: "HoodFlow's public agent surface prepares execution. It does not hold funds, request private keys, or sign for the user.",
+      actionLock: "Read/preflight only. Official corporate-action and halt data can be incomplete or delayed; a passport is not proof of execution.",
     },
     virtualsAcp: {
       integrationMode: "registered public resource provider",
@@ -112,7 +137,7 @@ export async function GET() {
         },
       ],
       signerConfigured: false,
-      claim: "HoodFlow is registered on EconomyOS with two public, read-only ACP resources. Quote and basket preflights remain direct API actions and always hand execution back to the user.",
+      claim: "HoodFlow is registered on EconomyOS with two public, read-only ACP resources. Quote, ActionLock and basket preflights remain direct API actions and always hand execution back to the user.",
     },
   }, {
     headers: {
