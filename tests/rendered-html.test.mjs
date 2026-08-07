@@ -229,13 +229,16 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(agents, /Let an agent find the route/);
   assert.match(agents, /You keep the signature/);
   assert.match(agents, /AGENT API LIVE/);
-  assert.match(agents, /Virtuals ACP resource not yet published/);
+  assert.match(agents, /2 EconomyOS resources published/);
   assert.match(agents, /NOT EXECUTION-BOUND/);
   assert.match(agents, /View API guide/);
   assert.match(agents, /href="\/docs#agents"/);
   assert.match(agents, /Stock Tokens are not shares/);
   assert.doesNotMatch(agents, /Not affiliated with or endorsed by Robinhood Markets/);
   assert.match(agents, /dataExpiresAt/);
+  assert.match(docs, /two public, read-only ACP resources/);
+  assert.match(docs, /no EconomyOS signer or transaction permission is configured/);
+  assert.doesNotMatch(docs, /not claiming a live Virtuals ACP registry listing/i);
   assert.match(agents, /ONE-COPY AGENT CONNECTOR/);
   assert.match(agents, /DETERMINISTIC BASKET AGENT/);
   assert.match(agents, /PREPARE_WEIGHTED_BASKET/);
@@ -255,7 +258,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(agentManifest, /preflightActions/);
   assert.match(agentManifest, /streamable-http/);
   assert.match(agentManifest, /prepare-stock-token-basket/);
-  assert.match(agentManifest, /registryStatus: "not-published"/);
+  assert.match(agentManifest, /registryStatus: "published"/);
+  assert.match(agentManifest, /019fdd55-ee5f-72b6-b06e-4dd67502ed4d/);
+  assert.match(agentManifest, /signerConfigured: false/);
   assert.match(agentMarkets, /finalWalletConfirmationRequired: true/);
   assert.match(agentQuoteRoute, /RATE_LIMIT = 30/);
   assert.match(agentQuoteRoute, /acquireLocalAgentQuoteCapacity/);

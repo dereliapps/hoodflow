@@ -346,7 +346,7 @@ export default function AgentsWorkspace({
       <div className="agents-disclosure"><span>Stock Tokens are not shares and may be restricted in your jurisdiction. Review eligibility and product risks before transacting.</span></div>
       <header className="agents-hero">
         <div className="agents-hero-copy">
-          <div className="agents-status-line"><span><i /> PUBLIC AGENT API LIVE</span><b>Virtuals ACP resource not yet published</b></div>
+          <div className="agents-status-line"><span><i /> PUBLIC AGENT API LIVE</span><b>2 EconomyOS resources published</b></div>
           <p className="eyebrow">HOODFLOW FOR AGENTS</p>
           <h1>Let an agent find the route.<br /><em>You keep the signature.</em></h1>
           <p>Give an AI agent a structured market registry and a bounded preflight action. HoodFlow checks reviewed Robinhood Chain liquidity, rejects unsafe oracle deviation, then carries the exact intent into a fresh wallet-confirmed order.</p>
@@ -523,7 +523,7 @@ export default function AgentsWorkspace({
         </div>
       </section>
 
-      <div className="agents-trust-note"><strong>What is not being claimed</strong><p>HoodFlow is not yet listed as a live Virtuals ACP provider. The public resource and quote-preflight surface are ready; registry onboarding, commercial terms and any future scoped agent signer remain separate release gates.</p></div>
+      <div className="agents-trust-note"><strong>Published with a hard boundary</strong><p>HoodFlow is registered on EconomyOS with two public, read-only ACP resources. Quote and basket preflights stay on HoodFlow&apos;s direct API, and no agent signer is configured: every transaction still ends with the user&apos;s wallet confirmation.</p></div>
     </section>
   );
 }

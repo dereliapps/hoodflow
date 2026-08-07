@@ -38,7 +38,7 @@ HoodFlow exposes public REST, OpenAPI 3.1.2, and stateless Streamable HTTP MCP s
 - [`GET /openapi.json`](https://hoodflow.app/openapi.json) — machine-readable REST contract.
 - [`GET /api/agents/hoodflow`](https://hoodflow.app/api/agents/hoodflow) — capability manifest and input schema.
 
-The API surface is ready for provider onboarding, but HoodFlow is not yet published as a live Virtuals ACP provider. Registry publication, commercial terms, and any future scoped agent signer remain separate release gates.
+HoodFlow is registered on EconomyOS as a public resource provider with two read-only ACP resources: the Agent Manifest and Reviewed Markets. Quote and basket preflights remain direct HoodFlow API actions; no EconomyOS signer or transaction permission is configured. Commercial offerings, terms, and any future scoped signer remain separate release gates.
 
 ## Why the launchpad adapter exists
 

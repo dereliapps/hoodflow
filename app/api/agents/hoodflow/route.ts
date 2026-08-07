@@ -96,9 +96,23 @@ export async function GET() {
       note: "HoodFlow's public agent surface prepares execution. It does not hold funds, request private keys, or sign for the user.",
     },
     virtualsAcp: {
-      integrationMode: "API-only provider candidate",
-      registryStatus: "not-published",
-      claim: "The resource and preflight API are ready for provider onboarding; no live ACP listing is claimed yet.",
+      integrationMode: "registered public resource provider",
+      registryStatus: "published",
+      agentId: "019fdd55-ee5f-72b6-b06e-4dd67502ed4d",
+      resources: [
+        {
+          id: "019fdd57-7db9-780f-9d9f-01b89e626b7e",
+          name: "HoodFlow Agent Manifest",
+          url: `${origin}/api/agents/hoodflow`,
+        },
+        {
+          id: "019fdd57-be0a-7331-a7fe-42d50768f70a",
+          name: "HoodFlow Reviewed Markets",
+          url: `${origin}/api/agents/markets`,
+        },
+      ],
+      signerConfigured: false,
+      claim: "HoodFlow is registered on EconomyOS with two public, read-only ACP resources. Quote and basket preflights remain direct API actions and always hand execution back to the user.",
     },
   }, {
     headers: {

@@ -13,7 +13,12 @@ HoodFlow also exposes a bounded, read-only agent surface:
 
 The quote endpoint validates the market, finds a reviewed Uniswap V3 or V4 route, checks a live oracle reference and maximum deviation, computes an indicative minimum output, and returns a 75-second handoff. It cannot connect a wallet, approve tokens, sign, or submit a transaction. HoodFlow requotes the intent before the user's wallet confirms it.
 
-This is an API-only provider candidate. It is not a published Virtuals ACP resource, an ACP job flow, or an EconomyOS Agent Wallet integration.
+HoodFlow is now registered in EconomyOS as a public resource provider. The published agent is `019fdd55-ee5f-72b6-b06e-4dd67502ed4d`, with two read-only ACP resources:
+
+- `HoodFlow Agent Manifest` (`019fdd57-7db9-780f-9d9f-01b89e626b7e`)
+- `HoodFlow Reviewed Markets` (`019fdd57-be0a-7331-a7fe-42d50768f70a`)
+
+The quote and basket preflights remain direct HoodFlow API actions because ACP resources do not encode POST method, body, or header contracts. No EconomyOS signer is configured: the agent cannot sign, hold funds, approve tokens, or submit transactions.
 
 ## What is live
 
