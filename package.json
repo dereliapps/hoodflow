@@ -37,7 +37,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openzeppelin/contracts": "^5.6.1",
-    "@privy-io/react-auth": "^3.35.1",
+    "@privy-io/react-auth": "^3.35.2",
     "@walletconnect/ethereum-provider": "^2.23.10",
     "drizzle-orm": "0.45.2",
     "ethers": "^6.17.0",
