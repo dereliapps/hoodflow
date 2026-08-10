@@ -23,7 +23,7 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(response.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
 
   const html = await response.text();
-  assert.match(html, /<title>HoodFlow \| Route first\. Sign second\.<\/title>/i);
+  assert.match(html, /<title>HoodFlow \| Stress the route\. Sign the fill\.<\/title>/i);
   assert.match(html, /Markets in focus\./);
   assert.match(html, /Routes in full view\./);
   assert.match(html, /Explore markets/);
@@ -90,6 +90,11 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
     readFile(new URL("../lib/fill-proof.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/route-desk.css", import.meta.url), "utf8"),
   ]);
+  const [depthMapUi, depthMapCss, depthMapLib] = await Promise.all([
+    readFile(new URL("../app/depth-map-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/depth-map-workspace.module.css", import.meta.url), "utf8"),
+    readFile(new URL("../lib/depth-map.ts", import.meta.url), "utf8"),
+  ]);
 
   assert.match(page, /"use client"/);
   assert.match(page, /createStrategy/);
@@ -148,7 +153,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(layout, /NEXT_PUBLIC_SITE_URL/);
   assert.doesNotMatch(layout, /next[/]headers|headers\(\)/);
   assert.match(page, /Automatic retries are active/);
-  assert.match(page, /Release 0\.13\.0/);
+  assert.match(page, /Release 0\.14\.0/);
   assert.match(page, /Open FillProof/);
   assert.match(page, /fillProofSnapshot/);
   assert.match(page, /DCA command center/);
@@ -160,6 +165,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(routeDeskHome, /MarketStatus/);
   assert.match(page, /label: "Crypto"/);
   assert.match(page, /label: "Agents"/);
+  assert.match(page, /label: "DepthMap"/);
+  assert.match(page, /view === "depth-map"/);
+  assert.match(page, /DepthMapWorkspace/);
   assert.match(page, /view === "agents"/);
   assert.match(page, /AgentsWorkspace/);
   assert.match(page, /openAgentMarket/);
@@ -174,6 +182,8 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(docs, /Buy a Stock Token with USDG/);
   assert.match(docs, /Sell a Stock Token back to USDG/);
   assert.match(docs, /Reference price versus execution quote/);
+  assert.match(docs, /Stress-test the route before opening an order/);
+  assert.match(docs, /highest sampled pass is not a maximum/i);
   assert.match(docs, /Common messages/);
   assert.match(docs, /Discover tokens by contract address/);
   assert.match(docs, /Connect once, keep execution human-controlled/);
@@ -246,6 +256,21 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(worker, /url\.pathname === "\/\.well-known\/api-catalog"/);
   assert.match(worker, /internalUrl\.pathname = "\/api-catalog"/);
   assert.match(analyticsClient, /\| "settlement_selected"/);
+  assert.match(analyticsClient, /\| "depth_scan_started"/);
+  assert.match(analyticsClient, /\| "depth_scan_completed"/);
+  assert.match(analyticsClient, /\| "depth_handoff_opened"/);
+  assert.match(depthMapUi, /DEPTHMAP \/ LIVE LIQUIDITY STRESS TEST/);
+  assert.match(depthMapUi, /fetch\("\/api\/agents\/quote"/);
+  assert.match(depthMapUi, /Promise\.all\(\[worker\(\), worker\(\)\]\)/);
+  assert.match(depthMapUi, /Highest sampled pass is not a maximum trade size/);
+  assert.match(depthMapUi, /HoodFlow does not interpolate between samples/);
+  assert.match(depthMapUi, /none-requote-required/);
+  assert.match(depthMapUi, /requiresUserSignature !== true/);
+  assert.match(depthMapLib, /\["10", "25", "100", "250", "1000"\]/);
+  assert.match(depthMapLib, /DEPTH_MAP_SCAN_COOLDOWN_MS = 30_000/);
+  assert.match(depthMapCss, /grid-template-columns: 250px minmax\(500px, 1fr\) 350px/);
+  assert.match(depthMapCss, /@media \(max-width: 720px\)/);
+  assert.doesNotMatch(depthMapCss, /(?:background|background-color):\s*(?:#fff(?:fff)?\b|white\b)/i);
   assert.match(agents, /HOODFLOW FOR AGENTS/);
   assert.match(agents, /Let an agent find the route/);
   assert.match(agents, /You keep the signature/);
@@ -355,7 +380,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(css, /\.agents-basket-shell/);
   assert.match(css, /\.basket-order-context/);
   assert.match(communityMarketRoute, /token-pairs\/v1\/robinhood/);
-  assert.match(layout, /HoodFlow \| Route first\. Sign second\./);
+  assert.match(layout, /HoodFlow \| Stress the route\. Sign the fill\./);
   assert.match(layout, /Instrument_Sans/);
   assert.match(layout, /IBM_Plex_Mono/);
   assert.match(layout, /summary_large_image/);

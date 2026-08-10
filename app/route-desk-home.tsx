@@ -22,7 +22,7 @@ type RouteDeskHomeProps = {
   walletUsdgBalance: string;
   walletEthBalance: string;
   onOpenMarkets: () => void;
-  onOpenActionLock: (ticker: string) => void;
+  onOpenDepthMap: () => void;
   onOpenAsset: (ticker: string) => void;
   onQuote: (ticker: string) => void;
   onWallet: () => void;
@@ -48,7 +48,7 @@ export default function RouteDeskHome({
   walletUsdgBalance,
   walletEthBalance,
   onOpenMarkets,
-  onOpenActionLock,
+  onOpenDepthMap,
   onOpenAsset,
   onQuote,
   onWallet,
@@ -66,8 +66,8 @@ export default function RouteDeskHome({
           <p className="terminal-eyebrow"><i /> Robinhood Chain execution terminal</p>
           <h1>Markets in focus.<br /><span>Routes in full view.</span></h1>
           <p className="terminal-deck">
-            Discover Stock Token markets, inspect live liquidity and review a protected USDG quote
-            before your self-custody wallet signs.
+            Stress-test live liquidity across five USDG sizes, inspect the protected route and keep
+            the final signature inside your self-custody wallet.
           </p>
           <div className="terminal-hero-actions">
             <button type="button" className="hf-primary" onClick={onOpenMarkets}>Explore markets</button>
@@ -81,11 +81,11 @@ export default function RouteDeskHome({
         </div>
       </header>
 
-      <button type="button" className="action-lock-home" onClick={() => onOpenActionLock(selected?.ticker ?? "AAPL")}>
-        <span><i /> NEW / ACTIONLOCK</span>
-        <strong>If the token changes, the quote dies.</strong>
-        <p>Check corporate actions, multiplier windows, trading halts, canonical deployment and route safety in one portable passport with a content checksum.</p>
-        <b>Run a wallet-free preflight <em>→</em></b>
+      <button type="button" className="action-lock-home" onClick={onOpenDepthMap}>
+        <span><i /> NEW / DEPTHMAP</span>
+        <strong>One quote can hide a weak route.</strong>
+        <p>Probe the same reviewed market at 10, 25, 100, 250 and 1,000 USDG. See every sampled pass, expiry and unavailable point before opening an order.</p>
+        <b>Stress-test live liquidity <em>→</em></b>
       </button>
 
       <section className="market-terminal" aria-label="Live route desk">

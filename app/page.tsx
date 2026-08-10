@@ -84,12 +84,13 @@ function WorkspaceLoader({ label }: { label: string }) {
 const CommunityTokens = dynamic(() => import("./community-tokens"), { ssr: false, loading: () => <WorkspaceLoader label="Loading crypto markets" /> });
 const AgentsWorkspace = dynamic(() => import("./agents-workspace"), { ssr: false, loading: () => <WorkspaceLoader label="Loading agent execution" /> });
 const ActionLockWorkspace = dynamic(() => import("./action-lock-workspace"), { ssr: false, loading: () => <WorkspaceLoader label="Loading ActionLock" /> });
+const DepthMapWorkspace = dynamic(() => import("./depth-map-workspace"), { ssr: false, loading: () => <WorkspaceLoader label="Loading DepthMap" /> });
 const FillProofReceipt = dynamic(() => import("./fill-proof-receipt"), { ssr: false });
 const AssetRequestBoard = dynamic(() => import("./asset-request-board"), { ssr: false, loading: () => <WorkspaceLoader label="Loading asset requests" /> });
 const ReferralRewards = dynamic(() => import("./referral-rewards"), { ssr: false, loading: () => <WorkspaceLoader label="Loading rewards" /> });
 const PrivyWalletRuntime = dynamic(() => import("./privy-wallet-runtime"), { ssr: false });
 
-type View = "overview" | "strategies" | "assets" | "asset" | "community" | "agents" | "action-lock" | "portfolio" | "rewards" | "marketplace" | "activity" | "controls";
+type View = "overview" | "strategies" | "assets" | "asset" | "community" | "agents" | "action-lock" | "depth-map" | "portfolio" | "rewards" | "marketplace" | "activity" | "controls";
 type StrategyKind = "Buy" | "Sell" | "DCA";
 type StrategyStatus = "Prepared" | "Paused" | "Confirmed" | "Cancelled";
 type MarketplaceSort = "featured" | "cadence" | "risk";
@@ -852,7 +853,7 @@ export default function Home() {
         setView("community");
       } else if (params.get("ref")) {
         setView("rewards");
-      } else if (requestedView && ["overview", "strategies", "assets", "community", "agents", "action-lock", "portfolio", "rewards", "marketplace", "activity", "controls"].includes(requestedView)) {
+      } else if (requestedView && ["overview", "strategies", "assets", "community", "agents", "action-lock", "depth-map", "portfolio", "rewards", "marketplace", "activity", "controls"].includes(requestedView)) {
         setView(requestedView);
       } else if (view === "asset") {
         setView("assets");
@@ -2279,6 +2280,7 @@ export default function Home() {
   const navigation: Array<{ view: View; label: string }> = [
     { view: "overview", label: "Home" },
     { view: "assets", label: "Stock Tokens" },
+    { view: "depth-map", label: "DepthMap" },
     { view: "action-lock", label: "ActionLock" },
     { view: "community", label: "Crypto" },
     { view: "agents", label: "Agents" },
@@ -2337,7 +2339,7 @@ export default function Home() {
           walletUsdgBalance={walletUsdgBalance}
           walletEthBalance={walletBalance}
           onOpenMarkets={() => navigate("assets")}
-          onOpenActionLock={openActionLock}
+          onOpenDepthMap={() => navigate("depth-map")}
           onOpenAsset={openAsset}
           onQuote={(ticker) => openComposer("Buy", ticker)}
           onWallet={handleWalletButton}
@@ -2427,6 +2429,21 @@ export default function Home() {
 
       {view === "action-lock" && <ActionLockWorkspace />}
 
+      {view === "depth-map" && <DepthMapWorkspace
+        markets={assetRegistry
+          .filter((market) => market.fullFill && market.ticker !== "SGOV")
+          .map((market) => ({
+            ticker: market.ticker,
+            name: market.name,
+            type: market.type as "Stock" | "ETF",
+            route: isV3RoutedAsset(market.ticker) ? ("V3" as const) : ("V4" as const),
+            price: priceBook[market.ticker]?.price ?? null,
+            priceStatus: priceBook[market.ticker]?.status ?? "unavailable",
+            priceUpdatedAt: priceBook[market.ticker]?.updatedAt ?? null,
+          }))}
+        onOpenMarket={openAgentMarket}
+      />}
+
       {view === "agents" && <AgentsWorkspace
         onOpenMarket={openAgentMarket}
         basketPlan={basketPlan}
@@ -2503,7 +2520,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Release 0.13.0</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("action-lock")}>ActionLock</button><button onClick={() => navigate("agents")}>Agents</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Release 0.14.0</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("depth-map")}>DepthMap</button><button onClick={() => navigate("action-lock")}>ActionLock</button><button onClick={() => navigate("agents")}>Agents</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) closeComposer(); }}>

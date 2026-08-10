@@ -10,7 +10,7 @@ import {
 
 export const metadata: Metadata = {
   title: "Documentation",
-  description: "Learn how to connect a wallet, inspect an ActionLock safety passport, buy and sell Stock Tokens, and understand HoodFlow quotes, permissions and route states.",
+  description: "Learn how to stress-test live liquidity with DepthMap, inspect ActionLock and FillProof records, and buy or sell Stock Tokens with a self-custody wallet.",
   alternates: { canonical: "/docs" },
 };
 
@@ -23,6 +23,7 @@ const sections = [
   ["quotes", "Prices and quotes"],
   ["permissions", "Wallet permissions"],
   ["routes", "Route states"],
+  ["depthmap", "DepthMap"],
   ["action-lock", "ActionLock"],
   ["fillproof", "FillProof"],
   ["agents", "Agent API"],
@@ -107,8 +108,21 @@ export default function DocsPage() {
           </div>
         </section>
 
+        <section id="depthmap" className="docs-section">
+          <p className="docs-kicker">07 / DEPTHMAP</p><h2>Stress-test the route before opening an order</h2>
+          <p><strong>DepthMap</strong> requests five separate, wallet-free Buy preflights for the selected reviewed market: 10, 25, 100, 250 and 1,000 USDG. Each sample uses the same 0.50% slippage setting, current oracle corridor and live DEX route checks as HoodFlow&apos;s agent preflight.</p>
+          <div className="docs-status-grid">
+            <article><b className="ready">SAMPLED PASS</b><p>The exact input returned a locally verified, unexpired indicative preflight. It is a point-in-time signal, not a guaranteed fill.</p></article>
+            <article><b className="unavailable">NO SAFE PREFLIGHT</b><p>No guarded result was promoted for that input. HoodFlow does not interpolate between missing points or guess the cause.</p></article>
+            <article><b className="watch">75-SECOND EXPIRY</b><p>Every DepthMap result expires quickly. An expired point loses its pass state and cannot open a prepared order.</p></article>
+            <article><b className="paused">NOT A MAXIMUM</b><p>The highest sampled pass is not a maximum trade size, liquidity promise or recommendation. Larger untested values remain unknown.</p></article>
+          </div>
+          <div className="docs-split"><article><span>BOUNDED WORKLOAD</span><h3>Five fixed points, two at a time</h3><p>The scanner runs only after a user click, checks at most two samples concurrently and applies a cooldown between scans. It never fans out across every market in the background.</p></article><article className="accent"><span>FRESH HANDOFF</span><h3>Carry the amount, then verify again</h3><p>Opening an order carries only the selected asset and amount. The trade screen requests a new executable quote and runs ActionLock before any wallet signature.</p></article></div>
+          <div className="docs-note"><span>READ IT CORRECTLY</span><p>Route-reviewed means HoodFlow has a configured, tested route. It does not mean every amount is executable at every moment. DepthMap keeps unavailable samples visible instead of turning old or partial data into a green signal.</p></div>
+        </section>
+
         <section id="action-lock" className="docs-section">
-          <p className="docs-kicker">07 / ACTIONLOCK</p><h2>Inspect event risk before you trust a route</h2>
+          <p className="docs-kicker">08 / ACTIONLOCK</p><h2>Inspect event risk before you trust a route</h2>
           <p><strong>ActionLock</strong> is a read-only preflight for route-reviewed Stock Tokens. Send the same asset, side, amount and slippage fields accepted by <code>POST /api/agents/quote</code> to <code>POST /api/action-lock</code>. It does not connect to a wallet, request approval, sign a message or submit a transaction.</p>
           <div className="docs-status-grid">
             <article><b className="ready">CANONICAL ADDRESS</b><p>Confirms that the requested ticker resolves to HoodFlow&apos;s reviewed token address instead of trusting a symbol or display name alone.</p></article>
@@ -121,7 +135,7 @@ export default function DocsPage() {
         </section>
 
         <section id="fillproof" className="docs-section">
-          <p className="docs-kicker">08 / FILLPROOF</p><h2>Reconstruct what actually settled</h2>
+          <p className="docs-kicker">09 / FILLPROOF</p><h2>Reconstruct what actually settled</h2>
           <p>Every new reviewed Stock Token Buy or Sell can open a <strong>FillProof</strong>. HoodFlow reads the confirmed transaction, decodes the supported Universal Router command, verifies the sender and canonical token addresses, totals matching settlement transfers, and compares the actual raw output with the protected minimum encoded in calldata.</p>
           <div className="docs-split"><article><span>ONCHAIN RECONSTRUCTION</span><h3>Public facts, checked together</h3><p>The transaction hash, block, sender, router, route, raw input, minimum output, actual token transfer and native gas cost come from Robinhood Chain. A public receipt link works without connecting a wallet.</p></article><article className="accent"><span>LOCAL PRETRADE SNAPSHOT</span><h3>Expected versus actual</h3><p>New trades also keep the quoted output and ActionLock reference in wallet-scoped browser storage. Those local fields enable an expected-versus-actual comparison, but they are not presented as onchain facts or a HoodFlow signature.</p></article></div>
           <div className="docs-callout"><strong>Public verification endpoint</strong><p><code>GET /api/fill-proof?txHash=0x...</code> returns the wallet-free onchain reconstruction used by the receipt view. It accepts only confirmed, reviewed HoodFlow router settlements on chain 4663.</p></div>
@@ -129,7 +143,7 @@ export default function DocsPage() {
         </section>
 
         <section id="agents" className="docs-section">
-          <p className="docs-kicker">09 / AGENT API</p><h2>Connect once, keep execution human-controlled</h2>
+          <p className="docs-kicker">10 / AGENT API</p><h2>Connect once, keep execution human-controlled</h2>
           <p>HoodFlow exposes the same bounded capabilities through REST, OpenAPI 3.1.2 and a stateless Streamable HTTP MCP endpoint. A successful preflight verifies the configured DEX route, current Chainlink reference, oracle-pause state and maximum DEX-to-oracle deviation. It remains indicative: HoodFlow requotes before every wallet signature.</p>
           <div className="docs-split"><article><span>MCP + OPENAPI</span><h3>Drop HoodFlow into an agent</h3><p><code>POST /api/mcp</code> exposes market discovery, quote preflight and basket planning as tools. <code>GET /openapi.json</code> publishes the equivalent REST contract. Neither connector receives a signer, private key or transaction permission.</p></article><article className="accent"><span>BASKET PREFLIGHT</span><h3>One budget, explicit legs</h3><p><code>POST /api/agents/basket</code> allocates one USDG budget across two to six unique markets and checks every leg. A basket is non-atomic: each accepted leg gets a fresh quote and a separate trade confirmation; token approval and Permit2 signing can add wallet prompts.</p></article></div>
           <div className="docs-split"><article><span>MARKET RESOURCE</span><h3>Discover reviewed routes</h3><p><code>GET /api/agents/markets</code> returns the currently exposed route-reviewed Stock Token markets, addresses, settlement asset and execution policy.</p></article><article className="accent"><span>SINGLE PREFLIGHT</span><h3>Carry intent, then requote</h3><p><code>POST /api/agents/quote</code> accepts the asset, side, exact amount and slippage. The handoff preserves those inputs, then requests a fresh execution-bound quote for final wallet confirmation.</p></article></div>
@@ -139,7 +153,7 @@ export default function DocsPage() {
         </section>
 
         <section id="community" className="docs-section">
-          <p className="docs-kicker">10 / MEME + CRYPTO</p><h2>Discover tokens by contract address</h2>
+          <p className="docs-kicker">11 / MEME + CRYPTO</p><h2>Discover tokens by contract address</h2>
           <p>The Token Terminal combines Virtuals&apos; official Robinhood Chain launch feed, top-volume, trending and newest DEX pools, and HoodFlow&apos;s canonical RWA registry. Rank the indexed markets by volume, 24-hour change, liquidity or age. Provider-derived categories remain discovery metadata; interactive category filters are not live yet.</p>
           <p>Paste any standard ERC-20 contract address on Robinhood Chain. HoodFlow reads bytecode and metadata, detects the token&apos;s lifecycle and quote asset, then probes Uniswap V2, V3 and hookless V4 liquidity only when a DEX route should exist. You can pay or receive USDG, VIRTUAL or WETH; when a direct pair is unavailable, an eligible V2 order can route through the market&apos;s native quote token in the same transaction.</p>
           <div className="docs-split"><article><span>VIRTUALS BONDING</span><h3>Trade at the source</h3><p>The token has not graduated. HoodFlow shows official Virtuals metadata and links to its source market instead of treating an empty pre-created DEX pair as executable.</p></article><article className="accent"><span>GRADUATED / DEX</span><h3>Verify live liquidity</h3><p>HoodFlow probes the active token and quote asset onchain. Embedded execution appears only after a fresh route returns non-zero output.</p></article></div>
@@ -147,19 +161,19 @@ export default function DocsPage() {
         </section>
 
         <section id="rewards" className="docs-section">
-          <p className="docs-kicker">11 / REWARDS</p><h2>How HF Points qualify</h2>
+          <p className="docs-kicker">12 / REWARDS</p><h2>How HF Points qualify</h2>
           <p>A wallet creates a shareable referral link with one message signature. The invited wallet receives 100 HF Points and its referrer receives 500 only after the invited wallet&apos;s first eligible Universal Router trade is confirmed on Robinhood Chain. Clicks, repeat trades and raw volume earn no points. Verified points are recorded now; the public Season 0 leaderboard remains Coming Soon until rankings open.</p>
           <div className="docs-callout"><strong>No guaranteed token allocation.</strong><p>HF Points are planned to inform future $HFLOW eligibility, but have no present monetary value. Conversion rate, launch, eligibility, jurisdiction and anti-sybil terms remain subject to a future announcement.</p></div>
         </section>
 
         <section id="dca" className="docs-section">
-          <p className="docs-kicker">12 / AUTOMATION BETA</p><h2>DCA is separate from Direct Buy</h2>
+          <p className="docs-kicker">13 / AUTOMATION BETA</p><h2>DCA is separate from Direct Buy</h2>
           <p>The recurring engine is an advanced beta feature. Only prepare a schedule when the application reports that the deployed engine and keeper are live. A DCA defines its asset, amount, cadence, total budget, expiry and slippage boundary; keepers cannot execute outside those limits.</p>
           <a className="docs-address" href={`${explorer}${HOODFLOW_DCA_ADDRESS}`} target="_blank" rel="noreferrer">View recurring engine contract →</a>
         </section>
 
         <section id="troubleshooting" className="docs-section">
-          <p className="docs-kicker">13 / TROUBLESHOOTING</p><h2>Common messages</h2>
+          <p className="docs-kicker">14 / TROUBLESHOOTING</p><h2>Common messages</h2>
           <details><summary>Wallet is on the wrong network</summary><p>Approve the network switch to Robinhood Chain. If your wallet does not add it automatically, use chain ID {ROBINHOOD_MAINNET.chainIdNumber} and the official network configuration.</p></details>
           <details><summary>Waiting for oracle</summary><p>The reference feed is unavailable, stale or still being verified. Trading stays disabled rather than using an unverified value.</p></details>
           <details><summary>No live full-fill route</summary><p>Liquidity for the selected asset or amount cannot pass the current route policy. Reduce the amount or try again later; never bypass the warning with a blind transaction.</p></details>
@@ -176,6 +190,6 @@ export default function DocsPage() {
     </div>
 
     <section className="seo-risk"><strong>Stock Tokens are not shares.</strong><p>They may be restricted in your jurisdiction and do not provide shareholder rights.</p></section>
-    <footer className="seo-footer"><span>Documentation · Release 0.13.0</span><Link href="/learn">Read plain-language guides</Link><Link href="/security">Review security & known limitations →</Link><a href="https://x.com/hoodfloow" target="_blank" rel="noreferrer">𝕏 @hoodfloow</a></footer>
+    <footer className="seo-footer"><span>Documentation · Release 0.14.0</span><Link href="/learn">Read plain-language guides</Link><Link href="/security">Review security & known limitations →</Link><a href="https://x.com/hoodfloow" target="_blank" rel="noreferrer">𝕏 @hoodfloow</a></footer>
   </main>;
 }
