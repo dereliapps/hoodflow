@@ -10,7 +10,7 @@ import {
 
 export const metadata: Metadata = {
   title: "Documentation",
-  description: "Learn how to stress-test live liquidity with DepthMap, inspect ActionLock and FillProof records, and buy or sell Stock Tokens with a self-custody wallet.",
+  description: "Learn how to stress-test live liquidity, compare device-local Depth Memory observations, inspect ActionLock and FillProof records, and trade with a self-custody wallet.",
   alternates: { canonical: "/docs" },
 };
 
@@ -24,6 +24,7 @@ const sections = [
   ["permissions", "Wallet permissions"],
   ["routes", "Route states"],
   ["depthmap", "DepthMap"],
+  ["depth-memory", "Depth Memory"],
   ["action-lock", "ActionLock"],
   ["fillproof", "FillProof"],
   ["agents", "Agent API"],
@@ -121,6 +122,19 @@ export default function DocsPage() {
           <div className="docs-note"><span>READ IT CORRECTLY</span><p>Route-reviewed means HoodFlow has a configured, tested route. It does not mean every amount is executable at every moment. DepthMap keeps unavailable samples visible instead of turning old or partial data into a green signal.</p></div>
         </section>
 
+        <section id="depth-memory" className="docs-section">
+          <p className="docs-kicker">07B / DEPTH MEMORY</p><h2>Compare only what HoodFlow actually observed</h2>
+          <p>After a complete DepthMap scan, HoodFlow saves a sanitized historical observation in this browser. Repeating the same fixed ladder later unlocks an exact-input comparison: which sampled passes appeared or were not reobserved, how the observed DEX-to-oracle distance changed and whether the reviewed venue changed.</p>
+          <div className="docs-status-grid">
+            <article><b className="ready">DEVICE-LOCAL</b><p>Up to five observations per market and twenty total are kept in browser storage. Wallet addresses, transaction hashes, calldata, approvals and signatures are never included.</p></article>
+            <article><b className="watch">PASSED THEN</b><p>A historical pass describes an expired point-in-time observation. It is never restored into the live scanner and can never enable an order.</p></article>
+            <article><b className="unavailable">NO SIGNAL</b><p>A missing historical result stays unresolved. HoodFlow does not relabel it as failed liquidity or infer a cause that the response did not prove.</p></article>
+            <article><b className="paused">NO POLLING</b><p>Opening Depth Memory makes no network request. Only an explicit fresh scan calls the same bounded five-point preflight flow.</p></article>
+          </div>
+          <div className="docs-split"><article><span>EXACT COMPARISON</span><h3>Same market, same input</h3><p>Output and oracle-distance changes are calculated only when both selected observations passed at the identical USDG sample. Values between ladder points are never interpolated.</p></article><article className="accent"><span>FRESHNESS BOUNDARY</span><h3>History cannot become authority</h3><p>The “Run fresh comparison” action always creates five new preflights under the existing two-worker limit and cooldown. Opening an order still requires an unexpired current point, a fresh execution quote and ActionLock.</p></article></div>
+          <div className="docs-note"><span>PRIVACY + CONTROL</span><p>Depth Memory works without a wallet and can be exported or cleared per market. If local storage is blocked, live DepthMap remains available and no historical notebook is created.</p></div>
+        </section>
+
         <section id="action-lock" className="docs-section">
           <p className="docs-kicker">08 / ACTIONLOCK</p><h2>Inspect event risk before you trust a route</h2>
           <p><strong>ActionLock</strong> is a read-only preflight for route-reviewed Stock Tokens. Send the same asset, side, amount and slippage fields accepted by <code>POST /api/agents/quote</code> to <code>POST /api/action-lock</code>. It does not connect to a wallet, request approval, sign a message or submit a transaction.</p>
@@ -190,6 +204,6 @@ export default function DocsPage() {
     </div>
 
     <section className="seo-risk"><strong>Stock Tokens are not shares.</strong><p>They may be restricted in your jurisdiction and do not provide shareholder rights.</p></section>
-    <footer className="seo-footer"><span>Documentation · Release 0.14.0</span><Link href="/learn">Read plain-language guides</Link><Link href="/security">Review security & known limitations →</Link><a href="https://x.com/hoodfloow" target="_blank" rel="noreferrer">𝕏 @hoodfloow</a></footer>
+    <footer className="seo-footer"><span>Documentation · Release 0.15.0</span><Link href="/learn">Read plain-language guides</Link><Link href="/security">Review security & known limitations →</Link><a href="https://x.com/hoodfloow" target="_blank" rel="noreferrer">𝕏 @hoodfloow</a></footer>
   </main>;
 }

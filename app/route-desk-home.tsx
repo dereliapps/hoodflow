@@ -66,8 +66,8 @@ export default function RouteDeskHome({
           <p className="terminal-eyebrow"><i /> Robinhood Chain execution terminal</p>
           <h1>Markets in focus.<br /><span>Routes in full view.</span></h1>
           <p className="terminal-deck">
-            Stress-test live liquidity across five USDG sizes, inspect the protected route and keep
-            the final signature inside your self-custody wallet.
+            Stress-test live liquidity across five USDG sizes, compare what changed between visits
+            and keep the final signature inside your self-custody wallet.
           </p>
           <div className="terminal-hero-actions">
             <button type="button" className="hf-primary" onClick={onOpenMarkets}>Explore markets</button>
@@ -82,10 +82,10 @@ export default function RouteDeskHome({
       </header>
 
       <button type="button" className="action-lock-home" onClick={onOpenDepthMap}>
-        <span><i /> NEW / DEPTHMAP</span>
-        <strong>One quote can hide a weak route.</strong>
-        <p>Probe the same reviewed market at 10, 25, 100, 250 and 1,000 USDG. See every sampled pass, expiry and unavailable point before opening an order.</p>
-        <b>Stress-test live liquidity <em>→</em></b>
+        <span><i /> NEW / DEPTH MEMORY</span>
+        <strong>Liquidity changes. Now the route has a memory.</strong>
+        <p>Run the same five fixed USDG samples across visits. HoodFlow shows exactly which observed passes appeared, were not reobserved or moved—saved only in your browser.</p>
+        <b>Open DepthMap & compare <em>→</em></b>
       </button>
 
       <section className="market-terminal" aria-label="Live route desk">

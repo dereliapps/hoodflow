@@ -9,10 +9,21 @@ import {
   isFreshDepthMapQuote,
   type DepthMapPoint,
 } from "@/lib/depth-map";
+import {
+  appendDepthMemory,
+  clearDepthMemoryAsset,
+  createDepthMemoryScan,
+  DEPTH_MEMORY_STORAGE_KEY,
+  parseDepthMemory,
+  sanitizeDepthMemoryScan,
+  serializeDepthMemory,
+  type DepthMemoryScan,
+} from "@/lib/depth-memory";
 import { formatTokenAmount } from "@/lib/format-display-number";
 import { MAX_ORACLE_DEVIATION_BPS } from "@/lib/oracle-protection";
 import { track } from "@/lib/analytics-client";
 
+import DepthMemoryPanel from "./depth-memory-panel";
 import styles from "./depth-map-workspace.module.css";
 
 export type DepthMapMarket = {
@@ -53,6 +64,8 @@ type DepthQuote = {
     deviationBps: number;
     maxDeviationBps: number;
     updatedAt: number;
+    heartbeat: number;
+    oraclePaused: false;
   };
   requiresUserSignature: true;
   quotedAt: string;
@@ -69,6 +82,27 @@ const money = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 4,
 });
+
+const DEPTH_DECIMAL_PATTERN = /^(?:0|[1-9]\d*)(?:\.\d{1,36})?$/;
+const DEPTH_MAX_CLOCK_SKEW_MS = 5 * 60 * 1_000;
+const DEPTH_MAX_QUOTE_TTL_MS = 2 * 60 * 1_000;
+const DEPTH_MAX_ORACLE_HEARTBEAT_SECONDS = 7 * 24 * 60 * 60;
+const DEPTH_MEMORY_LOCK_NAME = "hoodflow-depth-memory-write-v1";
+
+async function withDepthMemoryStorageLock<T>(operation: () => T | Promise<T>) {
+  if (typeof navigator !== "undefined" && navigator.locks) {
+    return navigator.locks.request(DEPTH_MEMORY_LOCK_NAME, { mode: "exclusive" }, operation);
+  }
+  return operation();
+}
+
+const DEPTH_ORACLE_TIMESTAMP_TOLERANCE_MS = 1_000;
+
+function positiveDepthDecimal(value: unknown) {
+  if (typeof value !== "string" || value.length > 80 || !DEPTH_DECIMAL_PATTERN.test(value)) return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
 
 function ageLabel(updatedAt: number | null, now = Date.now()) {
   if (!updatedAt) return "No verified round";
@@ -87,32 +121,57 @@ function secondsUntil(value: string, now: number) {
 function parseDepthQuote(value: unknown, asset: string, amount: string): DepthQuote | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const quote = value as Partial<DepthQuote>;
-  const amountNumber = Number(quote.pay?.amount);
+  const now = Date.now();
+  const amountNumber = positiveDepthDecimal(quote.pay?.amount);
   const expectedAmount = Number(amount);
+  const estimatedOutput = positiveDepthDecimal(quote.receive?.estimatedAmount);
+  const minimumOutput = positiveDepthDecimal(quote.receive?.indicativeMinimumAmount);
+  const feeBps = quote.route?.feeBps;
+  const gasEstimate = quote.route?.gasEstimate;
+  const quotedAt = Date.parse(quote.quotedAt ?? "");
   const expiresAt = Date.parse(quote.protection?.dataExpiresAt ?? "");
+  const oracleUpdatedAt = quote.reference?.updatedAt;
+  const oracleHeartbeat = quote.reference?.heartbeat;
+  const oracleUpdatedAtMs = typeof oracleUpdatedAt === "number" ? oracleUpdatedAt * 1_000 : Number.NaN;
   if (
     quote.status !== "indicative-preflight"
     || quote.asset !== asset
     || quote.side !== "buy"
     || quote.pay?.ticker !== "USDG"
-    || !Number.isFinite(amountNumber)
+    || amountNumber === null
     || Math.abs(amountNumber - expectedAmount) > 0.000001
     || quote.receive?.ticker !== asset
-    || !(Number(quote.receive.estimatedAmount) > 0)
-    || !(Number(quote.receive.indicativeMinimumAmount) > 0)
+    || estimatedOutput === null
+    || minimumOutput === null
+    || minimumOutput > estimatedOutput
     || !["Uniswap V3", "Uniswap V4"].includes(quote.route?.protocol ?? "")
-    || !(Number(quote.route?.feeBps) >= 0)
+    || !Number.isInteger(feeBps)
+    || !(typeof feeBps === "number" && feeBps >= 0 && feeBps <= 100_000)
+    || !(gasEstimate === null || (typeof gasEstimate === "string" && /^\d{1,30}$/.test(gasEstimate)))
     || quote.protection?.executionBinding !== "none-requote-required"
     || quote.protection.slippageBps !== 50
+    || !Number.isFinite(quotedAt)
     || !Number.isFinite(expiresAt)
-    || expiresAt <= Date.now()
+    || quotedAt < now - DEPTH_MAX_CLOCK_SKEW_MS
+    || quotedAt > now + DEPTH_MAX_CLOCK_SKEW_MS
+    || expiresAt <= quotedAt
+    || expiresAt - quotedAt > DEPTH_MAX_QUOTE_TTL_MS
+    || expiresAt <= now
+    || expiresAt > now + DEPTH_MAX_CLOCK_SKEW_MS + DEPTH_MAX_QUOTE_TTL_MS
     || quote.reference?.status !== "live"
+    || quote.reference.oraclePaused !== false
     || !(Number(quote.reference.price) > 0)
     || !(Number(quote.reference.impliedDexPrice) > 0)
     || !Number.isInteger(quote.reference.deviationBps)
     || quote.reference.deviationBps < 0
     || quote.reference.deviationBps > quote.reference.maxDeviationBps
     || quote.reference.maxDeviationBps !== MAX_ORACLE_DEVIATION_BPS
+    || !Number.isInteger(oracleUpdatedAt)
+    || !(typeof oracleUpdatedAt === "number" && oracleUpdatedAt > 0)
+    || !Number.isInteger(oracleHeartbeat)
+    || !(typeof oracleHeartbeat === "number" && oracleHeartbeat > 0 && oracleHeartbeat <= DEPTH_MAX_ORACLE_HEARTBEAT_SECONDS)
+    || oracleUpdatedAtMs > quotedAt + DEPTH_ORACLE_TIMESTAMP_TOLERANCE_MS
+    || quotedAt - oracleUpdatedAtMs > oracleHeartbeat * 1_000 + DEPTH_ORACLE_TIMESTAMP_TOLERANCE_MS
     || quote.requiresUserSignature !== true
   ) return null;
   return quote as DepthQuote;
@@ -181,8 +240,11 @@ export default function DepthMapWorkspace({ markets, onOpenMarket }: Props) {
   const [lastScanAt, setLastScanAt] = useState<number | null>(null);
   const [clock, setClock] = useState(() => Date.now());
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const [memoryScans, setMemoryScans] = useState<DepthMemoryScan[]>([]);
+  const [memoryStorage, setMemoryStorage] = useState<"checking" | "enabled" | "blocked">("checking");
   const scanRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  const allowedAssetsRef = useRef(new Set(markets.map((market) => market.ticker)));
 
   const selectedMarket = markets.find((market) => market.ticker === asset) ?? markets[0];
   const highestPass = useMemo(() => highestFreshDepthMapPass(points, clock), [clock, points]);
@@ -193,6 +255,37 @@ export default function DepthMapWorkspace({ markets, onOpenMarket }: Props) {
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 1_000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const syncMemory = () => {
+      try {
+        const scans = parseDepthMemory(window.localStorage.getItem(DEPTH_MEMORY_STORAGE_KEY), allowedAssetsRef.current);
+        if (!active) return;
+        setMemoryScans(scans);
+        setMemoryStorage("enabled");
+      } catch {
+        if (active) setMemoryStorage("blocked");
+      }
+    };
+    const receiveStorageUpdate = (event: StorageEvent) => {
+      if (event.key !== DEPTH_MEMORY_STORAGE_KEY && event.key !== null) return;
+      try {
+        const storage = window.localStorage;
+        if (event.storageArea !== storage) return;
+        syncMemory();
+      } catch {
+        if (active) setMemoryStorage("blocked");
+      }
+    };
+    const initialSync = window.setTimeout(syncMemory, 0);
+    window.addEventListener("storage", receiveStorageUpdate);
+    return () => {
+      active = false;
+      window.clearTimeout(initialSync);
+      window.removeEventListener("storage", receiveStorageUpdate);
+    };
   }, []);
 
   useEffect(() => () => {
@@ -214,6 +307,41 @@ export default function DepthMapWorkspace({ markets, onOpenMarket }: Props) {
     url.searchParams.set("view", "depth-map");
     url.searchParams.set("depthAsset", nextAsset);
     window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  }
+
+  async function saveMemoryScan(scan: DepthMemoryScan) {
+    const validated = sanitizeDepthMemoryScan(scan, allowedAssetsRef.current);
+    if (!validated) return "invalid" as const;
+    try {
+      return await withDepthMemoryStorageLock(() => {
+        const stored = parseDepthMemory(window.localStorage.getItem(DEPTH_MEMORY_STORAGE_KEY), allowedAssetsRef.current);
+        const next = appendDepthMemory(stored, validated);
+        window.localStorage.setItem(DEPTH_MEMORY_STORAGE_KEY, serializeDepthMemory(next));
+        setMemoryScans(next);
+        setMemoryStorage("enabled");
+        track("depth_memory_saved", { ticker: validated.asset });
+        return "saved" as const;
+      });
+    } catch {
+      setMemoryStorage("blocked");
+      return "blocked" as const;
+    }
+  }
+
+  async function clearMemoryForAsset() {
+    const targetAsset = asset;
+    try {
+      await withDepthMemoryStorageLock(() => {
+        const stored = parseDepthMemory(window.localStorage.getItem(DEPTH_MEMORY_STORAGE_KEY), allowedAssetsRef.current);
+        const next = clearDepthMemoryAsset(stored, targetAsset);
+        window.localStorage.setItem(DEPTH_MEMORY_STORAGE_KEY, serializeDepthMemory(next));
+        setMemoryScans(next);
+        setMemoryStorage("enabled");
+        track("depth_memory_cleared", { ticker: targetAsset });
+      });
+    } catch {
+      setMemoryStorage("blocked");
+    }
   }
 
   async function runDepthScan() {
@@ -258,11 +386,14 @@ export default function DepthMapWorkspace({ markets, onOpenMarket }: Props) {
       if (highest) setSelectedAmount(highest.amount);
       const passCount = results.filter((point) => point.status === "pass").length;
       const limited = results.some((point) => point.status === "rate-limited");
-      setScanError(passCount > 0
-        ? ""
-        : limited
-          ? "The public scanner reached its request boundary. No result was promoted from partial data."
-          : "No sampled size returned a current guarded preflight. Nothing is ready for handoff.");
+      const memoryResult = await saveMemoryScan(createDepthMemoryScan(assetAtStart, startedAt, Date.now(), results));
+      setScanError(memoryResult === "invalid"
+        ? "The completed scan failed local record verification. No observation was saved."
+        : passCount > 0
+          ? ""
+          : limited
+            ? "The public scanner reached its request boundary. No result was promoted from partial data."
+            : "No sampled size returned a current guarded preflight. Nothing is ready for handoff.");
       track("depth_scan_completed", { ticker: assetAtStart, passCount, sampledPoints: results.length });
     } catch {
       if (!controller.signal.aborted && scanRef.current === scanId) {
@@ -305,6 +436,16 @@ export default function DepthMapWorkspace({ markets, onOpenMarket }: Props) {
   const deviationPosition = quote
     ? Math.min(100, quote.reference.deviationBps / quote.reference.maxDeviationBps * 100)
     : 0;
+  const scanActionLabel = scanBusy
+    ? `Scanning ${points.filter((point) => point.status !== "scanning").length}/5…`
+    : selectedMarket?.priceStatus !== "live"
+      ? "Oracle check required"
+      : cooldownMs > 0
+        ? `Fresh scan in ${Math.ceil(cooldownMs / 1_000)}s`
+        : memoryScans.some((scan) => scan.asset === asset)
+          ? "Run fresh comparison"
+          : "Run five-point scan";
+  const scanDisabled = scanBusy || cooldownMs > 0 || selectedMarket?.priceStatus !== "live";
 
   return <section className={`page inner-page ${styles.workspace}`}>
     <header className={styles.hero}>
@@ -353,15 +494,7 @@ export default function DepthMapWorkspace({ markets, onOpenMarket }: Props) {
             <strong>{selectedMarket?.price ? money.format(selectedMarket.price) : "Unavailable"}</strong>
             <small>{ageLabel(selectedMarket?.priceUpdatedAt ?? null, clock)}</small>
           </div>
-          <button type="button" onClick={() => void runDepthScan()} disabled={scanBusy || cooldownMs > 0 || selectedMarket?.priceStatus !== "live"}>
-            {scanBusy
-              ? `Scanning ${points.filter((point) => point.status !== "scanning").length}/5…`
-              : selectedMarket?.priceStatus !== "live"
-                ? "Oracle check required"
-                : cooldownMs > 0
-                  ? `Fresh scan in ${Math.ceil(cooldownMs / 1_000)}s`
-                  : "Run five-point scan"}
-          </button>
+          <button type="button" onClick={() => void runDepthScan()} disabled={scanDisabled}>{scanActionLabel}</button>
         </header>
 
         <div className={styles.guardLegend}>
@@ -370,7 +503,10 @@ export default function DepthMapWorkspace({ markets, onOpenMarket }: Props) {
           <small>Each point is a separate 0.50% slippage preflight. Failed points stay failed; HoodFlow does not interpolate between samples.</small>
         </div>
 
-        <div className={styles.ladder} role="list" aria-live="polite">
+        <p className={styles.srOnly} role="status" aria-live="polite" aria-atomic="true">
+          {scanBusy ? `DepthMap scan progress: ${points.filter((point) => point.status !== "scanning").length} of 5 samples completed.` : ""}
+        </p>
+        <div className={styles.ladder} role="group" aria-label={`${asset} five-point liquidity samples`}>
           <div className={styles.ladderHead}><span>EXACT INPUT</span><span>DEX / ORACLE DISTANCE</span><span>ESTIMATED OUTPUT</span><span>STATE</span></div>
           {(points.length ? points : DEPTH_MAP_SAMPLE_AMOUNTS.map((amount): DepthMapPoint<DepthQuote> => ({ amount, status: "unavailable" }))).map((point) => {
             const fresh = point.status === "pass" && isFreshDepthMapQuote(point.quote, clock);
@@ -389,7 +525,7 @@ export default function DepthMapWorkspace({ markets, onOpenMarket }: Props) {
             const position = pointQuote ? Math.min(100, pointQuote.reference.deviationBps / pointQuote.reference.maxDeviationBps * 100) : 0;
             return <button
               type="button"
-              role="listitem"
+              aria-pressed={selectedPoint?.amount === point.amount}
               className={`${styles.ladderRow} ${selectedPoint?.amount === point.amount ? styles.rowSelected : ""} ${styles[`state${state.replaceAll(" ", "")}`] ?? ""}`}
               key={point.amount}
               onClick={() => setSelectedAmount(point.amount)}
@@ -442,6 +578,16 @@ export default function DepthMapWorkspace({ markets, onOpenMarket }: Props) {
         <footer>Highest sampled pass is not a maximum trade size, liquidity promise or fill. The order screen requotes and runs ActionLock before any wallet signature.</footer>
       </aside>
     </section>
+
+    {memoryStorage !== "checking" && <DepthMemoryPanel
+      asset={asset}
+      scans={memoryScans}
+      storageEnabled={memoryStorage !== "blocked"}
+      runDisabled={scanDisabled}
+      runLabel={scanActionLabel}
+      onRunAgain={() => void runDepthScan()}
+      onClear={() => void clearMemoryForAsset()}
+    />}
 
     <section className={styles.proofRail}>
       <article><span>01</span><p><strong>Fixed ladder</strong><small>Every market is tested at the same five USDG inputs. Users cannot inflate the scanner workload.</small></p></article>

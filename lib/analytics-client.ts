@@ -16,6 +16,8 @@ export type HoodFlowEvent =
   | "depth_scan_started"
   | "depth_scan_completed"
   | "depth_handoff_opened"
+  | "depth_memory_saved"
+  | "depth_memory_cleared"
   | "settlement_selected"
   | "referral_registered"
   | "referral_shared"

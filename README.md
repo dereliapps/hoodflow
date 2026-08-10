@@ -19,6 +19,7 @@ HoodFlow indexes the official Virtuals Robinhood Chain launch feed and keeps bon
 
 - WalletConnect and injected-wallet connections to Robinhood Chain mainnet.
 - Live onchain reference prices and history for the canonical Stock Token registry.
+- DepthMap five-point liquidity preflights with device-local Depth Memory comparisons across repeat scans.
 - Protected direct buy and sell routes through reviewed Uniswap V2, V3, and V4 liquidity.
 - Community market discovery from GeckoTerminal and DEX Screener.
 - Official Virtuals Robinhood Chain discovery with explicit `bonding` and `graduated` lifecycle states.
