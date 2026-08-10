@@ -48,11 +48,12 @@ test("publishes a complete OpenAPI 3.1.2 read/preflight contract", () => {
     "/api/agents/hoodflow",
     "/api/agents/markets",
     "/api/agents/quote",
+    "/api/fill-proof",
   ]);
   assert.ok(Object.keys(paths).every((path) => !/execute|sign|submit|send|swap/i.test(path)));
 
   const operationIds = collectValuesForKey(paths, "operationId");
-  assert.equal(operationIds.length, 5);
+  assert.equal(operationIds.length, 6);
   assert.equal(new Set(operationIds).size, operationIds.length);
 
   const safety = document["x-hoodflow-safety"] as JsonObject;
@@ -66,6 +67,39 @@ test("publishes a complete OpenAPI 3.1.2 read/preflight contract", () => {
     serialized,
     /"(?:privateKey|private_key|calldata|signedTransaction|sendTransaction)"\s*:/i,
   );
+});
+
+test("publishes FillProof as a read-only onchain verification endpoint", () => {
+  const document = buildHoodFlowOpenApiDocument() as never as {
+    paths: {
+      "/api/fill-proof": {
+        get: {
+          parameters: Array<{ name: string; in: string; required: boolean }>;
+          responses: { "200": { content: { "application/json": { schema: { $ref: string } } } } };
+          "x-hoodflow-safety": Record<string, unknown>;
+        };
+      };
+    };
+    components: { schemas: { FillProofResponse: Record<string, unknown>; FillProof: Record<string, unknown> } };
+  };
+
+  const endpoint = document.paths["/api/fill-proof"].get;
+  assert.deepEqual(endpoint.parameters[0], {
+    name: "txHash",
+    in: "query",
+    required: true,
+    description: "Confirmed Robinhood Chain mainnet transaction hash.",
+    schema: { type: "string", pattern: "^0x[0-9a-fA-F]{64}$" },
+  });
+  assert.equal(
+    endpoint.responses["200"].content["application/json"].schema.$ref,
+    "#/components/schemas/FillProofResponse",
+  );
+  assert.equal(endpoint["x-hoodflow-safety"].custody, false);
+  assert.equal(endpoint["x-hoodflow-safety"].signing, false);
+  assert.equal(endpoint["x-hoodflow-safety"].submission, false);
+  assert.equal(document.components.schemas.FillProofResponse.additionalProperties, false);
+  assert.equal(document.components.schemas.FillProof.additionalProperties, false);
 });
 
 test("publishes ActionLock as a bounded read/preflight endpoint", () => {

@@ -26,9 +26,9 @@ export function buildHoodFlowOpenApiDocument() {
     jsonSchemaDialect: "https://spec.openapis.org/oas/3.1/dialect/base",
     info: {
       title: "HoodFlow Agent Preflight API",
-      version: "1.2.0",
+      version: "1.3.0",
       description: [
-        "Public discovery, ActionLock safety inspection and indicative preflight for route-reviewed Stock Tokens on Robinhood Chain.",
+        "Public discovery, ActionLock safety inspection, indicative preflight and post-trade FillProof reconstruction for route-reviewed Stock Tokens on Robinhood Chain.",
         "This API never holds funds, signs messages, returns executable calldata, or submits transactions.",
       ].join(" "),
     },
@@ -38,6 +38,7 @@ export function buildHoodFlowOpenApiDocument() {
       { name: "Discovery", description: "Read route-reviewed markets and connector metadata." },
       { name: "Preflight", description: "Prepare temporary, non-executable quote and basket intents." },
       { name: "Safety", description: "Inspect asset identity and event-risk signals without signing or submitting." },
+      { name: "Verification", description: "Reconstruct verifiable settlement facts from confirmed public transactions." },
     ],
     externalDocs: {
       description: "HoodFlow documentation",
@@ -163,6 +164,53 @@ export function buildHoodFlowOpenApiDocument() {
             submission: false,
             executionBinding: "none-preflight-only",
             officialDataCompleteness: "not-guaranteed",
+          },
+        },
+      },
+      "/api/fill-proof": {
+        get: {
+          operationId: "reconstructHoodFlowFillProof",
+          summary: "Reconstruct a confirmed HoodFlow settlement",
+          description: [
+            "Decodes a confirmed Universal Router transaction, verifies its reviewed route and canonical recipient transfers, and compares raw output with the calldata minimum.",
+            "Historical transactions do not receive an invented pretrade quote. The document checksum detects modification; it is not a HoodFlow signature or audit.",
+          ].join(" "),
+          tags: ["Verification"],
+          security: [],
+          parameters: [{
+            name: "txHash",
+            in: "query",
+            required: true,
+            description: "Confirmed Robinhood Chain mainnet transaction hash.",
+            schema: { type: "string", pattern: "^0x[0-9a-fA-F]{64}$" },
+          }],
+          responses: {
+            "200": {
+              description: "Public onchain settlement reconstruction.",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/FillProofResponse" },
+                },
+              },
+            },
+            "404": errorResponse,
+            "422": errorResponse,
+            "429": {
+              ...errorResponse,
+              headers: {
+                "Retry-After": {
+                  description: "Seconds before another request should be attempted.",
+                  schema: { type: "integer", minimum: 1 },
+                },
+              },
+            },
+            "503": errorResponse,
+          },
+          "x-hoodflow-safety": {
+            custody: false,
+            signing: false,
+            submission: false,
+            source: "public-onchain-reconstruction",
           },
         },
       },
@@ -463,6 +511,69 @@ export function buildHoodFlowOpenApiDocument() {
             executionHandoff: { type: ["object", "null"], additionalProperties: true },
             stateFingerprint: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
             fingerprint: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
+          },
+          additionalProperties: false,
+        },
+        FillProofResponse: {
+          type: "object",
+          required: ["proof"],
+          properties: {
+            proof: { $ref: "#/components/schemas/FillProof" },
+          },
+          additionalProperties: false,
+        },
+        FillProof: {
+          type: "object",
+          description: "A public onchain settlement reconstruction. Its checksum detects document changes but is not a HoodFlow signature or audit.",
+          required: [
+            "schema",
+            "generatedAt",
+            "chainId",
+            "asset",
+            "side",
+            "transaction",
+            "route",
+            "amounts",
+            "gas",
+            "checks",
+            "integrity",
+            "notice",
+          ],
+          properties: {
+            schema: { type: "string", const: "hoodflow.fillproof.v1" },
+            generatedAt: { type: "string", format: "date-time" },
+            chainId: { type: "integer", const: 4663 },
+            asset: { type: "string", enum: reviewedAssets },
+            side: { type: "string", enum: ["buy", "sell"] },
+            transaction: { type: "object", additionalProperties: true },
+            route: { type: "object", additionalProperties: true },
+            amounts: { type: "object", additionalProperties: true },
+            gas: { type: "object", additionalProperties: true },
+            checks: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["code", "status", "label", "detail"],
+                properties: {
+                  code: { type: "string", enum: ["confirmed", "sender", "router", "route", "settlement", "minimum"] },
+                  status: { type: "string", const: "pass" },
+                  label: { type: "string" },
+                  detail: { type: "string" },
+                },
+                additionalProperties: false,
+              },
+            },
+            integrity: {
+              type: "object",
+              required: ["algorithm", "digest", "scope"],
+              properties: {
+                algorithm: { type: "string", const: "SHA-256" },
+                digest: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+                scope: { type: "string", const: "onchain-reconstruction" },
+              },
+              additionalProperties: false,
+            },
+            notice: { type: "string" },
           },
           additionalProperties: false,
         },

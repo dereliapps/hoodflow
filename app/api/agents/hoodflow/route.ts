@@ -15,8 +15,8 @@ export async function GET() {
   return NextResponse.json({
     name: "HoodFlow Execution Preflight",
     provider: "HoodFlow",
-    version: "1.0",
-    description: "A bounded preflight surface for discovering reviewed Stock Token markets and checking indicative Robinhood Chain routes before a fresh wallet quote.",
+    version: "1.1",
+    description: "A bounded surface for discovering and preflighting reviewed Stock Token routes, then reconstructing confirmed Robinhood Chain settlements without wallet authority.",
     network: { chainId: 4663, name: "Robinhood Chain", settlementToken: "USDG" },
     connectors: {
       mcp: {
@@ -30,12 +30,27 @@ export async function GET() {
       },
     },
     capabilities: {
-      resources: [{
-        id: "hoodflow.execution-markets",
-        description: "Read the current route-reviewed Stock Token registry and execution policy.",
-        method: "GET",
-        endpoint: `${origin}/api/agents/markets`,
-      }],
+      resources: [
+        {
+          id: "hoodflow.execution-markets",
+          description: "Read the current route-reviewed Stock Token registry and execution policy.",
+          method: "GET",
+          endpoint: `${origin}/api/agents/markets`,
+        },
+        {
+          id: "hoodflow.fill-proof",
+          name: "FillProof",
+          description: "Reconstruct the reviewed route, canonical settlement transfer, protected raw minimum and gas facts for a confirmed public transaction.",
+          method: "GET",
+          endpoint: `${origin}/api/fill-proof?txHash={txHash}`,
+          inputSchema: {
+            type: "object",
+            required: ["txHash"],
+            properties: { txHash: { type: "string", pattern: "^0x[0-9a-fA-F]{64}$" } },
+          },
+          output: "A wallet-free onchain reconstruction with a modification-detection checksum. It is not a HoodFlow signature or audit.",
+        },
+      ],
       preflightActions: [
         {
           id: "hoodflow.prepare-stock-token-quote",
@@ -119,6 +134,7 @@ export async function GET() {
       maxOracleDeviationBps: MAX_ORACLE_DEVIATION_BPS,
       note: "HoodFlow's public agent surface prepares execution. It does not hold funds, request private keys, or sign for the user.",
       actionLock: "Read/preflight only. Official corporate-action and halt data can be incomplete or delayed; a passport is not proof of execution.",
+      fillProof: "Read-only public-chain reconstruction. Historical trades receive no invented pretrade quote; the checksum is not a HoodFlow signature.",
     },
     virtualsAcp: {
       integrationMode: "registered public resource provider",

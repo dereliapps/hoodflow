@@ -84,6 +84,12 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
     readFile(new URL("../app/openapi.json/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api-catalog/route.ts", import.meta.url), "utf8"),
   ]);
+  const [fillProofUi, fillProofApi, fillProofLib, routeCss] = await Promise.all([
+    readFile(new URL("../app/fill-proof-receipt.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/fill-proof/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/fill-proof.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/route-desk.css", import.meta.url), "utf8"),
+  ]);
 
   assert.match(page, /"use client"/);
   assert.match(page, /createStrategy/);
@@ -142,7 +148,9 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(layout, /NEXT_PUBLIC_SITE_URL/);
   assert.doesNotMatch(layout, /next[/]headers|headers\(\)/);
   assert.match(page, /Automatic retries are active/);
-  assert.match(page, /Release 0\.12\.0/);
+  assert.match(page, /Release 0\.13\.0/);
+  assert.match(page, /Open FillProof/);
+  assert.match(page, /fillProofSnapshot/);
   assert.match(page, /DCA command center/);
   assert.match(page, /TRACKED TRADE VOLUME/);
   assert.match(page, /price-skeleton/);
@@ -173,6 +181,8 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(docs, /POST \/api\/agents\/quote/);
   assert.match(docs, /POST \/api\/agents\/basket/);
   assert.match(docs, /POST \/api\/action-lock/);
+  assert.match(docs, /GET \/api\/fill-proof\?txHash=/);
+  assert.match(docs, /not a HoodFlow signature/i);
   assert.match(docs, /CANONICAL ADDRESS/);
   assert.match(docs, /CORPORATE ACTION/);
   assert.match(docs, /TOKEN MULTIPLIER/);
@@ -285,6 +295,8 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(actionLockLib, /executionHandoff: handoffAllowed/);
   assert.match(agentManifest, /preflightActions/);
   assert.match(agentManifest, /hoodflow\.prepare-action-lock/);
+  assert.match(agentManifest, /hoodflow\.fill-proof/);
+  assert.match(agentManifest, /\/api\/fill-proof\?txHash=\{txHash\}/);
   assert.match(agentManifest, /\/api\/action-lock/);
   assert.match(agentManifest, /streamable-http/);
   assert.match(agentManifest, /prepare-stock-token-basket/);
@@ -323,6 +335,15 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(mcpRoute, /handleHoodFlowMcpPost/);
   assert.match(openApiLib, /openapi: HOODFLOW_OPENAPI_VERSION/);
   assert.match(openApiLib, /"3\.1\.2"/);
+  assert.match(openApiLib, /reconstructHoodFlowFillProof/);
+  assert.match(fillProofUi, /FILLPROOF \/ EXECUTION RECEIPT/);
+  assert.match(fillProofUi, /Download JSON/);
+  assert.match(fillProofApi, /verifyHoodFlowRouterSettlement/);
+  assert.match(fillProofApi, /uiMultiplier/);
+  assert.match(fillProofLib, /rawActual/);
+  assert.match(fillProofLib, /minimumSatisfied: true/);
+  assert.match(routeCss, /\.fillproof-shell/);
+  assert.doesNotMatch(routeCss, /\.fillproof-[^{]*\{[^}]*background:\s*(?:#fff|white)/i);
   assert.match(openApiRoute, /buildHoodFlowOpenApiDocument/);
   assert.match(apiCatalogRoute, /application\/linkset\+json/);
   assert.match(communityMarketRoute, /Virtuals official/);

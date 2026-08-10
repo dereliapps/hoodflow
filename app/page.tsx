@@ -63,6 +63,11 @@ import { ROBINHOOD_PRICE_FEEDS } from "@/config/robinhood-price-feeds";
 import { track } from "@/lib/analytics-client";
 import { seoAssets } from "@/lib/seo-assets";
 import { calculateOracleDeviation } from "@/lib/oracle-protection";
+import {
+  FILL_PROOF_SNAPSHOT_SCHEMA,
+  isFillProofLocalSnapshot,
+  type FillProofLocalSnapshot,
+} from "@/lib/fill-proof";
 import RouteDeskHome from "./route-desk-home";
 import type { PrivyWalletController } from "./privy-wallet-bridge";
 import { PRIVY_CONFIGURED } from "./privy-config";
@@ -79,6 +84,7 @@ function WorkspaceLoader({ label }: { label: string }) {
 const CommunityTokens = dynamic(() => import("./community-tokens"), { ssr: false, loading: () => <WorkspaceLoader label="Loading crypto markets" /> });
 const AgentsWorkspace = dynamic(() => import("./agents-workspace"), { ssr: false, loading: () => <WorkspaceLoader label="Loading agent execution" /> });
 const ActionLockWorkspace = dynamic(() => import("./action-lock-workspace"), { ssr: false, loading: () => <WorkspaceLoader label="Loading ActionLock" /> });
+const FillProofReceipt = dynamic(() => import("./fill-proof-receipt"), { ssr: false });
 const AssetRequestBoard = dynamic(() => import("./asset-request-board"), { ssr: false, loading: () => <WorkspaceLoader label="Loading asset requests" /> });
 const ReferralRewards = dynamic(() => import("./referral-rewards"), { ssr: false, loading: () => <WorkspaceLoader label="Loading rewards" /> });
 const PrivyWalletRuntime = dynamic(() => import("./privy-wallet-runtime"), { ssr: false });
@@ -149,6 +155,7 @@ type Strategy = {
   chainStrategyId?: string;
   inputAmount?: number;
   outputAmount?: number;
+  fillProofSnapshot?: FillProofLocalSnapshot;
 };
 
 type DirectQuotePreview = {
@@ -296,6 +303,24 @@ function errorMessage(error: unknown) {
   return friendlyExecutionError(error);
 }
 
+function captureFillProofSnapshot(actionLock: ActionLockGate): FillProofLocalSnapshot {
+  return {
+    schema: FILL_PROOF_SNAPSHOT_SCHEMA,
+    capturedAt: new Date().toISOString(),
+    asset: actionLock.intent.asset,
+    side: actionLock.intent.side,
+    expectedRawOutput: actionLock.quote.receive.rawEstimatedAmount,
+    expectedDisplayOutput: actionLock.quote.receive.estimatedAmount,
+    minimumRawOutput: actionLock.quote.receive.rawIndicativeMinimumAmount,
+    minimumDisplayOutput: actionLock.quote.receive.indicativeMinimumAmount,
+    quoteExpiresAt: actionLock.quote.protection.dataExpiresAt,
+    protocol: actionLock.quote.route.protocol === "Uniswap V3" ? "V3" : "V4",
+    feeTier: actionLock.quote.route.fee,
+    uiMultiplierRaw: actionLock.quote.uiScaling.multiplierRaw,
+    actionLockDigest: actionLock.fingerprint,
+  };
+}
+
 async function getVerifiedSigner(provider: BrowserProvider, expectedAddress: string) {
   const signer = await provider.getSigner();
   const signerAddress = await signer.getAddress();
@@ -424,7 +449,8 @@ function isStoredStrategy(value: unknown): value is Strategy {
     && typeof item.expires === "string"
     && typeof item.createdAt === "number"
     && typeof item.walletAddress === "string"
-    && /^0x[a-fA-F0-9]{40}$/.test(item.walletAddress);
+    && /^0x[a-fA-F0-9]{40}$/.test(item.walletAddress)
+    && (item.fillProofSnapshot === undefined || isFillProofLocalSnapshot(item.fillProofSnapshot));
 }
 
 function orderStorageKey(walletAddress: string) {
@@ -457,6 +483,8 @@ export default function Home() {
   const [rpcHealth, setRpcHealth] = useState<{ endpoint: string; configuredEndpoints: number; latencyMs: number } | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null);
+  const [selectedFillProof, setSelectedFillProof] = useState<Strategy | null>(null);
+  const closeFillProof = useCallback(() => setSelectedFillProof(null), []);
   const [kind, setKind] = useState<StrategyKind>("DCA");
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const hydratedWalletRef = useRef("");
@@ -523,6 +551,7 @@ export default function Home() {
     setPortfolioBalances({});
     setPortfolioLoading(false);
     setSelectedStrategy(null);
+    setSelectedFillProof(null);
     setActiveBasketLeg(null);
     setComposerQuote(null);
     setComposerQuoteBusy(false);
@@ -1762,6 +1791,24 @@ export default function Home() {
         } else if (pendingReceipt?.status === 1) {
           clearPendingBasketTransaction(address, draftAsset, amountIn.toString());
           recordBasketLeg("confirmed", pendingReceipt.hash);
+          const recoveredAmount = formatUnits(amountIn, USDG_DECIMALS);
+          setStrategies((current) => current.some((strategy) => strategy.txHash?.toLowerCase() === pendingReceipt.hash.toLowerCase())
+            ? current
+            : [{
+                id: Date.now(),
+                name: `${draftAsset} basket buy`,
+                kind: "Buy",
+                asset: draftAsset,
+                rule: `Buy once with ${recoveredAmount} USDG`,
+                detail: "Receipt recovered · open FillProof for onchain settlement",
+                status: "Confirmed",
+                budget: `${recoveredAmount} USDG`,
+                expires: "Completed",
+                createdAt: Date.now(),
+                walletAddress: address.toLowerCase(),
+                txHash: pendingReceipt.hash,
+                inputAmount: Number(recoveredAmount),
+              }, ...current]);
           setActiveBasketLeg(null);
           setComposerOpen(false);
           track("transaction_confirmed", { ticker: draftAsset, side: "buy", reconciled: true });
@@ -1824,6 +1871,7 @@ export default function Home() {
     );
     actionLock = await runActionLockGate(actionLockIntent);
     const executionQuote = actionLock.quote;
+    const fillProofSnapshot = captureFillProofSnapshot(actionLock);
     const quotedAmountIn = BigInt(executionQuote.pay.rawAmount);
     const minAmountOut = BigInt(executionQuote.receive.rawIndicativeMinimumAmount);
     if (quotedAmountIn !== amountIn) throw new Error("ActionLock input changed before signing.");
@@ -1916,6 +1964,7 @@ export default function Home() {
       rule: `Buy once with ${draftAmount} USDG`, detail: "Receipt confirmed · balance reconciliation pending", status: "Confirmed",
       budget: `${Number(draftAmount).toFixed(2)} USDG`, expires: "Completed", createdAt: Date.now(), txHash: receipt.hash,
       walletAddress: address.toLowerCase(), inputAmount: Number(draftAmount), actionLockFingerprint: actionLock.fingerprint,
+      fillProofSnapshot,
     }, ...current]);
     setComposerOpen(false);
     track("transaction_confirmed", { ticker: draftAsset, side: "buy" });
@@ -2014,6 +2063,7 @@ export default function Home() {
     );
     actionLock = await runActionLockGate(actionLockIntent);
     const executionQuote = actionLock.quote;
+    const fillProofSnapshot = captureFillProofSnapshot(actionLock);
     if (BigInt(executionQuote.pay.rawAmount) !== amountIn) {
       throw new Error("The ERC-8056 raw input changed before execution. Run the sell again.");
     }
@@ -2039,7 +2089,17 @@ export default function Home() {
     setTransactionStep(`Confirm the ${draftAsset} sell in your wallet…`);
     const transaction = await router.execute(calldata.commands, calldata.inputs, executionDeadline);
     setTransactionStep("Waiting for mainnet confirmation…");
-    const receipt = await transaction.wait();
+    let receipt: TransactionReceipt | null;
+    try {
+      receipt = await transaction.wait();
+    } catch (error) {
+      if (isError(error, "TRANSACTION_REPLACED")) {
+        if (!error.cancelled && error.receipt.status === 1) receipt = error.receipt;
+        else throw new Error("The submitted sell was cancelled or reverted.");
+      } else {
+        throw error;
+      }
+    }
     if (!receipt || receipt.status !== 1) throw new Error("The sell was not confirmed.");
     const received = BigInt(await usdG.balanceOf(address)) - usdGBefore;
     if (received <= 0n) throw new Error("Transaction confirmed but no USDG was received.");
@@ -2052,6 +2112,7 @@ export default function Home() {
       budget: `${draftAmount} ${draftAsset}`, expires: "Completed", createdAt: Date.now(), txHash: receipt.hash,
       walletAddress: address.toLowerCase(),
       inputAmount: Number(draftAmount), outputAmount: Number(formatUnits(received, USDG_DECIMALS)), actionLockFingerprint: actionLock.fingerprint,
+      fillProofSnapshot,
     }, ...current]);
     await refreshWalletBalances(address, provider);
     setComposerOpen(false);
@@ -2190,8 +2251,8 @@ export default function Home() {
     }
     const escapeCell = (value: string) => `"${value.replaceAll('"', '""')}"`;
     const rows = [
-      ["Asset", "Order", "Rule", "Result", "Time", "Status", "Mainnet receipt"],
-      ...activityRows.map((item) => [item.asset, item.name, item.rule, item.detail, new Date(item.createdAt).toISOString(), item.status, `${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${item.txHash}`]),
+      ["Asset", "Order", "Rule", "Result", "Time", "Status", "Mainnet receipt", "FillProof"],
+      ...activityRows.map((item) => [item.asset, item.name, item.rule, item.detail, new Date(item.createdAt).toISOString(), item.status, `${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${item.txHash}`, item.kind === "DCA" ? "" : `${window.location.origin}/fillproof/${item.txHash}`]),
     ];
     const csv = rows.map((row) => row.map(escapeCell).join(",")).join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
@@ -2413,12 +2474,12 @@ export default function Home() {
           <div className="activity-overview"><article><span>CONFIRMED RECEIPTS</span><strong>{activityRows.length}</strong><small>Explorer-linked mainnet transactions</small></article><article><span>TRACKED TRADE VOLUME</span><strong>{trackedTradeVolume.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDG</strong><small>Buys spent plus sell proceeds</small></article><article><span>DCA CREATED</span><strong>{activityRows.filter((item) => item.kind === "DCA").length}</strong><small>Onchain automation receipts</small></article><article><span>LAST ACTIVITY</span><strong>{activityRows[0] ? new Date(activityRows[0].createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "None yet"}</strong><small>{activityRows[0] ? new Date(activityRows[0].createdAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "Your first receipt will appear here"}</small></article></div>
           <div className="activity-toolbar"><div>{(["all", "trades", "dca"] as ActivityFilter[]).map((filter) => <button key={filter} className={activityFilter === filter ? "selected" : ""} onClick={() => setActivityFilter(filter)}>{filter === "all" ? `All ${activityRows.length}` : filter === "trades" ? "Buy & Sell" : "DCA"}</button>)}</div><span><i /> {connected ? `${compactAddress(walletAddress)} · Robinhood Chain` : "Connect wallet to load receipts"}</span></div>
           <div className="activity-card">
-            {connected && visibleActivityRows.map((item) => <div className="activity-row upgraded" key={item.id}><Mark ticker={item.asset} /><div><span className={`activity-kind ${item.kind.toLowerCase()}`}>{item.kind}</span><strong>{item.kind === "Buy" ? `Bought ${item.asset}` : item.kind === "Sell" ? `Sold ${item.asset}` : `${item.asset} DCA created`}</strong><small>{item.name}</small></div><p><strong>{item.detail}</strong><small>{item.rule}</small></p><time>{new Date(item.createdAt).toLocaleString()}</time><a className="activity-status" href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${item.txHash}`} target="_blank" rel="noreferrer">View receipt ↗</a></div>)}
+            {connected && visibleActivityRows.map((item) => <div className="activity-row upgraded" key={item.id}><Mark ticker={item.asset} /><div><span className={`activity-kind ${item.kind.toLowerCase()}`}>{item.kind}</span><strong>{item.kind === "Buy" ? `Bought ${item.asset}` : item.kind === "Sell" ? `Sold ${item.asset}` : `${item.asset} DCA created`}</strong><small>{item.name}</small></div><p><strong>{item.detail}</strong><small>{item.kind === "DCA" ? item.rule : item.fillProofSnapshot ? "Pretrade snapshot pinned · onchain reconstruction ready" : "Onchain receipt · pre-FillProof trade"}</small></p><time>{new Date(item.createdAt).toLocaleString()}</time><div className="activity-row-actions">{item.kind !== "DCA" && <button type="button" onClick={() => setSelectedFillProof(item)}>Open FillProof</button>}<a className="activity-status" href={`${ROBINHOOD_MAINNET.blockExplorerUrls[0]}/tx/${item.txHash}`} target="_blank" rel="noreferrer">{item.kind === "DCA" ? "Strategy receipt" : "Explorer"} ↗</a></div></div>)}
             {!connected && <div className="empty-state order-empty activity-empty wallet-locked-empty"><span className="activity-lock" aria-hidden="true">↳</span><strong>Connect a wallet to view activity</strong><span>Receipts are isolated by wallet address. Disconnecting immediately hides every local transaction label.</span><div><button onClick={handleWalletButton}>Connect wallet</button></div></div>}
             {connected && activityRows.length === 0 && <div className="empty-state order-empty activity-empty"><strong>No confirmed mainnet activity yet</strong><span>Start with a live quote. Once the wallet confirms, HoodFlow stores the transaction reference under this wallet only and links the block explorer receipt.</span><div><button onClick={() => openComposer("Buy")}>Buy a Stock Token</button><button onClick={() => openComposer("DCA")}>Create a DCA</button></div></div>}
             {activityRows.length > 0 && visibleActivityRows.length === 0 && <div className="empty-state"><strong>No receipts in this filter</strong><span>Your other confirmed activity remains available under All.</span></div>}
           </div>
-          <div className="activity-proof"><article><span>01</span><p><strong>Wallet confirmed</strong><small>Prepared quotes never appear as completed activity.</small></p></article><article><span>02</span><p><strong>Explorer linked</strong><small>Every row opens the public transaction receipt.</small></p></article><article><span>03</span><p><strong>Exportable</strong><small>Download the same local receipt history as CSV.</small></p></article></div>
+          <div className="activity-proof"><article><span>01</span><p><strong>Quote pinned</strong><small>New fills keep the exact ActionLock quote and protected minimum as a local snapshot.</small></p></article><article><span>02</span><p><strong>Settlement reconstructed</strong><small>Router calldata and canonical token transfers are verified from the public receipt.</small></p></article><article><span>03</span><p><strong>Portable receipt</strong><small>Download JSON or share a wallet-free public FillProof link.</small></p></article></div>
           <p className="activity-local-note">This device-local index is separated by wallet address and is not a complete tax record. Disconnecting hides it immediately; clearing browser storage removes the labels but never changes onchain transactions.</p>
         </section>
       )}
@@ -2442,7 +2503,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Release 0.12.0</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("action-lock")}>ActionLock</button><button onClick={() => navigate("agents")}>Agents</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Release 0.13.0</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("action-lock")}>ActionLock</button><button onClick={() => navigate("agents")}>Agents</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) closeComposer(); }}>
@@ -2471,6 +2532,16 @@ export default function Home() {
           </section>
         </div>
       )}
+
+      {selectedFillProof?.txHash && connected && selectedFillProof.walletAddress.toLowerCase() === walletAddress.toLowerCase() && <div className="modal-backdrop fillproof-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) closeFillProof(); }}>
+        <FillProofReceipt
+          txHash={selectedFillProof.txHash}
+          walletAddress={walletAddress}
+          localSnapshot={selectedFillProof.fillProofSnapshot}
+          onClose={closeFillProof}
+          onNotify={notify}
+        />
+      </div>}
 
       {selectedStrategy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !onchainBusy) setSelectedStrategy(null); }}>
         <section className="detail-drawer" role="dialog" aria-modal="true" aria-label={`${selectedStrategy.name} details`}>

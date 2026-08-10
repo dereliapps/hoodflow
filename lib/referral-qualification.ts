@@ -19,14 +19,23 @@ const ROUTED_TOKEN_TO_TICKER = new Map(
   ROUTED_ASSETS.map((ticker) => [ROBINHOOD_TOKENS[ticker].toLowerCase(), ticker]),
 );
 
-type ReceiptLog = { address: string; topics: readonly string[]; data: string };
-type SwapShape = {
+export type ReceiptLog = { address: string; topics: readonly string[]; data: string };
+export type ReviewedHoodFlowSettlement = {
   protocol: "V3" | "V4";
   tokenIn: string;
   tokenOut: string;
   amountIn: bigint;
   minimumOut: bigint;
+  fee: number;
+  tickSpacing: number | null;
+  deadline: bigint;
+  received: bigint;
+  transferCount: number;
+  ticker: string;
+  side: "buy" | "sell";
 };
+
+type SwapShape = Omit<ReviewedHoodFlowSettlement, "deadline" | "received" | "transferCount" | "ticker" | "side">;
 
 function decodePermit(input: string) {
   const [permitValue] = CODER.decode([
@@ -66,7 +75,15 @@ function decodeV3(input: string, wallet: string): SwapShape {
   }
   const ticker = ROUTED_TOKEN_TO_TICKER.get((tokenIn === USDG_ADDRESS ? tokenOut : tokenIn).toLowerCase());
   if (!ticker || V3_ROUTE_FEES[ticker] !== fee) throw new Error("The referral trade is not a reviewed HoodFlow V3 route.");
-  return { protocol: "V3", tokenIn, tokenOut, amountIn: BigInt(amountInValue), minimumOut: BigInt(minimumOutValue) };
+  return {
+    protocol: "V3",
+    tokenIn,
+    tokenOut,
+    amountIn: BigInt(amountInValue),
+    minimumOut: BigInt(minimumOutValue),
+    fee,
+    tickSpacing: null,
+  };
 }
 
 function decodeV4(input: string): SwapShape {
@@ -100,28 +117,29 @@ function decodeV4(input: string): SwapShape {
   }
   const ticker = ROUTED_TOKEN_TO_TICKER.get((tokenIn === USDG_ADDRESS ? tokenOut : tokenIn).toLowerCase());
   if (!ticker || V3_ROUTE_FEES[ticker]) throw new Error("The referral trade is not a reviewed HoodFlow V4 market.");
-  return { protocol: "V4", tokenIn, tokenOut, amountIn, minimumOut };
+  return { protocol: "V4", tokenIn, tokenOut, amountIn, minimumOut, fee, tickSpacing };
 }
 
 function outputReceived(logs: readonly ReceiptLog[], tokenOut: string, wallet: string) {
   const walletTopic = zeroPadValue(wallet, 32).toLowerCase();
-  return logs.reduce((total, log) => {
+  return logs.reduce((result, log) => {
     if (log.address.toLowerCase() !== tokenOut.toLowerCase()
       || log.topics.length !== 3
       || log.topics[0]?.toLowerCase() !== TRANSFER_TOPIC
       || log.topics[2]?.toLowerCase() !== walletTopic
-      || !/^0x[a-fA-F0-9]{64}$/.test(log.data)) return total;
-    return total + BigInt(log.data);
-  }, 0n);
+      || !/^0x[a-fA-F0-9]{64}$/.test(log.data)) return result;
+    return { amount: result.amount + BigInt(log.data), count: result.count + 1 };
+  }, { amount: 0n, count: 0 });
 }
 
-export function verifyEligibleReferralTrade(args: {
+export function verifyHoodFlowRouterSettlement(args: {
   transactionData: string;
   wallet: string;
   logs: readonly ReceiptLog[];
+  requireExactPermitAmount?: boolean;
 }) {
   const wallet = getAddress(args.wallet);
-  const [commandsValue, inputsValue] = ROUTER_INTERFACE.decodeFunctionData("execute", args.transactionData);
+  const [commandsValue, inputsValue, deadlineValue] = ROUTER_INTERFACE.decodeFunctionData("execute", args.transactionData);
   const commands = String(commandsValue).toLowerCase();
   const inputs = Array.from(inputsValue as Result, (value) => String(value));
   if ((commands !== "0x0a00" && commands !== "0x0a10") || inputs.length !== 2) {
@@ -130,6 +148,9 @@ export function verifyEligibleReferralTrade(args: {
 
   const permit = decodePermit(inputs[0]);
   const swap = commands === "0x0a00" ? decodeV3(inputs[1], wallet) : decodeV4(inputs[1]);
+  if (swap.amountIn <= 0n || swap.minimumOut <= 0n) {
+    throw new Error("The transaction does not contain positive HoodFlow input and protection bounds.");
+  }
   const stockToken = swap.tokenIn === USDG_ADDRESS ? swap.tokenOut : swap.tokenOut === USDG_ADDRESS ? swap.tokenIn : null;
   if (!stockToken || !ROUTED_TOKEN_TO_TICKER.has(stockToken.toLowerCase())) {
     throw new Error("Only reviewed USDG Stock Token routes qualify for referral points.");
@@ -137,12 +158,32 @@ export function verifyEligibleReferralTrade(args: {
   if (permit.spender !== UNIVERSAL_ROUTER_ADDRESS || permit.token !== swap.tokenIn || permit.amount < swap.amountIn) {
     throw new Error("The transaction permit does not match the qualifying swap.");
   }
+  if (args.requireExactPermitAmount && permit.amount !== swap.amountIn) {
+    throw new Error("The transaction permit exceeds the exact HoodFlow input amount.");
+  }
   if (PERMIT2_ADDRESS === ZeroAddress) throw new Error("Referral qualification is unavailable.");
 
-  const received = outputReceived(args.logs, swap.tokenOut, wallet);
-  if (received < swap.minimumOut || received <= 0n) throw new Error("The qualifying output was not settled to the invitee wallet.");
-  if (swap.tokenIn === USDG_ADDRESS ? swap.amountIn < MINIMUM_USDG_VALUE : received < MINIMUM_USDG_VALUE) {
+  const output = outputReceived(args.logs, swap.tokenOut, wallet);
+  if (output.amount < swap.minimumOut || output.amount <= 0n) throw new Error("The qualifying output was not settled to the invitee wallet.");
+  const ticker = ROUTED_TOKEN_TO_TICKER.get(stockToken.toLowerCase())!;
+  return {
+    ...swap,
+    deadline: BigInt(deadlineValue),
+    received: output.amount,
+    transferCount: output.count,
+    ticker,
+    side: swap.tokenIn === USDG_ADDRESS ? "buy" as const : "sell" as const,
+  } satisfies ReviewedHoodFlowSettlement;
+}
+
+export function verifyEligibleReferralTrade(args: {
+  transactionData: string;
+  wallet: string;
+  logs: readonly ReceiptLog[];
+}) {
+  const settlement = verifyHoodFlowRouterSettlement(args);
+  if (settlement.side === "buy" ? settlement.amountIn < MINIMUM_USDG_VALUE : settlement.received < MINIMUM_USDG_VALUE) {
     throw new Error("An eligible referral trade must settle at least 1 USDG of value.");
   }
-  return { ...swap, received, ticker: ROUTED_TOKEN_TO_TICKER.get(stockToken.toLowerCase())! };
+  return settlement;
 }
