@@ -85,12 +85,13 @@ const CommunityTokens = dynamic(() => import("./community-tokens"), { ssr: false
 const AgentsWorkspace = dynamic(() => import("./agents-workspace"), { ssr: false, loading: () => <WorkspaceLoader label="Loading agent execution" /> });
 const ActionLockWorkspace = dynamic(() => import("./action-lock-workspace"), { ssr: false, loading: () => <WorkspaceLoader label="Loading ActionLock" /> });
 const DepthMapWorkspace = dynamic(() => import("./depth-map-workspace"), { ssr: false, loading: () => <WorkspaceLoader label="Loading DepthMap" /> });
+const BellLockWorkspace = dynamic(() => import("./bell-lock-workspace"), { ssr: false, loading: () => <WorkspaceLoader label="Loading BellLock" /> });
 const FillProofReceipt = dynamic(() => import("./fill-proof-receipt"), { ssr: false });
 const AssetRequestBoard = dynamic(() => import("./asset-request-board"), { ssr: false, loading: () => <WorkspaceLoader label="Loading asset requests" /> });
 const ReferralRewards = dynamic(() => import("./referral-rewards"), { ssr: false, loading: () => <WorkspaceLoader label="Loading rewards" /> });
 const PrivyWalletRuntime = dynamic(() => import("./privy-wallet-runtime"), { ssr: false });
 
-type View = "overview" | "strategies" | "assets" | "asset" | "community" | "agents" | "action-lock" | "depth-map" | "portfolio" | "rewards" | "marketplace" | "activity" | "controls";
+type View = "overview" | "strategies" | "assets" | "asset" | "community" | "agents" | "action-lock" | "depth-map" | "bell-lock" | "portfolio" | "rewards" | "marketplace" | "activity" | "controls";
 type StrategyKind = "Buy" | "Sell" | "DCA";
 type StrategyStatus = "Prepared" | "Paused" | "Confirmed" | "Cancelled";
 type MarketplaceSort = "featured" | "cadence" | "risk";
@@ -853,7 +854,7 @@ export default function Home() {
         setView("community");
       } else if (params.get("ref")) {
         setView("rewards");
-      } else if (requestedView && ["overview", "strategies", "assets", "community", "agents", "action-lock", "depth-map", "portfolio", "rewards", "marketplace", "activity", "controls"].includes(requestedView)) {
+      } else if (requestedView && ["overview", "strategies", "assets", "community", "agents", "action-lock", "depth-map", "bell-lock", "portfolio", "rewards", "marketplace", "activity", "controls"].includes(requestedView)) {
         setView(requestedView);
       } else if (view === "asset") {
         setView("assets");
@@ -1583,6 +1584,15 @@ export default function Home() {
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
   }
 
+  function openBellLock(ticker = "AAPL") {
+    setView("bell-lock");
+    const url = new URL("/", window.location.origin);
+    url.searchParams.set("view", "bell-lock");
+    if (isRoutedAsset(ticker)) url.searchParams.set("bellAsset", ticker);
+    window.history.pushState({}, "", `${url.pathname}${url.search}`);
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
+  }
+
   function navigate(nextView: View) {
     setView(nextView);
     if (nextView !== "asset") {
@@ -2280,6 +2290,7 @@ export default function Home() {
   const navigation: Array<{ view: View; label: string }> = [
     { view: "overview", label: "Home" },
     { view: "assets", label: "Stock Tokens" },
+    { view: "bell-lock", label: "BellLock" },
     { view: "depth-map", label: "DepthMap" },
     { view: "action-lock", label: "ActionLock" },
     { view: "community", label: "Crypto" },
@@ -2411,6 +2422,7 @@ export default function Home() {
               <p>{selectedAsset.fullFill ? `Buy with USDG or sell ${selectedAsset.ticker} back to USDG through ${isV3RoutedAsset(selectedAsset.ticker) ? "the verified Uniswap V3 pool" : "the best reviewed Uniswap V4 pool"}. Every order uses an exact short-lived permission.` : selectedAsset.ticker === "MSFT" ? "A quote exists, but the full router fork test detected a partial fill. HoodFlow blocks the order until complete-input execution is verified." : "No reviewed USDG pool can currently fill the complete input. The asset remains indexed and monitored without exposing your wallet to a forced route."}</p>
               <div className="trade-route-facts"><div><span>NETWORK</span><strong>Robinhood Chain / 4663</strong></div><div><span>PAY</span><strong>USDG</strong></div><div><span>RECEIVE</span><strong>{selectedAsset.ticker} token</strong></div><div><span>ROUTE</span><strong>{selectedAsset.fullFill ? `${isV3RoutedAsset(selectedAsset.ticker) ? "V3" : "V4"} full-fill verified` : "Blocked"}</strong></div></div>
               <div className="asset-trade-actions"><button className="primary-action asset-trade-action" onClick={() => openComposer("Buy", selectedAsset.ticker)} disabled={!selectedAsset.fullFill || priceBook[selectedAsset.ticker]?.status !== "live"}>{selectedAsset.fullFill ? priceBook[selectedAsset.ticker]?.status === "live" ? `Buy ${selectedAsset.ticker}` : "Waiting for oracle" : "No safe route"}</button><button className="asset-sell-action" onClick={() => openComposer("Sell", selectedAsset.ticker)} disabled={!selectedAsset.fullFill || priceBook[selectedAsset.ticker]?.status !== "live"}>Sell to USDG</button></div>
+              {selectedAsset.fullFill && <button className="asset-action-lock" onClick={() => openBellLock(selectedAsset.ticker)}>Arm BellLock for the next open →</button>}
               {selectedAsset.fullFill && <button className="asset-action-lock" onClick={() => openActionLock(selectedAsset.ticker)}>Run ActionLock before connecting →</button>}
               {!connected && selectedAsset.fullFill && <button className="connect-inline" onClick={handleWalletButton}>Connect wallet first</button>}
             </aside>
@@ -2428,6 +2440,8 @@ export default function Home() {
       {view === "community" && <CommunityTokens walletAddress={walletAddress} walletProvider={walletProvider} onWallet={handleWalletButton} notify={notify} onTradeConfirmed={qualifyReferral} />}
 
       {view === "action-lock" && <ActionLockWorkspace />}
+
+      {view === "bell-lock" && <BellLockWorkspace onOpenMarket={openAgentMarket} />}
 
       {view === "depth-map" && <DepthMapWorkspace
         markets={assetRegistry
@@ -2520,7 +2534,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Release 0.15.0</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("depth-map")}>DepthMap</button><button onClick={() => navigate("action-lock")}>ActionLock</button><button onClick={() => navigate("agents")}>Agents</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Release 0.16.0</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("bell-lock")}>BellLock</button><button onClick={() => navigate("depth-map")}>DepthMap</button><button onClick={() => navigate("action-lock")}>ActionLock</button><button onClick={() => navigate("agents")}>Agents</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) closeComposer(); }}>

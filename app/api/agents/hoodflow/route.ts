@@ -15,8 +15,8 @@ export async function GET() {
   return NextResponse.json({
     name: "HoodFlow Execution Preflight",
     provider: "HoodFlow",
-    version: "1.1",
-    description: "A bounded surface for discovering and preflighting reviewed Stock Token routes, then reconstructing confirmed Robinhood Chain settlements without wallet authority.",
+    version: "1.2",
+    description: "A bounded surface for discovering reviewed Stock Token routes, inspecting reopening policies, preparing preflights and reconstructing confirmed Robinhood Chain settlements without wallet authority.",
     network: { chainId: 4663, name: "Robinhood Chain", settlementToken: "USDG" },
     connectors: {
       mcp: {
@@ -94,6 +94,40 @@ export async function GET() {
           output: "A downloadable ActionLock passport with explicit pass, block or unknown checks. It is not proof of execution or settlement.",
         },
         {
+          id: "hoodflow.evaluate-bell-lock-preview",
+          name: "BellLock",
+          description: "Evaluate a buy-only reopening policy against server-collected source observations. Caller evidence is rejected and the public preview never returns a trade handoff.",
+          method: "POST",
+          endpoint: `${origin}/api/bell-lock/evaluate`,
+          inputSchema: {
+            type: "object",
+            required: ["policyId", "asset", "amountUsdg", "armedAt", "maxGapBps", "maxSpreadBps", "maxOracleDexDeviationBps", "maxImpactBps", "convergenceSamples", "windowExpirySeconds", "targetSession", "stressMultiplier"],
+            properties: {
+              policyId: { type: "string" },
+              asset: { type: "string", description: "Route-reviewed HoodFlow ticker, for example AAPL." },
+              amountUsdg: { type: "string", description: "Exact USDG intent from 1 to 50,000." },
+              armedAt: { type: "string", format: "date-time" },
+              maxGapBps: { type: "integer", minimum: 10, maximum: 2500 },
+              maxSpreadBps: { type: "integer", minimum: 5, maximum: 1000 },
+              maxOracleDexDeviationBps: { type: "integer", minimum: 5, maximum: 1000 },
+              maxImpactBps: { type: "integer", minimum: 5, maximum: 1000 },
+              convergenceSamples: { type: "integer", const: 2 },
+              windowExpirySeconds: { type: "integer", minimum: 30, maximum: 300 },
+              targetSession: { type: "string", const: "regular" },
+              stressMultiplier: { type: "integer", const: 2 },
+            },
+            additionalProperties: false,
+          },
+          checks: [
+            "regular-session-transition",
+            "two-distinct-opening-observations",
+            "opening-gap-and-spread-policy",
+            "issuer-halt-and-corporate-action-context",
+            "exact-and-stress-route-policy",
+          ],
+          output: "A source-observed RefusalProof only. Signed session evidence is not configured, so ready and wallet handoff states are impossible in the public preview.",
+        },
+        {
           id: "hoodflow.prepare-stock-token-basket",
           description: "Allocate one USDG budget across two to six reviewed markets and preflight every leg. The plan is non-atomic and never auto-submits.",
           method: "POST",
@@ -134,6 +168,7 @@ export async function GET() {
       maxOracleDeviationBps: MAX_ORACLE_DEVIATION_BPS,
       note: "HoodFlow's public agent surface prepares execution. It does not hold funds, request private keys, or sign for the user.",
       actionLock: "Read/preflight only. Official corporate-action and halt data can be incomplete or delayed; a passport is not proof of execution.",
+      bellLock: "Policy-only preview. Client evidence is rejected; signed session verification is unavailable and no execution handoff can be returned.",
       fillProof: "Read-only public-chain reconstruction. Historical trades receive no invented pretrade quote; the checksum is not a HoodFlow signature.",
     },
     virtualsAcp: {
@@ -153,7 +188,7 @@ export async function GET() {
         },
       ],
       signerConfigured: false,
-      claim: "HoodFlow is registered on EconomyOS with two public, read-only ACP resources. Quote, ActionLock and basket preflights remain direct API actions and always hand execution back to the user.",
+      claim: "HoodFlow is registered on EconomyOS with two public, read-only ACP resources. Quote, ActionLock, BellLock preview and basket preflights remain direct API actions; none receives wallet authority.",
     },
   }, {
     headers: {

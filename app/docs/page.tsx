@@ -10,7 +10,7 @@ import {
 
 export const metadata: Metadata = {
   title: "Documentation",
-  description: "Learn how to stress-test live liquidity, compare device-local Depth Memory observations, inspect ActionLock and FillProof records, and trade with a self-custody wallet.",
+  description: "Learn how BellLock watches a market reopening, stress-test live liquidity, inspect ActionLock and FillProof records, and trade with a self-custody wallet.",
   alternates: { canonical: "/docs" },
 };
 
@@ -26,6 +26,7 @@ const sections = [
   ["depthmap", "DepthMap"],
   ["depth-memory", "Depth Memory"],
   ["action-lock", "ActionLock"],
+  ["bell-lock", "BellLock"],
   ["fillproof", "FillProof"],
   ["agents", "Agent API"],
   ["community", "Crypto"],
@@ -148,6 +149,20 @@ export default function DocsPage() {
           <div className="docs-note"><span>OFFICIAL-DATA LIMIT</span><p>Corporate-action and exchange-halt information can be incomplete, delayed or unavailable from public sources. ActionLock reports those gaps as unknown; it does not certify issuer disclosures or replace official exchange and issuer notices.</p></div>
         </section>
 
+        <section id="bell-lock" className="docs-section">
+          <p className="docs-kicker">08B / BELLLOCK</p><h2>Watch the opening bell without giving an agent your wallet</h2>
+          <p><strong>BellLock</strong> is a user-armed reopening policy for Stock Tokens. It records the exact USDG intent and hard limits for opening gap, spread, oracle-to-DEX deviation and stress-size route drift. The watcher can inspect evidence; it cannot approve a token, sign a message or submit a transaction.</p>
+          <div className="docs-status-grid">
+            <article><b className="watch">ARMED</b><p>The policy is saved in this browser and waits for its target regular session. Keeping the page open is required in the current preview; there is no hidden background trader.</p></article>
+            <article><b className="watch">WARMING</b><p>A reopening needs two fresh, distinct and sufficiently spaced observations. One print is never promoted into a signature window.</p></article>
+            <article><b className="paused">REFUSED</b><p>Unknown session evidence, a halt, corporate-action conflict, stale report or breached limit fails closed. BellLock records the reason and exposes no execution handoff.</p></article>
+            <article><b className="ready">READY — VERIFIED TIER ONLY</b><p>A future production handoff requires verifier-bound session reports, previous-close evidence and fresh exact plus stress quotes. The wallet still makes the final decision.</p></article>
+          </div>
+          <div className="docs-split"><article><span>PROOF-OF-OPEN POLICY</span><h3>Closed to open, then converge</h3><p>The strict evaluator binds a closed-to-regular-session transition, two unique report digests, compatible feed units, a verified previous close and every evidence expiry into one short signature window.</p></article><article className="accent"><span>PREVIEW SAFETY BOUNDARY</span><h3>No signed stream, no green light</h3><p>The current public preview can show official unsigned Robinhood observations and onchain reads, but it cannot call them a cryptographic session proof. Until verified Data Streams collection is configured, it returns an armed, warming, refused or unavailable receipt and never enables a trade.</p></article></div>
+          <div className="docs-note"><span>CHECKSUM ≠ SIGNATURE</span><p>A BellLock receipt includes a deterministic SHA-256 integrity digest so the JSON can be compared byte for byte. That digest does not authenticate HoodFlow or the upstream publisher. Only a verifier receipt bound to the raw report can satisfy the strict proof tier.</p></div>
+          <Link className="docs-address" href="/?view=bell-lock">Open BellLock →</Link>
+        </section>
+
         <section id="fillproof" className="docs-section">
           <p className="docs-kicker">09 / FILLPROOF</p><h2>Reconstruct what actually settled</h2>
           <p>Every new reviewed Stock Token Buy or Sell can open a <strong>FillProof</strong>. HoodFlow reads the confirmed transaction, decodes the supported Universal Router command, verifies the sender and canonical token addresses, totals matching settlement transfers, and compares the actual raw output with the protected minimum encoded in calldata.</p>
@@ -204,6 +219,6 @@ export default function DocsPage() {
     </div>
 
     <section className="seo-risk"><strong>Stock Tokens are not shares.</strong><p>They may be restricted in your jurisdiction and do not provide shareholder rights.</p></section>
-    <footer className="seo-footer"><span>Documentation · Release 0.15.0</span><Link href="/learn">Read plain-language guides</Link><Link href="/security">Review security & known limitations →</Link><a href="https://x.com/hoodfloow" target="_blank" rel="noreferrer">𝕏 @hoodfloow</a></footer>
+    <footer className="seo-footer"><span>Documentation · Release 0.16.0</span><Link href="/learn">Read plain-language guides</Link><Link href="/security">Review security & known limitations →</Link><a href="https://x.com/hoodfloow" target="_blank" rel="noreferrer">𝕏 @hoodfloow</a></footer>
   </main>;
 }

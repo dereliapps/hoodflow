@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.0 — 2026-08-11
+
+- Added BellLock, a buy-only passive reopening-policy workspace with hard gap, spread, oracle/DEX and stress-size boundaries.
+- Added a trusted-server BellProof evaluator that requires verifier-bound closed-to-open session reports, two distinct price reports, previous-close binding and exact plus stress route evidence.
+- Added a public fail-closed BellLock preview endpoint that rejects caller-supplied evidence and can never return a trade handoff without signed session verification.
+- Added source-observed RefusalProof receipts, device-local policy history, OpenAPI/agent-manifest discovery and full BellLock documentation.
+- Kept wallet approval, signing, custody and transaction submission outside the BellLock observer.
+
 ## 0.7.0 — 2026-07-18
 
 - Added selectable USDG, VIRTUAL, and WETH payment assets to the community-token terminal.

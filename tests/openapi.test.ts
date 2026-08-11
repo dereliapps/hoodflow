@@ -48,12 +48,13 @@ test("publishes a complete OpenAPI 3.1.2 read/preflight contract", () => {
     "/api/agents/hoodflow",
     "/api/agents/markets",
     "/api/agents/quote",
+    "/api/bell-lock/evaluate",
     "/api/fill-proof",
   ]);
   assert.ok(Object.keys(paths).every((path) => !/execute|sign|submit|send|swap/i.test(path)));
 
   const operationIds = collectValuesForKey(paths, "operationId");
-  assert.equal(operationIds.length, 6);
+  assert.equal(operationIds.length, 7);
   assert.equal(new Set(operationIds).size, operationIds.length);
 
   const safety = document["x-hoodflow-safety"] as JsonObject;
@@ -134,6 +135,47 @@ test("publishes ActionLock as a bounded read/preflight endpoint", () => {
     (document.components.schemas.ActionLockPassport.properties as { decision: { enum: string[] } }).decision.enum,
     ["clear", "watch", "blocked"],
   );
+});
+
+test("publishes BellLock preview as policy-only and non-authorizing", () => {
+  const document = buildHoodFlowOpenApiDocument() as never as {
+    paths: {
+      "/api/bell-lock/evaluate": {
+        post: {
+          requestBody: { content: { "application/json": { schema: { $ref: string } } } };
+          responses: { "200": { content: { "application/json": { schema: { $ref: string } } } } };
+          "x-hoodflow-safety": Record<string, unknown>;
+        };
+      };
+    };
+    components: {
+      schemas: {
+        BellLockPreviewRequest: { properties: Record<string, unknown>; additionalProperties: boolean };
+        BellLockPreviewEvaluation: {
+          properties: {
+            state: { enum: string[] };
+            handoffAllowed: { const: boolean };
+            handoff: { type: string };
+          };
+          additionalProperties: boolean;
+        };
+      };
+    };
+  };
+  const endpoint = document.paths["/api/bell-lock/evaluate"].post;
+  assert.equal(endpoint.requestBody.content["application/json"].schema.$ref, "#/components/schemas/BellLockPreviewRequest");
+  assert.equal(endpoint.responses["200"].content["application/json"].schema.$ref, "#/components/schemas/BellLockPreviewEvaluation");
+  assert.equal(endpoint["x-hoodflow-safety"].custody, false);
+  assert.equal(endpoint["x-hoodflow-safety"].signing, false);
+  assert.equal(endpoint["x-hoodflow-safety"].submission, false);
+  assert.equal(endpoint["x-hoodflow-safety"].handoffAllowed, false);
+  assert.equal(document.components.schemas.BellLockPreviewRequest.additionalProperties, false);
+  assert.equal(document.components.schemas.BellLockPreviewEvaluation.additionalProperties, false);
+  assert.ok(!("evidence" in document.components.schemas.BellLockPreviewRequest.properties));
+  assert.ok(!("observation" in document.components.schemas.BellLockPreviewRequest.properties));
+  assert.doesNotMatch(document.components.schemas.BellLockPreviewEvaluation.properties.state.enum.join(","), /ready/);
+  assert.equal(document.components.schemas.BellLockPreviewEvaluation.properties.handoffAllowed.const, false);
+  assert.equal(document.components.schemas.BellLockPreviewEvaluation.properties.handoff.type, "null");
 });
 
 test("keeps OpenAPI asset enums and basket bounds aligned with reviewed markets", () => {

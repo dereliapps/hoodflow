@@ -23,7 +23,7 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(response.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
 
   const html = await response.text();
-  assert.match(html, /<title>HoodFlow \| See what changed\. Scan again\.<\/title>/i);
+  assert.match(html, /<title>HoodFlow BellLock \| Agents watch the bell\. You keep the signature\.<\/title>/i);
   assert.match(html, /Markets in focus\./);
   assert.match(html, /Routes in full view\./);
   assert.match(html, /Explore markets/);
@@ -41,7 +41,7 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(html, /Stock Tokens are not shares/);
   assert.match(html, /review quote/i);
   assert.match(html, /Robinhood Chain/);
-  assert.match(html, /og\.png/);
+  assert.match(html, /og-belllock\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
@@ -97,6 +97,13 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
     readFile(new URL("../app/depth-memory-panel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/depth-memory-panel.module.css", import.meta.url), "utf8"),
     readFile(new URL("../lib/depth-memory.ts", import.meta.url), "utf8"),
+  ]);
+  const [bellLockUi, bellLockCss, bellLockCore, bellLockPreview, bellLockRoute] = await Promise.all([
+    readFile(new URL("../app/bell-lock-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/bell-lock-workspace.module.css", import.meta.url), "utf8"),
+    readFile(new URL("../lib/bell-lock.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/bell-lock-preview.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/bell-lock/evaluate/route.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /"use client"/);
@@ -156,7 +163,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(layout, /NEXT_PUBLIC_SITE_URL/);
   assert.doesNotMatch(layout, /next[/]headers|headers\(\)/);
   assert.match(page, /Automatic retries are active/);
-  assert.match(page, /Release 0\.15\.0/);
+  assert.match(page, /Release 0\.16\.0/);
   assert.match(page, /Open FillProof/);
   assert.match(page, /fillProofSnapshot/);
   assert.match(page, /DCA command center/);
@@ -306,6 +313,23 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(actionLockWorkspace, /Download/);
   assert.match(actionLockWorkspace, /Read-only preflight/);
   assert.match(actionLockWorkspace, /Change Watch/);
+  assert.match(page, /BellLockWorkspace/);
+  assert.match(page, /view: "bell-lock", label: "BellLock"/);
+  assert.match(bellLockUi, /BELLLOCK \/ GUARDED OPEN/);
+  assert.match(bellLockUi, /Arm passive BellLock/);
+  assert.match(bellLockUi, /SOURCE-OBSERVED V0/);
+  assert.match(bellLockUi, /Signed session proof/);
+  assert.match(bellLockUi, /body: JSON\.stringify\(policy\)/);
+  assert.doesNotMatch(bellLockUi, /body: JSON\.stringify\([^)]*memory/);
+  assert.doesNotMatch(bellLockCss, /(?:background|background-color):\s*(?:#fff(?:fff)?\b|white\b)/i);
+  assert.match(bellLockCore, /authenticatedPublisher: false|authenticatesPublisher: false/);
+  assert.match(bellLockCore, /globalBestExecutionClaimed: false/);
+  assert.match(bellLockCore, /verifierReceipt/);
+  assert.match(bellLockPreview, /source-observed-preview/);
+  assert.match(bellLockPreview, /handoffAllowed: false/);
+  assert.match(bellLockRoute, /parseBellLockPreviewRequest/);
+  assert.match(bellLockRoute, /fetchOfficialActionLockEvidence/);
+  assert.match(bellLockRoute, /cache-control": "no-store/);
   assert.match(docs, /two public, read-only ACP resources/);
   assert.match(docs, /no EconomyOS signer or transaction permission is configured/);
   assert.doesNotMatch(docs, /not claiming a live Virtuals ACP registry listing/i);
@@ -337,9 +361,11 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(actionLockLib, /executionHandoff: handoffAllowed/);
   assert.match(agentManifest, /preflightActions/);
   assert.match(agentManifest, /hoodflow\.prepare-action-lock/);
+  assert.match(agentManifest, /hoodflow\.evaluate-bell-lock-preview/);
   assert.match(agentManifest, /hoodflow\.fill-proof/);
   assert.match(agentManifest, /\/api\/fill-proof\?txHash=\{txHash\}/);
   assert.match(agentManifest, /\/api\/action-lock/);
+  assert.match(agentManifest, /\/api\/bell-lock\/evaluate/);
   assert.match(agentManifest, /streamable-http/);
   assert.match(agentManifest, /prepare-stock-token-basket/);
   assert.match(agentManifest, /registryStatus: "published"/);
@@ -397,7 +423,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(css, /\.agents-basket-shell/);
   assert.match(css, /\.basket-order-context/);
   assert.match(communityMarketRoute, /token-pairs\/v1\/robinhood/);
-  assert.match(layout, /HoodFlow \| See what changed\. Scan again\./);
+  assert.match(layout, /HoodFlow BellLock \| Agents watch the bell\. You keep the signature\./);
   assert.match(layout, /Instrument_Sans/);
   assert.match(layout, /IBM_Plex_Mono/);
   assert.match(layout, /summary_large_image/);
