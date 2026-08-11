@@ -659,167 +659,181 @@ export default function BellLockWorkspace({ onOpenMarket }: BellLockWorkspacePro
   return (
     <section className={styles.workspace} aria-labelledby="bell-lock-title">
       <header className={styles.hero}>
-        <div>
-          <p className={styles.eyebrow}><i aria-hidden="true" /> BELLLOCK / GUARDED OPEN</p>
-          <h1 id="bell-lock-title">Wait for a safer opening.<br /><em>Keep the signature.</em></h1>
-        </div>
-        <div className={styles.heroProtocol} aria-label="BellLock safety model">
-          <span>01</span><p><strong>Observe</strong><small>Regular-session transition</small></p>
-          <span>02</span><p><strong>Converge</strong><small>Two distinct samples</small></p>
-          <span>03</span><p><strong>Handoff</strong><small>Fresh user signature</small></p>
-        </div>
+        <p className={styles.eyebrow}><i aria-hidden="true" /> BELLLOCK / GUARDED OPEN</p>
+        <h1 id="bell-lock-title">Wait for a safer opening.<br /><em>Keep the signature.</em></h1>
+        <p className={styles.heroCopy}>Set the market and amount once. BellLock watches the opening and only prepares a trade review when your limits hold.</p>
+
+        <ol className={styles.story} aria-label="How BellLock works">
+          <li><span>1</span><p><strong>Set your limits</strong><small>Choose a token and USDG amount.</small></p></li>
+          <li><span>2</span><p><strong>Let BellLock watch</strong><small>Opening conditions are checked read-only.</small></p></li>
+          <li><span>3</span><p><strong>You decide</strong><small>Review a fresh quote and sign in your wallet.</small></p></li>
+        </ol>
       </header>
 
       <div className={styles.trustBar} role="note">
         <i aria-hidden="true" />
-        <p><strong>Passive policy only.</strong> Saved on this device; no token approval, executable signature, custody or automatic trade is created.</p>
-        <b>SELF-CUSTODY</b>
+        <p><strong>Your wallet stays in control.</strong> BellLock cannot approve tokens, sign or trade for you.</p>
       </div>
 
       <div className={styles.frame}>
         <form className={styles.policyPanel} onSubmit={armPolicy}>
           <div className={styles.panelHead}>
-            <div><span>POLICY CONSOLE</span><strong>Bound the reopen.</strong></div>
-            <button type="button" onClick={startNewPolicy}>New</button>
+            <div><span>YOUR BELLLOCK</span><strong>Choose what to watch.</strong></div>
+            <button type="button" onClick={startNewPolicy}>Reset</button>
           </div>
 
-          <label className={styles.field}>
-            <span>Stock Token</span>
-            <select value={draft.asset} onChange={(event) => updateDraft("asset", event.target.value)}>
-              {MARKETS.map((market) => <option key={market.ticker} value={market.ticker}>{market.ticker} / {market.name}</option>)}
-            </select>
-          </label>
+          <div className={styles.coreFields}>
+            <label className={styles.field}>
+              <span>Stock Token</span>
+              <select value={draft.asset} onChange={(event) => updateDraft("asset", event.target.value)}>
+                {MARKETS.map((market) => <option key={market.ticker} value={market.ticker}>{market.ticker} / {market.name}</option>)}
+              </select>
+            </label>
 
-          <label className={styles.field}>
-            <span>USDG exact input</span>
-            <div className={styles.unitInput}>
-              <input
-                value={draft.amountUsdg}
-                onChange={(event) => updateDraft("amountUsdg", event.target.value)}
-                inputMode="decimal"
-                autoComplete="off"
-                aria-describedby="bell-amount-help"
-              />
-              <b>USDG</b>
+            <label className={styles.field}>
+              <span>Amount to review</span>
+              <div className={styles.unitInput}>
+                <input
+                  value={draft.amountUsdg}
+                  onChange={(event) => updateDraft("amountUsdg", event.target.value)}
+                  inputMode="decimal"
+                  autoComplete="off"
+                  aria-describedby="bell-amount-help"
+                />
+                <b>USDG</b>
+              </div>
+              <small id="bell-amount-help">This is a read-only watch amount, not an order.</small>
+            </label>
+          </div>
+
+          <details className={styles.disclosure}>
+            <summary><span>Safety limits</span><small>Recommended defaults</small></summary>
+            <div className={styles.disclosureBody}>
+              <p className={styles.helpCopy}>BellLock refuses the handoff when any limit below is exceeded.</p>
+              <div className={styles.thresholdGrid}>
+                <label className={styles.field}>
+                  <span>Opening move</span>
+                  <div className={styles.unitInput}><input aria-label="Maximum opening move" value={draft.maxGapPercent} onChange={(event) => updateDraft("maxGapPercent", event.target.value)} inputMode="decimal" /><b>%</b></div>
+                </label>
+                <label className={styles.field}>
+                  <span>Market spread</span>
+                  <div className={styles.unitInput}><input aria-label="Maximum market spread" value={draft.maxSpreadPercent} onChange={(event) => updateDraft("maxSpreadPercent", event.target.value)} inputMode="decimal" /><b>%</b></div>
+                </label>
+                <label className={styles.field}>
+                  <span>Price-source difference</span>
+                  <div className={styles.unitInput}><input aria-label="Maximum price-source difference" value={draft.maxDeviationPercent} onChange={(event) => updateDraft("maxDeviationPercent", event.target.value)} inputMode="decimal" /><b>%</b></div>
+                </label>
+                <label className={styles.field}>
+                  <span>Estimated price impact</span>
+                  <div className={styles.unitInput}><input aria-label="Maximum estimated price impact" value={draft.maxImpactPercent} onChange={(event) => updateDraft("maxImpactPercent", event.target.value)} inputMode="decimal" /><b>%</b></div>
+                </label>
+              </div>
+
+              <label className={styles.field}>
+                <span>Review window</span>
+                <select value={draft.windowExpirySeconds} onChange={(event) => updateDraft("windowExpirySeconds", event.target.value)}>
+                  <option value="60">60 seconds</option>
+                  <option value="75">75 seconds</option>
+                  <option value="90">90 seconds</option>
+                  <option value="120">120 seconds</option>
+                </select>
+              </label>
+
+              <div className={styles.fixedRules} aria-label="Always-on BellLock checks">
+                <span>Always on</span>
+                <p>Regular US session</p><p>Two opening samples</p><p>2x read-only stress check</p>
+              </div>
             </div>
-            <small id="bell-amount-help">Also checks a fixed 2x stress size. It never expands your spend.</small>
-          </label>
-
-          <div className={styles.thresholdGrid}>
-            <label className={styles.field}>
-              <span>Max opening gap</span>
-              <div className={styles.unitInput}><input value={draft.maxGapPercent} onChange={(event) => updateDraft("maxGapPercent", event.target.value)} inputMode="decimal" /><b>%</b></div>
-            </label>
-            <label className={styles.field}>
-              <span>Max spread</span>
-              <div className={styles.unitInput}><input value={draft.maxSpreadPercent} onChange={(event) => updateDraft("maxSpreadPercent", event.target.value)} inputMode="decimal" /><b>%</b></div>
-            </label>
-            <label className={styles.field}>
-              <span>Oracle / DEX max</span>
-              <div className={styles.unitInput}><input value={draft.maxDeviationPercent} onChange={(event) => updateDraft("maxDeviationPercent", event.target.value)} inputMode="decimal" /><b>%</b></div>
-            </label>
-            <label className={styles.field}>
-              <span>Max price impact</span>
-              <div className={styles.unitInput}><input value={draft.maxImpactPercent} onChange={(event) => updateDraft("maxImpactPercent", event.target.value)} inputMode="decimal" /><b>%</b></div>
-            </label>
-          </div>
-
-          <div className={styles.fixedRules}>
-            <div><span>Target</span><strong>US regular open</strong><small>Fixed policy session</small></div>
-            <div><span>Convergence</span><strong>2 samples</strong><small>Distinct observations</small></div>
-            <div><span>Stress read</span><strong>2x amount</strong><small>Never executable</small></div>
-          </div>
-
-          <label className={styles.field}>
-            <span>Ready-window expiry</span>
-            <select value={draft.windowExpirySeconds} onChange={(event) => updateDraft("windowExpirySeconds", event.target.value)}>
-              <option value="60">60 seconds</option>
-              <option value="75">75 seconds</option>
-              <option value="90">90 seconds</option>
-              <option value="120">120 seconds</option>
-            </select>
-          </label>
+          </details>
 
           <button className={styles.armButton} type="submit" disabled={busy}>
-            <span>{busy ? "Evaluating window..." : "Arm passive BellLock"}</span><b aria-hidden="true">&rarr;</b>
+            <span>{busy ? "Checking the window..." : "Arm passive BellLock"}</span><b aria-hidden="true">&rarr;</b>
           </button>
-          <p className={styles.formFoot}>This tab performs read-only refreshes while visible. A ready result only opens a fresh HoodFlow trade review.</p>
+          <p className={styles.formFoot}>No approval or transaction is created. The visible tab checks again every 15 seconds.</p>
         </form>
 
         <div className={styles.outputPanel} id="bell-lock-output" tabIndex={-1}>
           <div className={styles.stateHead} role="status" aria-live="polite">
             <div>
-              <span>{stateCopy.eyebrow}</span>
+              <span>{result ? stateCopy.eyebrow : "READY TO SET UP"}</span>
               <h2>{result ? stateCopy.label : "Not armed"}</h2>
-              <p>{result?.summary ?? "Set hard boundaries, then arm a passive policy for the next regular-session window."}</p>
+              <p>{result?.summary ?? "Choose a market and amount, then BellLock will watch the next regular-session opening."}</p>
             </div>
             <div className={`${styles.stateBadge} ${styles[state]}`}><i aria-hidden="true" />{result ? stateCopy.label : "Draft"}</div>
           </div>
 
           {activePolicy ? (
             <div className={styles.policyTape}>
-              <div><span>ASSET</span><strong>{activePolicy.asset}</strong><small>{activeMarket?.name ?? "Stock Token"}</small></div>
-              <div><span>INPUT</span><strong>{activePolicy.amountUsdg}</strong><small>USDG exact size</small></div>
-              <div><span>ARMED</span><strong>{formatTimestamp(activePolicy.armedAt)}</strong><small>{shortId(activePolicy.policyId)}</small></div>
-              <div><span>MEMORY</span><strong>{memory.openingObservations.length} / 2</strong><small>{memory.baseline ? "Baseline pinned" : "No baseline yet"}</small></div>
+              <div><span>MARKET</span><strong>{activePolicy.asset}</strong><small>{activeMarket?.name ?? "Stock Token"}</small></div>
+              <div><span>WATCH AMOUNT</span><strong>{activePolicy.amountUsdg} USDG</strong><small>Read-only</small></div>
+              <div><span>OPENING READS</span><strong>{memory.openingObservations.length} / 2</strong><small>{memory.baseline ? "Previous close found" : "Waiting for baseline"}</small></div>
             </div>
           ) : null}
 
           {error ? <div className={styles.errorBox} role="alert"><i aria-hidden="true" /><p><strong>Evaluation unavailable</strong><span>{error}</span></p></div> : null}
 
-          <div className={styles.checkBoard} aria-label="BellLock boundaries">
-            {displayedChecks.map((check, index) => (
-              <article key={`${check.id}-${index}`} className={`${styles.check} ${styles[check.status]}`}>
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                <p><strong>{check.label}</strong><small>{check.detail ?? check.value}</small></p>
-                <div><b>{check.status === "pass" ? "PASS" : check.status === "fail" ? "FAIL" : "WAIT"}</b>{check.limit ? <small>Limit {check.limit}</small> : null}</div>
-              </article>
-            ))}
-          </div>
-
           {state === "ready" && activePolicy ? (
             <div className={styles.readyRail}>
-              <div><span>SIGN WINDOW</span><strong>{expirySeconds ?? activePolicy.windowExpirySeconds}s</strong><small>Requoted again inside the existing trade flow</small></div>
+              <div><span>REVIEW WINDOW</span><strong>{expirySeconds ?? activePolicy.windowExpirySeconds}s</strong><small>A fresh quote is checked before you sign</small></div>
               <button type="button" onClick={openReadyTrade}>Review {activePolicy.asset} trade <b aria-hidden="true">&rarr;</b></button>
             </div>
           ) : (
             <div className={styles.monitorRail}>
-              <p><i aria-hidden="true" /><span><strong>{monitoring ? "Passive monitor active" : "Monitor paused"}</strong><small>{monitoring ? `Visible-tab refresh every ${MONITOR_INTERVAL_MS / 1_000}s` : "No background signing or execution"}</small></span></p>
+              <p><i aria-hidden="true" /><span><strong>{monitoring ? "Watching the opening" : "Waiting to be armed"}</strong><small>{monitoring ? `Checking every ${MONITOR_INTERVAL_MS / 1_000}s while this tab is visible` : "Nothing runs or signs in the background"}</small></span></p>
               {activePolicy && ["armed", "warming"].includes(result?.state ?? "armed")
-                ? <button type="button" onClick={() => void evaluatePolicy(activePolicy, memory, true)} disabled={busy}>Evaluate now</button>
+                ? <button type="button" onClick={() => void evaluatePolicy(activePolicy, memory, true)} disabled={busy}>Check now</button>
                 : null}
             </div>
           )}
 
+          <details className={styles.resultDisclosure}>
+            <summary>
+              <span>Safety checks</span>
+              <small>{displayedChecks.filter((check) => check.status === "pass").length} passed · {displayedChecks.filter((check) => check.status === "fail").length} blocked · {displayedChecks.filter((check) => check.status === "wait").length} waiting</small>
+            </summary>
+            <div className={styles.checkBoard} aria-label="BellLock boundaries">
+              {displayedChecks.map((check, index) => (
+                <article key={`${check.id}-${index}`} className={`${styles.check} ${styles[check.status]}`}>
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <p><strong>{check.label}</strong><small>{check.detail ?? check.value}</small></p>
+                  <div><b>{check.status === "pass" ? "PASS" : check.status === "fail" ? "BLOCK" : "WAIT"}</b>{check.limit ? <small>Limit {check.limit}</small> : null}</div>
+                </article>
+              ))}
+            </div>
+          </details>
+
           {result?.proof ? (
-            <section className={styles.proofPanel} aria-labelledby="bell-proof-title">
-              <div>
-                <span>BELL RECEIPT / {result.proof.verification === "signed-session" ? "SIGNED SESSION" : "SOURCE-OBSERVED V0"}</span>
-                <h3 id="bell-proof-title">{result.proof.kind === "RefusalProof" ? "Refusal receipt" : "Guarded handoff receipt"}</h3>
-                <p>{result.proof.verification === "signed-session"
-                  ? "The API marked this receipt as backed by a verified signed-session observation. The wallet still makes the final decision."
-                  : "This JSON records source observations and the policy decision kept on this device. It is not an onchain or signed Data Streams attestation."}</p>
-              </div>
-              <dl>
-                <div><dt>Proof hash</dt><dd>{result.proof.proofHash ? shortId(result.proof.proofHash) : "Not supplied"}</dd></div>
-                <div><dt>Signed session proof</dt><dd>{result.proof.verification === "signed-session" ? "API verified" : "Unavailable"}</dd></div>
-                <div><dt>Issued</dt><dd>{formatTimestamp(result.proof.issuedAt ?? result.evaluatedAt)}</dd></div>
-                <div><dt>Expires</dt><dd>{formatTimestamp(result.proof.expiresAt ?? result.windowExpiresAt)}</dd></div>
-              </dl>
-              <div className={styles.proofActions}>
-                <button type="button" onClick={() => void copyProof()}>Copy JSON</button>
-                <button type="button" onClick={downloadProof}>Download</button>
-              </div>
-            </section>
+            <details className={styles.resultDisclosure}>
+              <summary><span>{result.proof.kind === "RefusalProof" ? "Refusal receipt" : "BellLock receipt"}</span><small>View or export JSON</small></summary>
+              <section className={styles.proofPanel} aria-labelledby="bell-proof-title">
+                <div>
+                  <span>{result.proof.verification === "signed-session" ? "VERIFIED SESSION" : "SOURCE-OBSERVED PREVIEW"}</span>
+                  <h3 id="bell-proof-title">Decision record</h3>
+                  <p>{result.proof.verification === "signed-session"
+                    ? "Verified session evidence supports this receipt. Your wallet still makes the final decision."
+                    : "This records the observed sources and decision. It is not an onchain or signed market attestation."}</p>
+                </div>
+                <dl>
+                  <div><dt>Receipt</dt><dd>{result.proof.proofHash ? shortId(result.proof.proofHash) : "Not supplied"}</dd></div>
+                  <div><dt>Verification</dt><dd>{result.proof.verification === "signed-session" ? "API verified" : "Preview only"}</dd></div>
+                  <div><dt>Issued</dt><dd>{formatTimestamp(result.proof.issuedAt ?? result.evaluatedAt)}</dd></div>
+                  <div><dt>Expires</dt><dd>{formatTimestamp(result.proof.expiresAt ?? result.windowExpiresAt)}</dd></div>
+                </dl>
+                <div className={styles.proofActions}>
+                  <button type="button" onClick={() => void copyProof()}>Copy JSON</button>
+                  <button type="button" onClick={downloadProof}>Download</button>
+                </div>
+              </section>
+            </details>
           ) : null}
         </div>
       </div>
 
-      <section className={styles.savedSection} aria-labelledby="saved-bells-title">
-        <div className={styles.savedHead}>
-          <div><span>DEVICE MEMORY</span><h2 id="saved-bells-title">Saved bells.</h2></div>
-          <p>Policies and up to two opening observations are stored locally. Wallet keys and approvals are never stored.</p>
-        </div>
+      <details className={styles.savedSection}>
+        <summary className={styles.savedHead}>
+          <span>Saved BellLocks <b>{storedPolicies.length}</b></span>
+          <small>Stored only on this device</small>
+        </summary>
         {storedPolicies.length ? (
           <div className={styles.savedGrid}>
             {storedPolicies.map((item) => (
@@ -827,20 +841,18 @@ export default function BellLockWorkspace({ onOpenMarket }: BellLockWorkspacePro
                 <button className={styles.savedLoad} type="button" onClick={() => loadPolicy(item)} aria-label={`Load ${item.policy.asset} BellLock policy`}>
                   <span>{item.policy.asset}</span>
                   <strong>{item.policy.amountUsdg} USDG</strong>
-                  <small>{STATE_COPY[item.lastState].label} / gap &lt;= {formatPercentBps(item.policy.maxGapBps)}</small>
+                  <small>{STATE_COPY[item.lastState].label} · opening move ≤ {formatPercentBps(item.policy.maxGapBps)}</small>
                 </button>
                 <button className={styles.savedRemove} type="button" onClick={() => removePolicy(item.policy.policyId)} aria-label={`Delete ${item.policy.asset} BellLock policy`}>&times;</button>
               </article>
             ))}
           </div>
         ) : (
-          <div className={styles.savedEmpty}><i aria-hidden="true" /><span>No passive policies stored on this device.</span></div>
+          <div className={styles.savedEmpty}><i aria-hidden="true" /><span>No BellLocks saved on this device yet.</span></div>
         )}
-      </section>
+      </details>
 
-      <div className={styles.productTruth}>
-        <span>NO APPROVAL</span><span>NO EXECUTABLE SIGNATURE</span><span>NO CUSTODY</span><span>FRESH QUOTE BEFORE SIGNING</span>
-      </div>
+      <p className={styles.productTruth}>Read-only until you choose to review a fresh quote. No custody. No automatic signature.</p>
 
       <div className={styles.srOnly} aria-live="polite">{notice}</div>
     </section>

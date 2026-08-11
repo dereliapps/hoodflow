@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.1 — 2026-08-11
+
+- Reorganized the product into Markets, Portfolio, Automate, Agents, Protection and More instead of exposing every workspace at once.
+- Grouped BellLock, DepthMap and ActionLock into one Protection suite with a persistent tool switcher.
+- Refocused the home page on the direct market-to-wallet flow and reduced competing feature promotions.
+- Simplified BellLock to a three-step setup with optional safety details and collapsed evidence sections.
+- Rebuilt the mobile Stock Token catalog as readable cards without page-level horizontal scrolling.
+
 ## 0.16.0 — 2026-08-11
 
 - Added BellLock, a buy-only passive reopening-policy workspace with hard gap, spread, oracle/DEX and stress-size boundaries.

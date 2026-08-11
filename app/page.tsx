@@ -76,6 +76,7 @@ import type {
   BasketHandoffLeg,
   BasketPreparedPlan,
 } from "./agents-workspace";
+import navigationStyles from "./product-navigation.module.css";
 
 function WorkspaceLoader({ label }: { label: string }) {
   return <section className="workspace-loader" role="status" aria-live="polite"><i /><strong>{label}</strong><span>Preparing the latest onchain view.</span></section>;
@@ -114,6 +115,168 @@ type InjectedWalletProvider = HoodFlowWalletProvider & {
 };
 type InjectedWalletPreference = "rabby" | "metamask" | "okx" | "browser";
 type WalletConnectConfig = { enabled: boolean; projectId: string | null };
+type ProductNavigationMenu = "markets" | "automate" | "protection" | "more";
+type ProductNavigationItem = { view: View; label: string; detail: string };
+
+const marketNavigation: readonly ProductNavigationItem[] = [
+  { view: "assets", label: "Stock Tokens", detail: "Reviewed stock-token routes" },
+  { view: "community", label: "Crypto", detail: "24/7 onchain markets" },
+];
+
+const primaryNavigation: readonly ProductNavigationItem[] = [
+  { view: "portfolio", label: "Portfolio", detail: "Balances and performance" },
+  { view: "agents", label: "Agents", detail: "Bounded market preflight" },
+];
+
+const automateNavigation: readonly ProductNavigationItem[] = [
+  { view: "strategies", label: "DCA", detail: "Recurring, user-bounded orders" },
+  { view: "marketplace", label: "Strategy library", detail: "Reusable allocation templates" },
+];
+
+const protectionNavigation: readonly ProductNavigationItem[] = [
+  { view: "bell-lock", label: "BellLock", detail: "Guard the market open" },
+  { view: "depth-map", label: "DepthMap", detail: "Test size-aware liquidity" },
+  { view: "action-lock", label: "ActionLock", detail: "Check issuer and token state" },
+];
+
+const moreNavigation: readonly ProductNavigationItem[] = [
+  { view: "activity", label: "Activity", detail: "Receipts and FillProofs" },
+  { view: "rewards", label: "Rewards", detail: "Referrals and points" },
+  { view: "controls", label: "Security", detail: "Contracts, limits and status" },
+];
+
+function viewIsActive(view: View, items: readonly ProductNavigationItem[]) {
+  return items.some((item) => item.view === view)
+    || (view === "asset" && items.some((item) => item.view === "assets"));
+}
+
+function ProductNavigation({
+  view,
+  navigate,
+  mobile = false,
+}: {
+  view: View;
+  navigate: (nextView: View) => void;
+  mobile?: boolean;
+}) {
+  const [openMenu, setOpenMenu] = useState<ProductNavigationMenu | null>(null);
+  const navigationRef = useRef<HTMLElement | null>(null);
+  const triggerRefs = useRef<Partial<Record<ProductNavigationMenu, HTMLButtonElement | null>>>({});
+  const navigationId = mobile ? "mobile" : "desktop";
+
+  useEffect(() => {
+    if (!openMenu) return;
+    const closeOnOutsidePress = (event: PointerEvent) => {
+      if (!navigationRef.current?.contains(event.target as Node)) setOpenMenu(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const trigger = triggerRefs.current[openMenu];
+      setOpenMenu(null);
+      window.requestAnimationFrame(() => trigger?.focus());
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePress);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePress);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [openMenu]);
+
+  function openView(nextView: View) {
+    setOpenMenu(null);
+    navigate(nextView);
+  }
+
+  function renderMenu(
+    id: ProductNavigationMenu,
+    label: string,
+    items: readonly ProductNavigationItem[],
+    description: string,
+    alignEnd = false,
+    includeDocs = false,
+  ) {
+    const expanded = openMenu === id;
+    const active = viewIsActive(view, items);
+    const panelId = `product-navigation-${navigationId}-${id}`;
+    return <div className={navigationStyles.navItem} data-align-end={alignEnd || undefined}>
+      <button
+        ref={(node) => { triggerRefs.current[id] = node; }}
+        type="button"
+        className={navigationStyles.groupTrigger}
+        data-active={active || undefined}
+        aria-haspopup="true"
+        aria-expanded={expanded}
+        aria-controls={panelId}
+        onClick={() => setOpenMenu(expanded ? null : id)}
+      >
+        {label}<span aria-hidden="true">{expanded ? "−" : "+"}</span>
+      </button>
+      {expanded && <div id={panelId} className={navigationStyles.menuPanel} aria-label={`${label} navigation`}>
+        <header><span>{label}</span><small>{description}</small></header>
+        {items.map((item) => <button
+          type="button"
+          key={item.view}
+          className={navigationStyles.menuLink}
+          data-active={item.view === view || (item.view === "assets" && view === "asset") || undefined}
+          aria-current={item.view === view || (item.view === "assets" && view === "asset") ? "page" : undefined}
+          onClick={() => openView(item.view)}
+        >
+          <strong>{item.label}</strong><small>{item.detail}</small><b aria-hidden="true">→</b>
+        </button>)}
+        {includeDocs && <Link className={navigationStyles.menuLink} href="/docs" onClick={() => setOpenMenu(null)}>
+          <strong>Docs</strong><small>Product and API reference</small><b aria-hidden="true">↗</b>
+        </Link>}
+      </div>}
+    </div>;
+  }
+
+  return <nav
+    ref={navigationRef}
+    className={mobile ? navigationStyles.mobileNav : navigationStyles.desktopNav}
+    aria-label={mobile ? "Mobile product navigation" : "Product navigation"}
+  >
+    {renderMenu("markets", "Markets", marketNavigation, "Discover and trade")}
+    <button
+      type="button"
+      className={navigationStyles.directLink}
+      data-active={view === "portfolio" || undefined}
+      aria-current={view === "portfolio" ? "page" : undefined}
+      onClick={() => openView("portfolio")}
+    >{primaryNavigation[0].label}</button>
+    {renderMenu("automate", "Automate", automateNavigation, "Plans you control")}
+    {!mobile && <button
+      type="button"
+      className={navigationStyles.directLink}
+      data-active={view === "agents" || undefined}
+      aria-current={view === "agents" ? "page" : undefined}
+      onClick={() => openView("agents")}
+    >{primaryNavigation[1].label}</button>}
+    {renderMenu("protection", "Protection", protectionNavigation, "Three checks. One safety suite.")}
+    {renderMenu("more", "More", mobile ? [primaryNavigation[1], ...moreNavigation] : moreNavigation, "Account and product", true, true)}
+  </nav>;
+}
+
+function ProtectionSuiteNavigation({ view, navigate }: { view: View; navigate: (nextView: View) => void }) {
+  if (!viewIsActive(view, protectionNavigation)) return null;
+  return <section className={navigationStyles.suiteBar} aria-label="Protection suite">
+    <div className={navigationStyles.suiteIdentity}>
+      <span>Protection suite</span>
+      <small>Open conditions, liquidity depth and issuer state</small>
+    </div>
+    <nav aria-label="Protection tools">
+      {protectionNavigation.map((item, index) => <button
+        type="button"
+        key={item.view}
+        data-active={view === item.view || undefined}
+        aria-current={view === item.view ? "page" : undefined}
+        onClick={() => navigate(item.view)}
+      >
+        <i aria-hidden="true">0{index + 1}</i><span><strong>{item.label}</strong><small>{item.detail}</small></span>
+      </button>)}
+    </nav>
+  </section>;
+}
 type ActionLockGate = {
   decision: "clear" | "watch" | "blocked";
   fingerprint: string;
@@ -1575,15 +1738,6 @@ export default function Home() {
     window.scrollTo({ top: 0, behavior: "auto" });
   }
 
-  function openActionLock(ticker = "AAPL") {
-    setView("action-lock");
-    const url = new URL("/", window.location.origin);
-    url.searchParams.set("view", "action-lock");
-    if (isRoutedAsset(ticker)) url.searchParams.set("lockAsset", ticker);
-    window.history.pushState({}, "", `${url.pathname}${url.search}`);
-    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
-  }
-
   function openBellLock(ticker = "AAPL") {
     setView("bell-lock");
     const url = new URL("/", window.location.origin);
@@ -2287,21 +2441,6 @@ export default function Home() {
     if (marketSort === "risk") return [...filtered].sort((left, right) => left.risk.localeCompare(right.risk));
     return filtered;
   }, [marketSearch, marketSort]);
-  const navigation: Array<{ view: View; label: string }> = [
-    { view: "overview", label: "Home" },
-    { view: "assets", label: "Stock Tokens" },
-    { view: "bell-lock", label: "BellLock" },
-    { view: "depth-map", label: "DepthMap" },
-    { view: "action-lock", label: "ActionLock" },
-    { view: "community", label: "Crypto" },
-    { view: "agents", label: "Agents" },
-    { view: "portfolio", label: "Portfolio" },
-    { view: "strategies", label: "DCA" },
-    { view: "rewards", label: "Rewards" },
-    { view: "activity", label: "Activity" },
-    { view: "controls", label: "Security" },
-  ];
-
   return (
     <main className="app-shell route-desk terminal-v2">
       {PRIVY_CONFIGURED && privyRuntimeEnabled && <PrivyWalletRuntime onController={handlePrivyController} onWallet={activatePrivyWallet} onError={notify} />}
@@ -2309,20 +2448,15 @@ export default function Home() {
         <button className="brand" onClick={() => navigate("overview")} aria-label="HoodFlow home">
           <span className="brand-mark"><i /><i /><i /></span><span className="brand-name">hoodflow</span><b className="version-badge">MAINNET BETA</b>
         </button>
-        <nav className="main-nav" aria-label="Main navigation">
-          {navigation.map((item) => <button key={item.view} className={view === item.view || (item.view === "assets" && view === "asset") ? "active" : ""} onClick={() => navigate(item.view)}>{item.label}</button>)}
-          <a href="/docs">Docs</a>
-        </nav>
+        <ProductNavigation view={view} navigate={navigate} />
         <div className="top-actions">
           <span className="network"><i /> Mainnet <b>#{networkBlock}</b></span>
           <button className={connected ? "wallet connected" : "wallet"} onClick={handleWalletButton}>{connected ? `${compactAddress(walletAddress)} · ${walletKind === "privy" ? "PRIVY" : walletKind === "walletconnect" ? "WC" : "WEB"}` : "Connect wallet"}</button>
         </div>
       </header>
 
-      <div className="mobile-nav">
-        {navigation.map((item) => <button key={item.view} className={view === item.view || (item.view === "assets" && view === "asset") ? "active" : ""} onClick={() => navigate(item.view)}>{item.label}</button>)}
-        <a href="/docs">Docs</a>
-      </div>
+      <ProductNavigation view={view} navigate={navigate} mobile />
+      <ProtectionSuiteNavigation view={view} navigate={navigate} />
 
       {view === "overview" && (
         <RouteDeskHome
@@ -2351,6 +2485,8 @@ export default function Home() {
           walletEthBalance={walletBalance}
           onOpenMarkets={() => navigate("assets")}
           onOpenDepthMap={() => navigate("depth-map")}
+          onOpenBellLock={() => navigate("bell-lock")}
+          onOpenActionLock={() => navigate("action-lock")}
           onOpenAsset={openAsset}
           onQuote={(ticker) => openComposer("Buy", ticker)}
           onWallet={handleWalletButton}
@@ -2422,8 +2558,8 @@ export default function Home() {
               <p>{selectedAsset.fullFill ? `Buy with USDG or sell ${selectedAsset.ticker} back to USDG through ${isV3RoutedAsset(selectedAsset.ticker) ? "the verified Uniswap V3 pool" : "the best reviewed Uniswap V4 pool"}. Every order uses an exact short-lived permission.` : selectedAsset.ticker === "MSFT" ? "A quote exists, but the full router fork test detected a partial fill. HoodFlow blocks the order until complete-input execution is verified." : "No reviewed USDG pool can currently fill the complete input. The asset remains indexed and monitored without exposing your wallet to a forced route."}</p>
               <div className="trade-route-facts"><div><span>NETWORK</span><strong>Robinhood Chain / 4663</strong></div><div><span>PAY</span><strong>USDG</strong></div><div><span>RECEIVE</span><strong>{selectedAsset.ticker} token</strong></div><div><span>ROUTE</span><strong>{selectedAsset.fullFill ? `${isV3RoutedAsset(selectedAsset.ticker) ? "V3" : "V4"} full-fill verified` : "Blocked"}</strong></div></div>
               <div className="asset-trade-actions"><button className="primary-action asset-trade-action" onClick={() => openComposer("Buy", selectedAsset.ticker)} disabled={!selectedAsset.fullFill || priceBook[selectedAsset.ticker]?.status !== "live"}>{selectedAsset.fullFill ? priceBook[selectedAsset.ticker]?.status === "live" ? `Buy ${selectedAsset.ticker}` : "Waiting for oracle" : "No safe route"}</button><button className="asset-sell-action" onClick={() => openComposer("Sell", selectedAsset.ticker)} disabled={!selectedAsset.fullFill || priceBook[selectedAsset.ticker]?.status !== "live"}>Sell to USDG</button></div>
-              {selectedAsset.fullFill && <button className="asset-action-lock" onClick={() => openBellLock(selectedAsset.ticker)}>Arm BellLock for the next open →</button>}
-              {selectedAsset.fullFill && <button className="asset-action-lock" onClick={() => openActionLock(selectedAsset.ticker)}>Run ActionLock before connecting →</button>}
+              {selectedAsset.fullFill && <p className="asset-protection-note"><i /> Every Buy and Sell runs ActionLock automatically before wallet handoff.</p>}
+              {selectedAsset.fullFill && <button className="asset-action-lock" onClick={() => openBellLock(selectedAsset.ticker)}>Not trading now? Watch the next open with BellLock →</button>}
               {!connected && selectedAsset.fullFill && <button className="connect-inline" onClick={handleWalletButton}>Connect wallet first</button>}
             </aside>
           </div>
@@ -2534,7 +2670,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Release 0.16.0</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("bell-lock")}>BellLock</button><button onClick={() => navigate("depth-map")}>DepthMap</button><button onClick={() => navigate("action-lock")}>ActionLock</button><button onClick={() => navigate("agents")}>Agents</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Release 0.16.1</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) closeComposer(); }}>

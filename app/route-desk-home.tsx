@@ -23,6 +23,8 @@ type RouteDeskHomeProps = {
   walletEthBalance: string;
   onOpenMarkets: () => void;
   onOpenDepthMap: () => void;
+  onOpenBellLock: () => void;
+  onOpenActionLock: () => void;
   onOpenAsset: (ticker: string) => void;
   onQuote: (ticker: string) => void;
   onWallet: () => void;
@@ -49,6 +51,8 @@ export default function RouteDeskHome({
   walletEthBalance,
   onOpenMarkets,
   onOpenDepthMap,
+  onOpenBellLock,
+  onOpenActionLock,
   onOpenAsset,
   onQuote,
   onWallet,
@@ -63,11 +67,11 @@ export default function RouteDeskHome({
     <section className="page overview-page route-home">
       <header className="terminal-hero">
         <div className="terminal-hero-copy">
-          <p className="terminal-eyebrow"><i /> Robinhood Chain execution terminal</p>
-          <h1>Markets in focus.<br /><span>Routes in full view.</span></h1>
+          <p className="terminal-eyebrow"><i /> Self-custody Stock Token execution</p>
+          <h1>Choose the market.<br /><span>Keep the signature.</span></h1>
           <p className="terminal-deck">
-            Stress-test live liquidity across five USDG sizes, compare what changed between visits
-            and keep the final signature inside your self-custody wallet.
+            Find a live USDG route, review the price and protected minimum, then make the final
+            decision inside your wallet.
           </p>
           <div className="terminal-hero-actions">
             <button type="button" className="hf-primary" onClick={onOpenMarkets}>Explore markets</button>
@@ -75,18 +79,11 @@ export default function RouteDeskHome({
           </div>
         </div>
         <div className="terminal-hero-readout" aria-label="Live HoodFlow status">
-          <div><span>Execution routes</span><strong>{routeCount}</strong><small>reviewed markets</small></div>
-          <div><span>Price verification</span><strong>{priceStatus}</strong><small>automatic checks</small></div>
+          <div><span>Markets ready</span><strong>{routeCount}</strong><small>reviewed routes</small></div>
+          <div><span>Price checks</span><strong>{priceStatus}</strong><small>verified automatically</small></div>
           <div><span>Current block</span><strong>#{networkBlock}</strong><small>mainnet / 4663</small></div>
         </div>
       </header>
-
-      <button type="button" className="action-lock-home" onClick={onOpenDepthMap}>
-        <span><i /> NEW / DEPTH MEMORY</span>
-        <strong>Liquidity changes. Now the route has a memory.</strong>
-        <p>Run the same five fixed USDG samples across visits. HoodFlow shows exactly which observed passes appeared, were not reobserved or moved—saved only in your browser.</p>
-        <b>Open DepthMap & compare <em>→</em></b>
-      </button>
 
       <section className="market-terminal" aria-label="Live route desk">
         <header className="market-terminal-bar">
@@ -199,6 +196,36 @@ export default function RouteDeskHome({
           <div><span>02</span><p><strong>Protected minimum</strong><small>The trade reverts below your floor.</small></p></div>
           <div><span>03</span><p><strong>Direct settlement</strong><small>Purchased tokens stay in your wallet.</small></p></div>
         </footer>
+      </section>
+
+      <section className="protection-guide" aria-labelledby="protection-guide-title">
+        <header>
+          <div>
+            <p className="terminal-eyebrow"><i /> Protection suite</p>
+            <h2 id="protection-guide-title">One tool for the moment you are in.</h2>
+          </div>
+          <p>ActionLock is already part of every direct order. The other tools are optional.</p>
+        </header>
+        <div className="protection-guide-grid">
+          <button type="button" onClick={onOpenActionLock}>
+            <span>TRADING NOW</span>
+            <strong>ActionLock</strong>
+            <small>Checks the asset and order before wallet handoff.</small>
+            <b>Included automatically <em>→</em></b>
+          </button>
+          <button type="button" onClick={onOpenDepthMap}>
+            <span>COMPARING SIZE</span>
+            <strong>DepthMap</strong>
+            <small>Tests the same five USDG amounts across reviewed routes.</small>
+            <b>Compare liquidity <em>→</em></b>
+          </button>
+          <button type="button" onClick={onOpenBellLock}>
+            <span>WAITING FOR OPEN</span>
+            <strong>BellLock</strong>
+            <small>Watches reopening conditions without wallet authority.</small>
+            <b>Watch the next open <em>→</em></b>
+          </button>
+        </div>
       </section>
 
       <p className="terminal-risk-note">

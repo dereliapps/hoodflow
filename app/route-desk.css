@@ -1162,6 +1162,99 @@
   font-style: normal;
 }
 
+.terminal-v2 .protection-guide {
+  margin-top: 22px;
+  border: 1px solid var(--hf-line);
+  border-radius: 6px;
+  background: var(--hf-panel);
+  overflow: hidden;
+}
+
+.terminal-v2 .protection-guide > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 30px;
+  padding: 22px 24px;
+  border-bottom: 1px solid var(--hf-line);
+}
+
+.terminal-v2 .protection-guide .terminal-eyebrow { margin-bottom: 10px; }
+
+.terminal-v2 .protection-guide h2 {
+  margin: 0;
+  color: var(--hf-text);
+  font-size: clamp(22px, 2.2vw, 34px);
+  font-weight: 560;
+  letter-spacing: -0.045em;
+}
+
+.terminal-v2 .protection-guide > header > p {
+  max-width: 430px;
+  margin: 0;
+  color: var(--hf-muted);
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: right;
+}
+
+.terminal-v2 .protection-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.terminal-v2 .protection-guide-grid > button {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  min-height: 168px;
+  padding: 20px 22px;
+  border: 0;
+  border-right: 1px solid var(--hf-line);
+  color: var(--hf-text);
+  background: #090d0b;
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.terminal-v2 .protection-guide-grid > button:last-child { border-right: 0; }
+.terminal-v2 .protection-guide-grid > button:hover { background: var(--hf-panel-raised); }
+
+.terminal-v2 .protection-guide-grid span,
+.terminal-v2 .protection-guide-grid b {
+  color: var(--hf-green);
+  font-family: var(--hf-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.terminal-v2 .protection-guide-grid strong {
+  margin-top: 12px;
+  font-size: 19px;
+  font-weight: 580;
+  letter-spacing: -0.03em;
+}
+
+.terminal-v2 .protection-guide-grid small {
+  margin-top: 6px;
+  color: var(--hf-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.terminal-v2 .protection-guide-grid b {
+  align-self: end;
+  margin-top: 18px;
+}
+
+.terminal-v2 .protection-guide-grid em {
+  margin-left: 7px;
+  font-size: 13px;
+  font-style: normal;
+}
+
 .terminal-v2 .market-terminal {
   margin-top: 22px;
   border: 1px solid var(--hf-line);
@@ -2525,6 +2618,30 @@
 .terminal-v2 .connect-inline {
   width: 100%;
   margin-top: 8px;
+}
+
+.terminal-v2 .asset-trade-card > p.asset-protection-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 13px 0 0;
+  padding: 12px;
+  border: 1px solid var(--hf-line);
+  border-radius: 4px;
+  color: var(--hf-muted);
+  background: #090d0b;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.terminal-v2 .asset-protection-note i {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--hf-green);
+  box-shadow: 0 0 0 4px rgba(55, 240, 138, 0.08);
 }
 
 .terminal-v2 .asset-action-lock {
@@ -4500,6 +4617,11 @@
   .terminal-v2 .terminal-hero-readout > div:last-child { border-bottom: 0; }
   .terminal-v2 .action-lock-home { grid-template-columns: 1fr; gap: 12px; padding: 20px; }
   .terminal-v2 .action-lock-home > b { grid-column: auto; margin-top: 4px; }
+  .terminal-v2 .protection-guide > header { align-items: flex-start; flex-direction: column; gap: 10px; padding: 20px; }
+  .terminal-v2 .protection-guide > header > p { max-width: 620px; text-align: left; }
+  .terminal-v2 .protection-guide-grid { grid-template-columns: 1fr; }
+  .terminal-v2 .protection-guide-grid > button { min-height: 0; border-right: 0; border-bottom: 1px solid var(--hf-line); }
+  .terminal-v2 .protection-guide-grid > button:last-child { border-bottom: 0; }
   .terminal-v2 .market-terminal-bar { align-items: flex-start; gap: 10px; padding-block: 12px; }
   .terminal-v2 .market-hours.compact .market-hours-badges { flex-wrap: wrap; justify-content: flex-end; }
   .terminal-v2 .market-terminal-grid { grid-template-columns: 1fr; }
@@ -4541,9 +4663,27 @@
   .terminal-v2 .dca-how { grid-template-columns: 1fr; }
   .terminal-v2 .dca-how article { border-right: 0; border-bottom: 1px solid var(--hf-line); }
   .terminal-v2 .asset-totals { min-width: 0; width: 100%; }
-  .terminal-v2 .asset-table { overflow-x: auto; }
-  .terminal-v2 .asset-table-head,
-  .terminal-v2 .asset-catalog-row { min-width: 880px; }
+  .terminal-v2 .asset-table { overflow: visible; }
+  .terminal-v2 .asset-table-head { display: none; }
+  .terminal-v2 .asset-catalog-row {
+    grid-template-areas:
+      "identity status"
+      "price type"
+      "actions actions";
+    grid-template-columns: minmax(0, 1fr) max-content;
+    gap: 14px 18px;
+    min-width: 0;
+    padding: 17px;
+  }
+  .terminal-v2 .asset-catalog-row .asset-identity { grid-area: identity; }
+  .terminal-v2 .asset-catalog-row .price-cell { grid-area: price; }
+  .terminal-v2 .asset-catalog-row .asset-type { grid-area: type; align-self: end; justify-self: end; }
+  .terminal-v2 .asset-catalog-row > .route-ready,
+  .terminal-v2 .asset-catalog-row > .route-watch { grid-area: status; justify-self: end; }
+  .terminal-v2 .asset-catalog-row .asset-row-actions,
+  .terminal-v2 .asset-catalog-row > .asset-details-only { grid-area: actions; width: 100%; }
+  .terminal-v2 .asset-catalog-row .asset-row-actions { display: grid; grid-template-columns: 1fr 1.35fr; }
+  .terminal-v2 .asset-catalog-row .asset-row-actions button { width: 100%; }
   .terminal-v2 .asset-contract-card { grid-template-columns: repeat(2, 1fr); }
   .terminal-v2 .portfolio-table,
   .terminal-v2 .table-card,
@@ -4584,6 +4724,11 @@
   .terminal-v2 .terminal-hero h1 { font-size: 49px; }
   .terminal-v2 .terminal-deck { font-size: 14px; }
   .terminal-v2 .terminal-hero-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .terminal-v2 .asset-toolbar { align-items: stretch; flex-direction: column; gap: 10px; }
+  .terminal-v2 .asset-toolbar > div { display: flex; overflow-x: auto; scrollbar-width: none; }
+  .terminal-v2 .asset-toolbar button { flex: 0 0 auto; }
+  .terminal-v2 .asset-toolbar label,
+  .terminal-v2 .asset-toolbar input { width: 100%; }
   .terminal-v2 .market-terminal-bar { display: grid; }
   .terminal-v2 .market-hours.compact .market-hours-badges { justify-content: flex-start; }
   .terminal-v2 .terminal-instrument-head { align-items: flex-start; gap: 10px; }
