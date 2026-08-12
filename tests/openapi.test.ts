@@ -50,11 +50,12 @@ test("publishes a complete OpenAPI 3.1.2 read/preflight contract", () => {
     "/api/agents/quote",
     "/api/bell-lock/evaluate",
     "/api/fill-proof",
+    "/api/payday",
   ]);
   assert.ok(Object.keys(paths).every((path) => !/execute|sign|submit|send|swap/i.test(path)));
 
   const operationIds = collectValuesForKey(paths, "operationId");
-  assert.equal(operationIds.length, 7);
+  assert.equal(operationIds.length, 8);
   assert.equal(new Set(operationIds).size, operationIds.length);
 
   const safety = document["x-hoodflow-safety"] as JsonObject;
@@ -68,6 +69,174 @@ test("publishes a complete OpenAPI 3.1.2 read/preflight contract", () => {
     serialized,
     /"(?:privateKey|private_key|calldata|signedTransaction|sendTransaction)"\s*:/i,
   );
+});
+
+test("publishes Payday as a fail-closed corporate-action preview", () => {
+  const document = buildHoodFlowOpenApiDocument() as never as {
+    paths: {
+      "/api/payday": {
+        get: {
+          description: string;
+          parameters: Array<{
+            name: string;
+            in: string;
+            required: boolean;
+            schema: { type: string; enum: string[] };
+          }>;
+          responses: {
+            "200": { content: { "application/json": { schema: { $ref: string } } } };
+            "422": { content: { "application/json": { schema: { $ref: string } } } };
+          };
+          "x-hoodflow-payday-boundary": {
+            qualifyingCorporateAction: string;
+            assetIdentity: string;
+            officialDateField: string;
+            onchainState: string[];
+            eligibleCode: string;
+            failurePolicy: string;
+          };
+          "x-hoodflow-safety": Record<string, unknown>;
+        };
+      };
+    };
+    components: {
+      schemas: {
+        PaydaySuccessResponse: {
+          properties: { ok: { const: boolean }; data: { $ref: string } };
+          additionalProperties: boolean;
+        };
+        PaydayData: {
+          properties: {
+            handoffAllowed: { const: boolean };
+            handoff: { type: string };
+            executionHandoff: { type: string };
+          };
+          additionalProperties: boolean;
+        };
+        PaydayCapabilities: {
+          properties: Record<string, { const: boolean }>;
+          additionalProperties: boolean;
+        };
+        PaydayDisabledCapabilities: {
+          properties: Record<string, { const: boolean }>;
+          additionalProperties: boolean;
+        };
+        PaydayCorporateAction: {
+          required: string[];
+          properties: {
+            processDate: { type: string[]; format: string };
+            classification: { enum: string[] };
+          };
+          description: string;
+          additionalProperties: boolean;
+        };
+        PaydayEligibility: {
+          properties: { code: { description: string; enum: string[] } };
+        };
+        PaydayErrorResponse: {
+          required: string[];
+          properties: {
+            ok: { const: boolean };
+            capabilities: { $ref: string };
+            handoffAllowed: { const: boolean };
+            handoff: { type: string };
+            executionHandoff: { type: string };
+          };
+          additionalProperties: boolean;
+        };
+      };
+    };
+  };
+
+  const endpoint = document.paths["/api/payday"].get;
+  assert.equal(endpoint.parameters.length, 1);
+  assert.equal(endpoint.parameters[0].name, "asset");
+  assert.equal(endpoint.parameters[0].in, "query");
+  assert.equal(endpoint.parameters[0].required, true);
+  assert.ok(endpoint.parameters[0].schema.enum.includes("AAPL"));
+  assert.ok(endpoint.parameters[0].schema.enum.includes("SGOV"));
+  assert.equal(
+    endpoint.responses["200"].content["application/json"].schema.$ref,
+    "#/components/schemas/PaydaySuccessResponse",
+  );
+  assert.equal(
+    endpoint.responses["422"].content["application/json"].schema.$ref,
+    "#/components/schemas/PaydayErrorResponse",
+  );
+  assert.match(endpoint.description, /CORPORATE_ACTION_TYPE_CASH_DIVIDEND/);
+  assert.match(endpoint.description, /stable UID/);
+  assert.match(endpoint.description, /chain 4663/);
+  assert.match(endpoint.description, /fails closed/);
+  assert.deepEqual(endpoint["x-hoodflow-payday-boundary"], {
+    qualifyingCorporateAction: "CORPORATE_ACTION_TYPE_CASH_DIVIDEND",
+    assetIdentity: "official-stable-uid+canonical-chain-4663-address",
+    officialDateField: "processDate (date-only)",
+    onchainState: ["uid()", "uiMultiplier()", "newUIMultiplier()", "effectiveAt()"],
+    eligibleCode: "CONCURRENT_MULTIPLIER_TRANSITION_READY",
+    failurePolicy: "fail-closed",
+  });
+  assert.deepEqual(endpoint["x-hoodflow-safety"], {
+    custody: false,
+    signing: false,
+    submission: false,
+    walletPermission: false,
+    entitlement: false,
+    handoffAllowed: false,
+  });
+
+  const schemas = document.components.schemas;
+  assert.equal(schemas.PaydaySuccessResponse.properties.ok.const, true);
+  assert.equal(schemas.PaydaySuccessResponse.properties.data.$ref, "#/components/schemas/PaydayData");
+  assert.equal(schemas.PaydaySuccessResponse.additionalProperties, false);
+  assert.equal(schemas.PaydayData.properties.handoffAllowed.const, false);
+  assert.equal(schemas.PaydayData.properties.handoff.type, "null");
+  assert.equal(schemas.PaydayData.properties.executionHandoff.type, "null");
+  assert.equal(schemas.PaydayData.additionalProperties, false);
+  assert.equal(schemas.PaydayCapabilities.properties.signs.const, false);
+  assert.equal(schemas.PaydayCapabilities.properties.submitsTransaction.const, false);
+  assert.equal(schemas.PaydayCapabilities.properties.requestsWalletPermission.const, false);
+  assert.equal(schemas.PaydayCapabilities.properties.createsClaimToken.const, false);
+  assert.equal(schemas.PaydayCapabilities.properties.controlsFunds.const, false);
+  assert.equal(schemas.PaydayCapabilities.properties.createsEntitlement.const, false);
+  assert.equal(schemas.PaydayCapabilities.additionalProperties, false);
+  assert.equal(schemas.PaydayDisabledCapabilities.properties.readsOfficialSources.const, false);
+  assert.equal(schemas.PaydayDisabledCapabilities.properties.signs.const, false);
+  assert.equal(schemas.PaydayDisabledCapabilities.properties.submitsTransaction.const, false);
+  assert.equal(schemas.PaydayDisabledCapabilities.properties.requestsWalletPermission.const, false);
+  assert.equal(schemas.PaydayDisabledCapabilities.properties.createsClaimToken.const, false);
+  assert.equal(schemas.PaydayDisabledCapabilities.properties.controlsFunds.const, false);
+  assert.equal(schemas.PaydayDisabledCapabilities.properties.createsEntitlement.const, false);
+  assert.equal(schemas.PaydayDisabledCapabilities.additionalProperties, false);
+  assert.match(schemas.PaydayCorporateAction.description, /CORPORATE_ACTION_TYPE_CASH_DIVIDEND Process Date/);
+  assert.ok(schemas.PaydayCorporateAction.required.includes("processDate"));
+  assert.ok(!schemas.PaydayCorporateAction.required.includes("effectiveAt"));
+  assert.deepEqual(schemas.PaydayCorporateAction.properties.processDate.type, ["string", "null"]);
+  assert.equal(schemas.PaydayCorporateAction.properties.processDate.format, "date");
+  assert.deepEqual(schemas.PaydayCorporateAction.properties.classification.enum, [
+    "multiplier-transition-concurrent-with-cash-dividend-process-date",
+    "cash-dividend-record-only",
+    "not-qualified",
+  ]);
+  assert.equal(schemas.PaydayCorporateAction.additionalProperties, false);
+  assert.match(schemas.PaydayEligibility.properties.code.description, /Only CONCURRENT_MULTIPLIER_TRANSITION_READY/);
+  assert.ok(schemas.PaydayEligibility.properties.code.enum.includes("CONCURRENT_MULTIPLIER_TRANSITION_READY"));
+  assert.deepEqual(schemas.PaydayErrorResponse.required, [
+    "ok",
+    "error",
+    "retryable",
+    "capabilities",
+    "handoffAllowed",
+    "handoff",
+    "executionHandoff",
+    "safety",
+  ]);
+  assert.equal(schemas.PaydayErrorResponse.properties.ok.const, false);
+  assert.equal(schemas.PaydayErrorResponse.properties.capabilities.$ref, "#/components/schemas/PaydayDisabledCapabilities");
+  assert.equal(schemas.PaydayErrorResponse.properties.handoffAllowed.const, false);
+  assert.equal(schemas.PaydayErrorResponse.properties.handoff.type, "null");
+  assert.equal(schemas.PaydayErrorResponse.properties.executionHandoff.type, "null");
+  assert.equal(schemas.PaydayErrorResponse.additionalProperties, false);
+  assert.doesNotMatch(JSON.stringify({ endpoint, schemas }), /dividend-derived|\bcaused\b|\bpayable\b/i);
 });
 
 test("publishes FillProof as a read-only onchain verification endpoint", () => {

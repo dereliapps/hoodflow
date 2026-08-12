@@ -25,9 +25,9 @@ type RouteDeskHomeProps = {
   onOpenDepthMap: () => void;
   onOpenBellLock: () => void;
   onOpenActionLock: () => void;
+  onOpenPayday: () => void;
   onOpenAsset: (ticker: string) => void;
   onQuote: (ticker: string) => void;
-  onWallet: () => void;
 };
 
 function MarketMark({ ticker }: { ticker: string }) {
@@ -53,9 +53,9 @@ export default function RouteDeskHome({
   onOpenDepthMap,
   onOpenBellLock,
   onOpenActionLock,
+  onOpenPayday,
   onOpenAsset,
   onQuote,
-  onWallet,
 }: RouteDeskHomeProps) {
   const [selectedTicker, setSelectedTicker] = useState(markets[0]?.ticker ?? "AAPL");
   const selected = useMemo(
@@ -75,7 +75,7 @@ export default function RouteDeskHome({
           </p>
           <div className="terminal-hero-actions">
             <button type="button" className="hf-primary" onClick={onOpenMarkets}>Explore markets</button>
-            <button type="button" className="hf-secondary" onClick={onWallet}>{connected ? "Wallet options" : "Connect wallet"}</button>
+            <button type="button" className="hf-secondary" onClick={onOpenPayday}>Open Payday Radar</button>
           </div>
         </div>
         <div className="terminal-hero-readout" aria-label="Live HoodFlow status">

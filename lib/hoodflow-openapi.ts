@@ -4,6 +4,7 @@ import {
   HOODFLOW_MCP_RESOURCE_URI,
   HOODFLOW_MCP_TOOL_NAMES,
 } from "@/lib/hoodflow-mcp";
+import { seoAssets } from "@/lib/seo-assets";
 
 export const HOODFLOW_OPENAPI_VERSION = "3.1.2";
 export const HOODFLOW_API_CATALOG_PROFILE = "https://www.rfc-editor.org/info/rfc9727";
@@ -17,18 +18,28 @@ const errorResponse = {
   },
 };
 
+const paydayErrorResponse = {
+  description: "The read-only Payday preview failed safely.",
+  content: {
+    "application/json": {
+      schema: { $ref: "#/components/schemas/PaydayErrorResponse" },
+    },
+  },
+};
+
 export function buildHoodFlowOpenApiDocument() {
   const origin = canonicalSiteOrigin();
   const reviewedAssets = listAgentMarkets().map((market) => market.ticker);
+  const paydayAssets = seoAssets.map((market) => market.ticker);
 
   return {
     openapi: HOODFLOW_OPENAPI_VERSION,
     jsonSchemaDialect: "https://spec.openapis.org/oas/3.1/dialect/base",
     info: {
       title: "HoodFlow Agent Preflight API",
-      version: "1.4.0",
+      version: "1.5.0",
       description: [
-        "Public discovery, BellLock reopening-policy preview, ActionLock safety inspection, indicative preflight and post-trade FillProof reconstruction for route-reviewed Stock Tokens on Robinhood Chain.",
+        "Public discovery, Payday corporate-action preview, BellLock reopening-policy preview, ActionLock safety inspection, indicative preflight and post-trade FillProof reconstruction for Stock Tokens on Robinhood Chain.",
         "This API never holds funds, signs messages, returns executable calldata, or submits transactions.",
       ].join(" "),
     },
@@ -38,6 +49,7 @@ export function buildHoodFlowOpenApiDocument() {
       { name: "Discovery", description: "Read route-reviewed markets and connector metadata." },
       { name: "Preflight", description: "Prepare temporary, non-executable quote and basket intents." },
       { name: "Safety", description: "Inspect asset identity and event-risk signals without signing or submitting." },
+      { name: "Corporate actions", description: "Classify official corporate-action and ERC-8056 multiplier evidence without creating an entitlement." },
       { name: "Verification", description: "Reconstruct verifiable settlement facts from confirmed public transactions." },
     ],
     externalDocs: {
@@ -112,6 +124,64 @@ export function buildHoodFlowOpenApiDocument() {
             signing: false,
             submission: false,
             executionBinding: "none-requote-required",
+          },
+        },
+      },
+      "/api/payday": {
+        get: {
+          operationId: "getHoodFlowPaydayPreview",
+          summary: "Inspect concurrent cash-dividend and multiplier evidence",
+          description: [
+            "Returns a read-only FlowRights / Payday preview for exactly one HoodFlow-indexed Stock Token ticker.",
+            "A preview is eligible only when Robinhood's official asset and corporate-action records bind the same stable UID and canonical chain 4663 deployment, the action is exactly CORPORATE_ACTION_TYPE_CASH_DIVIDEND, the date-only Process Date is unambiguous, and uid(), uiMultiplier(), newUIMultiplier() and effectiveAt() match the canonical token onchain.",
+            "The corporate-action record and positive multiplier transition are treated as concurrent evidence only. Unknown, completed-without-baseline, unqualified, ambiguous, stale or mismatched evidence fails closed and returns no arithmetic preview or handoff.",
+            "The response is not a share, dividend entitlement, quote, transaction instruction or execution promise.",
+          ].join(" "),
+          tags: ["Corporate actions", "Safety"],
+          security: [],
+          parameters: [{
+            name: "asset",
+            in: "query",
+            required: true,
+            description: "Exactly one HoodFlow-indexed Stock Token or tokenized ETF ticker. Duplicate asset parameters and every other query key are rejected.",
+            schema: { type: "string", enum: paydayAssets },
+          }],
+          responses: {
+            "200": {
+              description: "Read-only, fail-closed corporate-action classification wrapped as { ok: true, data }.",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/PaydaySuccessResponse" },
+                },
+              },
+            },
+            "422": paydayErrorResponse,
+            "429": {
+              ...paydayErrorResponse,
+              headers: {
+                "Retry-After": {
+                  description: "Seconds before another request should be attempted.",
+                  schema: { type: "integer", minimum: 1 },
+                },
+              },
+            },
+            "503": paydayErrorResponse,
+          },
+          "x-hoodflow-payday-boundary": {
+            qualifyingCorporateAction: "CORPORATE_ACTION_TYPE_CASH_DIVIDEND",
+            assetIdentity: "official-stable-uid+canonical-chain-4663-address",
+            officialDateField: "processDate (date-only)",
+            onchainState: ["uid()", "uiMultiplier()", "newUIMultiplier()", "effectiveAt()"],
+            eligibleCode: "CONCURRENT_MULTIPLIER_TRANSITION_READY",
+            failurePolicy: "fail-closed",
+          },
+          "x-hoodflow-safety": {
+            custody: false,
+            signing: false,
+            submission: false,
+            walletPermission: false,
+            entitlement: false,
+            handoffAllowed: false,
           },
         },
       },
@@ -478,6 +548,286 @@ export function buildHoodFlowOpenApiDocument() {
             requiresUserSignature: { type: "boolean", const: true },
             executionHandoff: { type: "object", additionalProperties: true },
             quotedAt: { type: "string", format: "date-time" },
+          },
+          additionalProperties: false,
+        },
+        PaydayErrorResponse: {
+          type: "object",
+          required: [
+            "ok",
+            "error",
+            "retryable",
+            "capabilities",
+            "handoffAllowed",
+            "handoff",
+            "executionHandoff",
+            "safety",
+          ],
+          properties: {
+            ok: { type: "boolean", const: false },
+            error: { type: "string" },
+            retryable: { type: "boolean" },
+            capabilities: { $ref: "#/components/schemas/PaydayDisabledCapabilities" },
+            handoffAllowed: { type: "boolean", const: false },
+            handoff: { type: "null" },
+            executionHandoff: { type: "null" },
+            safety: {
+              type: "string",
+              description: "Confirms that the failed request created no transaction, permission, signature, entitlement or execution handoff.",
+            },
+          },
+          additionalProperties: false,
+        },
+        PaydaySuccessResponse: {
+          type: "object",
+          required: ["ok", "data"],
+          properties: {
+            ok: { type: "boolean", const: true },
+            data: { $ref: "#/components/schemas/PaydayData" },
+          },
+          additionalProperties: false,
+        },
+        PaydayData: {
+          type: "object",
+          description: "A read-only classification and arithmetic preview. It is not a dividend, entitlement, quote, transaction instruction or proof of future safety.",
+          required: [
+            "feature",
+            "version",
+            "asset",
+            "corporateAction",
+            "eligibility",
+            "evidence",
+            "preview",
+            "integrity",
+            "capabilities",
+            "generatedAt",
+            "disclaimer",
+            "safety",
+            "handoffAllowed",
+            "handoff",
+            "executionHandoff",
+          ],
+          properties: {
+            feature: { type: "string", const: "HoodFlow FlowRights / Payday Preview" },
+            version: { type: "string", const: "hoodflow-payday/1" },
+            asset: { $ref: "#/components/schemas/PaydayAsset" },
+            corporateAction: {
+              oneOf: [
+                { $ref: "#/components/schemas/PaydayCorporateAction" },
+                { type: "null" },
+              ],
+            },
+            eligibility: { $ref: "#/components/schemas/PaydayEligibility" },
+            evidence: {
+              type: "array",
+              items: { $ref: "#/components/schemas/PaydayEvidence" },
+            },
+            preview: {
+              oneOf: [
+                { $ref: "#/components/schemas/PaydayMultiplierPreview" },
+                { type: "null" },
+              ],
+            },
+            integrity: { $ref: "#/components/schemas/PaydayIntegrity" },
+            capabilities: { $ref: "#/components/schemas/PaydayCapabilities" },
+            generatedAt: { type: "string", format: "date-time" },
+            disclaimer: { type: "string" },
+            safety: { type: "string" },
+            handoffAllowed: { type: "boolean", const: false },
+            handoff: { type: "null" },
+            executionHandoff: { type: "null" },
+          },
+          additionalProperties: false,
+        },
+        PaydayAsset: {
+          type: "object",
+          required: [
+            "uid",
+            "ticker",
+            "name",
+            "type",
+            "logoUrl",
+            "chainId",
+            "contractAddress",
+            "currentMultiplier",
+            "pendingMultiplier",
+            "pendingMultiplierEffectiveTime",
+          ],
+          properties: {
+            uid: { type: ["string", "null"], pattern: "^0x[0-9a-f]{64}$" },
+            ticker: { type: "string", enum: paydayAssets },
+            name: { type: ["string", "null"] },
+            type: { type: "string", enum: ["stock", "etf", "unknown"] },
+            logoUrl: { type: ["string", "null"], format: "uri" },
+            chainId: { type: "integer", const: 4663 },
+            contractAddress: { type: "string", pattern: "^0x[0-9a-f]{40}$" },
+            currentMultiplier: { type: ["string", "null"], pattern: "^(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,18})?$" },
+            pendingMultiplier: { type: ["string", "null"], pattern: "^(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,18})?$" },
+            pendingMultiplierEffectiveTime: { type: ["string", "null"], format: "date-time" },
+          },
+          additionalProperties: false,
+        },
+        PaydayCorporateAction: {
+          type: "object",
+          description: "Only an unambiguous CORPORATE_ACTION_TYPE_CASH_DIVIDEND Process Date concurrent with a verified positive multiplier transition can produce an eligible preview; every other classification remains visible but fails closed.",
+          required: [
+            "uid",
+            "type",
+            "status",
+            "processDate",
+            "sourceUpdatedAt",
+            "amountPerUnit",
+            "currency",
+            "classification",
+          ],
+          properties: {
+            uid: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+            type: { type: "string" },
+            status: { type: "string" },
+            processDate: {
+              type: ["string", "null"],
+              format: "date",
+              description: "Official date-only Process Date. It is scheduling evidence, not an execution timestamp.",
+            },
+            sourceUpdatedAt: { type: "null" },
+            amountPerUnit: { type: ["string", "null"], pattern: "^(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,18})?$" },
+            currency: { type: ["string", "null"] },
+            classification: {
+              type: "string",
+              enum: [
+                "multiplier-transition-concurrent-with-cash-dividend-process-date",
+                "cash-dividend-record-only",
+                "not-qualified",
+              ],
+            },
+          },
+          additionalProperties: false,
+        },
+        PaydayEligibility: {
+          type: "object",
+          required: ["state", "reason", "code"],
+          properties: {
+            state: { type: "string", enum: ["eligible", "pending", "blocked", "unavailable"] },
+            reason: { type: "string" },
+            code: {
+              type: "string",
+              description: "Only CONCURRENT_MULTIPLIER_TRANSITION_READY is paired with the eligible state.",
+              enum: [
+                "OFFICIAL_SOURCE_UNAVAILABLE",
+                "NO_DIVIDEND_EVENT",
+                "AMBIGUOUS_OFFICIAL_ASSET",
+                "OFFICIAL_ASSET_NOT_FOUND",
+                "TOKEN_DECIMALS_UNSUPPORTED",
+                "CANONICAL_DEPLOYMENT_MISMATCH",
+                "ASSET_NOT_ACTIVE",
+                "ONCHAIN_STATE_UNAVAILABLE",
+                "ONCHAIN_STATE_MISMATCH",
+                "AMBIGUOUS_ACTIVE_ACTIONS",
+                "AMBIGUOUS_PROCESS_DATE_ACTIONS",
+                "ACTION_IDENTITY_MISMATCH",
+                "ACTION_STATUS_UNSUPPORTED",
+                "NOT_CASH_DIVIDEND",
+                "DIVIDEND_DETAILS_INVALID",
+                "HISTORICAL_MULTIPLIER_BASELINE_UNAVAILABLE",
+                "MULTIPLIER_TRANSITION_PENDING",
+                "CONCURRENT_MULTIPLIER_TRANSITION_READY",
+              ],
+            },
+          },
+          additionalProperties: false,
+        },
+        PaydayEvidence: {
+          type: "object",
+          required: ["id", "label", "status", "detail", "source"],
+          properties: {
+            id: { type: "string" },
+            label: { type: "string" },
+            status: { type: "string", enum: ["pass", "pending", "block"] },
+            detail: { type: "string" },
+            source: { type: "string" },
+          },
+          additionalProperties: false,
+        },
+        PaydayMultiplierPreview: {
+          type: "object",
+          description: "One-token arithmetic illustration promoted only for a verified positive in-progress multiplier transition. It is not a wallet balance or executable quote.",
+          required: [
+            "oldMultiplier",
+            "newMultiplier",
+            "rawBalance",
+            "principalPreservingRawBalance",
+            "harvestRawAmount",
+            "estimatedUsdg",
+            "formula",
+            "rounding",
+          ],
+          properties: {
+            oldMultiplier: { type: "string", pattern: "^[1-9][0-9]*(?:\\.[0-9]{1,18})?$" },
+            newMultiplier: { type: "string", pattern: "^[1-9][0-9]*(?:\\.[0-9]{1,18})?$" },
+            rawBalance: { type: "string", const: "1.000000000000000000" },
+            principalPreservingRawBalance: { type: "string", pattern: "^(?:0|[1-9][0-9]*)\\.[0-9]{18}$" },
+            harvestRawAmount: { type: "string", pattern: "^(?:0|[1-9][0-9]*)\\.[0-9]{18}$" },
+            estimatedUsdg: { type: "null" },
+            formula: {
+              type: "string",
+              const: "principalRaw = ceil(rawBalance * oldMultiplier / newMultiplier); harvestRaw = rawBalance - principalRaw",
+            },
+            rounding: { type: "string" },
+          },
+          additionalProperties: false,
+        },
+        PaydayIntegrity: {
+          type: "object",
+          required: ["algorithm", "checksum", "authenticating", "notice"],
+          properties: {
+            algorithm: { type: "string", const: "sha256" },
+            checksum: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
+            authenticating: { type: "boolean", const: false },
+            notice: { type: "string" },
+          },
+          additionalProperties: false,
+        },
+        PaydayCapabilities: {
+          type: "object",
+          required: [
+            "readsOfficialSources",
+            "signs",
+            "submitsTransaction",
+            "requestsWalletPermission",
+            "createsClaimToken",
+            "controlsFunds",
+            "createsEntitlement",
+          ],
+          properties: {
+            readsOfficialSources: { type: "boolean", const: true },
+            signs: { type: "boolean", const: false },
+            submitsTransaction: { type: "boolean", const: false },
+            requestsWalletPermission: { type: "boolean", const: false },
+            createsClaimToken: { type: "boolean", const: false },
+            controlsFunds: { type: "boolean", const: false },
+            createsEntitlement: { type: "boolean", const: false },
+          },
+          additionalProperties: false,
+        },
+        PaydayDisabledCapabilities: {
+          type: "object",
+          required: [
+            "readsOfficialSources",
+            "signs",
+            "submitsTransaction",
+            "requestsWalletPermission",
+            "createsClaimToken",
+            "controlsFunds",
+            "createsEntitlement",
+          ],
+          properties: {
+            readsOfficialSources: { type: "boolean", const: false },
+            signs: { type: "boolean", const: false },
+            submitsTransaction: { type: "boolean", const: false },
+            requestsWalletPermission: { type: "boolean", const: false },
+            createsClaimToken: { type: "boolean", const: false },
+            controlsFunds: { type: "boolean", const: false },
+            createsEntitlement: { type: "boolean", const: false },
           },
           additionalProperties: false,
         },

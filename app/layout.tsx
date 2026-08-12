@@ -34,7 +34,7 @@ export const metadata: Metadata = {
       siteName: "HoodFlow",
       title: "HoodFlow | Find the route. Keep the signature.",
       description: "Reviewed markets, protected USDG quotes and a final signature that stays with the user.",
-      images: [{ url: "/og-crypto.png", width: 1200, height: 630, alt: "HoodFlow checks the route, oracle and protected quote before wallet handoff" }],
+      images: [{ url: "/og.png", width: 1732, height: 909, alt: "HoodFlow Payday Radar verifies corporate-action evidence before showing multiplier-transition math" }],
     },
     twitter: {
       card: "summary_large_image",
@@ -42,7 +42,7 @@ export const metadata: Metadata = {
       creator: "@hoodfloow",
       title: "HoodFlow | Find the route. Keep the signature.",
       description: "Reviewed markets, protected USDG quotes and a final signature that stays with the user.",
-      images: ["/og-crypto.png"],
+      images: ["/og.png"],
     },
     verification: { google: "7aPY4eAxVFKSGKAdD7KezZRG6g_tpnOadEqFXdWHeP4" },
     robots: { index: true, follow: true, googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1, "max-video-preview": -1 } },

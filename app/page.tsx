@@ -87,12 +87,13 @@ const AgentsWorkspace = dynamic(() => import("./agents-workspace"), { ssr: false
 const ActionLockWorkspace = dynamic(() => import("./action-lock-workspace"), { ssr: false, loading: () => <WorkspaceLoader label="Loading ActionLock" /> });
 const DepthMapWorkspace = dynamic(() => import("./depth-map-workspace"), { ssr: false, loading: () => <WorkspaceLoader label="Loading DepthMap" /> });
 const BellLockWorkspace = dynamic(() => import("./bell-lock-workspace"), { ssr: false, loading: () => <WorkspaceLoader label="Loading BellLock" /> });
+const PaydayWorkspace = dynamic(() => import("./payday-workspace"), { ssr: false, loading: () => <WorkspaceLoader label="Loading Payday evidence" /> });
 const FillProofReceipt = dynamic(() => import("./fill-proof-receipt"), { ssr: false });
 const AssetRequestBoard = dynamic(() => import("./asset-request-board"), { ssr: false, loading: () => <WorkspaceLoader label="Loading asset requests" /> });
 const ReferralRewards = dynamic(() => import("./referral-rewards"), { ssr: false, loading: () => <WorkspaceLoader label="Loading rewards" /> });
 const PrivyWalletRuntime = dynamic(() => import("./privy-wallet-runtime"), { ssr: false });
 
-type View = "overview" | "strategies" | "assets" | "asset" | "community" | "agents" | "action-lock" | "depth-map" | "bell-lock" | "portfolio" | "rewards" | "marketplace" | "activity" | "controls";
+type View = "overview" | "strategies" | "assets" | "asset" | "community" | "agents" | "action-lock" | "depth-map" | "bell-lock" | "payday" | "portfolio" | "rewards" | "marketplace" | "activity" | "controls";
 type StrategyKind = "Buy" | "Sell" | "DCA";
 type StrategyStatus = "Prepared" | "Paused" | "Confirmed" | "Cancelled";
 type MarketplaceSort = "featured" | "cadence" | "risk";
@@ -120,6 +121,7 @@ type ProductNavigationItem = { view: View; label: string; detail: string };
 
 const marketNavigation: readonly ProductNavigationItem[] = [
   { view: "assets", label: "Stock Tokens", detail: "Reviewed stock-token routes" },
+  { view: "payday", label: "Payday Radar", detail: "Inspect verified corporate-action evidence" },
   { view: "community", label: "Crypto", detail: "24/7 onchain markets" },
 ];
 
@@ -1017,7 +1019,7 @@ export default function Home() {
         setView("community");
       } else if (params.get("ref")) {
         setView("rewards");
-      } else if (requestedView && ["overview", "strategies", "assets", "community", "agents", "action-lock", "depth-map", "bell-lock", "portfolio", "rewards", "marketplace", "activity", "controls"].includes(requestedView)) {
+      } else if (requestedView && ["overview", "strategies", "assets", "community", "agents", "action-lock", "depth-map", "bell-lock", "payday", "portfolio", "rewards", "marketplace", "activity", "controls"].includes(requestedView)) {
         setView(requestedView);
       } else if (view === "asset") {
         setView("assets");
@@ -2487,9 +2489,9 @@ export default function Home() {
           onOpenDepthMap={() => navigate("depth-map")}
           onOpenBellLock={() => navigate("bell-lock")}
           onOpenActionLock={() => navigate("action-lock")}
+          onOpenPayday={() => navigate("payday")}
           onOpenAsset={openAsset}
           onQuote={(ticker) => openComposer("Buy", ticker)}
-          onWallet={handleWalletButton}
         />
       )}
 
@@ -2578,6 +2580,8 @@ export default function Home() {
       {view === "action-lock" && <ActionLockWorkspace />}
 
       {view === "bell-lock" && <BellLockWorkspace onOpenMarket={openAgentMarket} />}
+
+      {view === "payday" && <PaydayWorkspace />}
 
       {view === "depth-map" && <DepthMapWorkspace
         markets={assetRegistry
@@ -2670,7 +2674,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>HoodFlow Labs · Release 0.16.1</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
+      <footer><span>HoodFlow Labs · Release 0.17.0</span><div><button onClick={() => navigate("assets")}>Markets</button><button onClick={() => navigate("portfolio")}>Portfolio</button><Link href="/docs">Docs</Link><Link href="/security">Security</Link><a className="x-social" href="https://x.com/hoodfloow" target="_blank" rel="noreferrer" aria-label="HoodFlow on X"><b>𝕏</b> @hoodfloow</a></div><span className="chain-tag mainnet-tag"><i /> MAINNET BETA</span></footer>
 
       {composerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) closeComposer(); }}>

@@ -10,7 +10,7 @@ import {
 
 export const metadata: Metadata = {
   title: "Documentation",
-  description: "Learn how BellLock watches a market reopening, stress-test live liquidity, inspect ActionLock and FillProof records, and trade with a self-custody wallet.",
+  description: "Learn how Payday compares a cash-dividend Process Date with concurrent multiplier evidence, BellLock watches a market reopening, and HoodFlow keeps wallet execution user-controlled.",
   alternates: { canonical: "/docs" },
 };
 
@@ -26,6 +26,7 @@ const sections = [
   ["depthmap", "DepthMap"],
   ["depth-memory", "Depth Memory"],
   ["action-lock", "ActionLock"],
+  ["payday", "Payday Radar"],
   ["bell-lock", "BellLock"],
   ["fillproof", "FillProof"],
   ["agents", "Agent API"],
@@ -149,8 +150,22 @@ export default function DocsPage() {
           <div className="docs-note"><span>OFFICIAL-DATA LIMIT</span><p>Corporate-action and exchange-halt information can be incomplete, delayed or unavailable from public sources. ActionLock reports those gaps as unknown; it does not certify issuer disclosures or replace official exchange and issuer notices.</p></div>
         </section>
 
+        <section id="payday" className="docs-section">
+          <p className="docs-kicker">08B / FLOWRIGHTS</p><h2>Classify the event before previewing the increment</h2>
+          <p><strong>Payday Radar</strong> is a public, read-only corporate-action inspector for HoodFlow-indexed Stock Tokens. Call <code>GET /api/payday?asset=AAPL</code> with exactly one ticker. A successful HTTP response wraps the result as <code>{`{ ok: true, data }`}</code>; eligibility still depends on every evidence gate below.</p>
+          <div className="docs-status-grid">
+            <article><b className="ready">EXACT EVENT CLASS</b><p>Only <code>CORPORATE_ACTION_TYPE_CASH_DIVIDEND</code> can qualify. Splits, conversions, name changes, unknown types and ambiguous active events are never relabeled as yield.</p></article>
+            <article><b className="ready">UID + CHAIN 4663</b><p>The official asset, corporate action and HoodFlow registry must bind the same stable UID and the exact canonical Robinhood Chain deployment address.</p></article>
+            <article><b className="watch">PROCESS DATE + MULTIPLIER</b><p>The official <code>processDate</code> is date-only scheduling evidence. Separately, the canonical token&apos;s <code>uid()</code>, <code>uiMultiplier()</code>, <code>newUIMultiplier()</code> and <code>effectiveAt()</code> must match official state before any arithmetic preview appears.</p></article>
+            <article><b className="paused">FAIL CLOSED</b><p>Missing sources, a completed event without a trustworthy pre-event baseline, mismatched state or an incomplete transition returns pending, blocked or unavailable—not an inferred amount.</p></article>
+          </div>
+          <div className="docs-split"><article><span>PRINCIPAL-PRESERVING MATH</span><h3>One-token illustration, not a balance</h3><p>When every gate passes with code <code>CONCURRENT_MULTIPLIER_TRANSITION_READY</code>, Payday shows the raw amount that preserves the pre-event economic exposure after a positive multiplier change. The cash-dividend record and transition are concurrent evidence only. The endpoint reads no wallet balance and provides no USDG execution quote.</p></article><article className="accent"><span>RELEASE BOUNDARY</span><h3>No permission and no entitlement</h3><p>The endpoint cannot connect a wallet, request an approval, sign, submit, create a claim token, control funds, create an entitlement or return an execution handoff. Compound, Cash to USDG and Redirect remain instructions for a future audited release.</p></article></div>
+          <div className="docs-note"><span>STOCK TOKENS ARE NOT SHARES</span><p>The preview describes token arithmetic and source evidence only. It is not a shareholder right, dividend claim, investment recommendation, transaction instruction or execution promise.</p></div>
+          <Link className="docs-address" href="/?view=payday">Open Payday Radar →</Link>
+        </section>
+
         <section id="bell-lock" className="docs-section">
-          <p className="docs-kicker">08B / BELLLOCK</p><h2>Watch the opening bell without giving an agent your wallet</h2>
+          <p className="docs-kicker">08C / BELLLOCK</p><h2>Watch the opening bell without giving an agent your wallet</h2>
           <p><strong>BellLock</strong> is a user-armed reopening policy for Stock Tokens. It records the exact USDG intent and hard limits for opening gap, spread, oracle-to-DEX deviation and stress-size route drift. The watcher can inspect evidence; it cannot approve a token, sign a message or submit a transaction.</p>
           <div className="docs-status-grid">
             <article><b className="watch">ARMED</b><p>The policy is saved in this browser and waits for its target regular session. Keeping the page open is required in the current preview; there is no hidden background trader.</p></article>
@@ -219,6 +234,6 @@ export default function DocsPage() {
     </div>
 
     <section className="seo-risk"><strong>Stock Tokens are not shares.</strong><p>They may be restricted in your jurisdiction and do not provide shareholder rights.</p></section>
-    <footer className="seo-footer"><span>Documentation · Release 0.16.1</span><Link href="/learn">Read plain-language guides</Link><Link href="/security">Review security & known limitations →</Link><a href="https://x.com/hoodfloow" target="_blank" rel="noreferrer">𝕏 @hoodfloow</a></footer>
+    <footer className="seo-footer"><span>Documentation · Release 0.17.0</span><Link href="/learn">Read plain-language guides</Link><Link href="/security">Review security & known limitations →</Link><a href="https://x.com/hoodfloow" target="_blank" rel="noreferrer">𝕏 @hoodfloow</a></footer>
   </main>;
 }

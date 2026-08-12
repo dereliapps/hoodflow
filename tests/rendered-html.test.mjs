@@ -45,6 +45,77 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
+test("ships Payday as a read-only, fail-closed corporate-action preview", async () => {
+  const [page, routeDeskHome, paydayUi, paydayCss, paydayRoute, flowRights, docs, openApi] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/route-desk-home.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/payday-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/payday-workspace.module.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/payday/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/flow-rights.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/docs/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/hoodflow-openapi.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /const PaydayWorkspace = dynamic\(\(\) => import\("\.\/payday-workspace"\)/);
+  assert.match(page, /\| "payday" \|/);
+  assert.match(page, /\{ view: "payday", label: "Payday Radar"/);
+  assert.match(page, /requestedView[^\n]+"payday"/);
+  assert.match(page, /onOpenPayday=\{\(\) => navigate\("payday"\)\}/);
+  assert.match(page, /view === "payday" && <PaydayWorkspace \/>/);
+  assert.match(routeDeskHome, /onOpenPayday: \(\) => void/);
+  assert.match(routeDeskHome, /onClick=\{onOpenPayday\}>Open Payday Radar/);
+
+  assert.match(paydayUi, /FLOWRIGHTS \/ PAYDAY PREVIEW/);
+  assert.match(paydayUi, /fetch\(`\/api\/payday\?asset=\$\{encodeURIComponent\(asset\)\}`/);
+  assert.match(paydayUi, /cache: "no-store"/);
+  assert.match(paydayUi, /returnedTicker !== requestedTicker/);
+  assert.match(paydayUi, /state === "eligible" && \(actionType !== QUALIFYING_ACTION_TYPE \|\| !validPreview\)/);
+  assert.match(paydayUi, /It cannot approve, vault, swap or sign/);
+  assert.match(paydayUi, /No wallet balance is read/);
+  assert.match(paydayUi, /Preview only[^<]+no vault[^<]+no claim token[^<]+no wallet permission/i);
+  assert.doesNotMatch(paydayUi, /window\.ethereum|wallet_switchEthereumChain|eth_sendTransaction|sendTransaction\s*\(|writeContract\s*\(|\.approve\s*\(/);
+  assert.match(paydayCss, /@media \(max-width: 720px\)/);
+  assert.match(paydayCss, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.doesNotMatch(paydayCss, /(?:background|background-color):\s*(?:#fff(?:fff)?\b|white\b)/i);
+
+  assert.match(paydayRoute, /export async function GET\(request: NextRequest\)/);
+  assert.match(paydayRoute, /export async function OPTIONS\(\)/);
+  assert.doesNotMatch(paydayRoute, /export async function (?:POST|PUT|PATCH|DELETE)\b/);
+  assert.match(paydayRoute, /key !== "asset"/);
+  assert.match(paydayRoute, /keys\.filter\(\(key\) => key === "asset"\)\.length !== 1/);
+  assert.match(paydayRoute, /Client evidence is never accepted/);
+  assert.match(paydayRoute, /takeDurableAgentQuoteLimit/);
+  assert.match(paydayRoute, /acquireLocalAgentQuoteCapacity/);
+  assert.match(paydayRoute, /cache-control": "no-store, max-age=0"/);
+  assert.match(paydayRoute, /No transaction, wallet permission, signature, entitlement, or execution handoff was created/);
+
+  assert.match(flowRights, /export const PAYDAY_CHAIN_ID = 4_663/);
+  assert.match(flowRights, /https:\/\/api\.robinhood\.com/);
+  assert.match(flowRights, /CORPORATE_ACTION_TYPE_CASH_DIVIDEND/);
+  assert.match(flowRights, /action\.uid === asset\.uid/);
+  assert.match(flowRights, /exactChainDeployment\(action\.deployments, canonicalAddress\)/);
+  assert.match(flowRights, /onchain\.uid === asset\.uid/);
+  assert.match(flowRights, /normalizeDecimal\(onchain\.currentMultiplier\) === normalizeDecimal\(asset\.currentMultiplier\)/);
+  assert.match(flowRights, /This corporate action is not a cash dividend and is never treated as yield/);
+  assert.match(flowRights, /HISTORICAL_MULTIPLIER_BASELINE_UNAVAILABLE/);
+  assert.match(flowRights, /principalRaw = ceil\(rawBalance \* oldMultiplier \/ newMultiplier\)/);
+  assert.match(flowRights, /signs: false/);
+  assert.match(flowRights, /submitsTransaction: false/);
+  assert.match(flowRights, /requestsWalletPermission: false/);
+  assert.match(flowRights, /createsClaimToken: false/);
+  assert.match(flowRights, /controlsFunds: false/);
+  assert.match(flowRights, /createsEntitlement: false/);
+  assert.match(flowRights, /handoffAllowed: false/);
+  assert.match(flowRights, /executionHandoff: null/);
+  assert.match(docs, /Open Payday Radar/);
+  assert.match(docs, /CONCURRENT_MULTIPLIER_TRANSITION_READY/);
+  assert.match(openApi, /processDate/);
+  assert.match(openApi, /multiplier-transition-concurrent-with-cash-dividend-process-date/);
+  assert.match(openApi, /PaydayDisabledCapabilities/);
+  assert.doesNotMatch(`${docs}\n${openApi}`, /dividend-derived|\bcaused\b|\bpayable\b/i);
+});
+
 test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   const [page, routeDeskHome, layout, css, packageJson, priceRoute, priceLib, historyRoute, stockHistory, docs, community, rewards, referralRoute, referralQualification, communityMarketRoute, communityChartRoute, analyticsClient, agents, actionLockWorkspace, agentLib, actionLockLib, agentManifest, agentMarkets, agentQuoteRoute, actionLockRoute, agentGuard, worker, oracleProtection, basketLib, basketRoute, mcpLib, mcpHttp, mcpRoute, openApiLib, openApiRoute, apiCatalogRoute] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
@@ -164,7 +235,7 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
   assert.match(layout, /NEXT_PUBLIC_SITE_URL/);
   assert.doesNotMatch(layout, /next[/]headers|headers\(\)/);
   assert.match(page, /Automatic retries are active/);
-  assert.match(page, /Release 0\.16\.1/);
+  assert.match(page, /Release 0\.17\.0/);
   assert.match(page, /Open FillProof/);
   assert.match(page, /fillProofSnapshot/);
   assert.match(page, /DCA command center/);
