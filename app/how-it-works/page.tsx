@@ -1,10 +1,30 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { absoluteUrl, breadcrumbJsonLd, jsonLdString, ORGANIZATION_ID, PAGE_LAST_MODIFIED, pageSocialMetadata, WEBSITE_ID } from "@/lib/seo";
 
 export const metadata: Metadata = {
   title: "How HoodFlow Finds Stock Token Routes",
   description: "See how HoodFlow checks Robinhood Chain liquidity, protects minimum output with slippage limits and uses short-lived Permit2 permissions.",
   alternates: { canonical: "/how-it-works" },
+  ...pageSocialMetadata({ path: "/how-it-works", title: "How HoodFlow Finds Stock Token Routes", description: "See how HoodFlow checks Robinhood Chain liquidity, protects minimum output with slippage limits and uses short-lived Permit2 permissions." }),
+};
+
+const structuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": absoluteUrl("/how-it-works#page"),
+      url: absoluteUrl("/how-it-works"),
+      name: "How HoodFlow Finds Stock Token Routes",
+      description: "See how HoodFlow checks Robinhood Chain liquidity, protects minimum output with slippage limits and uses short-lived Permit2 permissions.",
+      inLanguage: "en",
+      dateModified: PAGE_LAST_MODIFIED.howItWorks,
+      isPartOf: { "@id": WEBSITE_ID },
+      publisher: { "@id": ORGANIZATION_ID },
+    },
+    breadcrumbJsonLd([{ name: "HoodFlow", path: "/" }, { name: "How it works", path: "/how-it-works" }]),
+  ],
 };
 
 const steps = [
@@ -17,6 +37,7 @@ const steps = [
 
 export default function HowItWorksPage() {
   return <main className="seo-shell">
+    <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdString(structuredData) }} />
     <header className="seo-nav"><Link href="/" className="seo-logo">hoodflow<span>MAINNET BETA</span></Link><nav><Link href="/stock-tokens">Markets</Link><Link href="/docs">Docs</Link><Link href="/security">Security</Link><Link href="/?view=assets" className="seo-cta">Open app</Link></nav></header>
     <section className="seo-hero"><p>EXECUTION, EXPLAINED</p><h1>Every trade<br /><em>earns its route.</em></h1><div><p>HoodFlow is a self-custody execution interface for Stock Tokens on Robinhood Chain. It does not custody funds, invent prices or force orders through thin liquidity.</p><span>Fresh quote · protected minimum · direct settlement</span></div></section>
     <section className="seo-steps">{steps.map(([number, title, copy]) => <article key={number}><span>{number}</span><h2>{title}</h2><p>{copy}</p></article>)}</section>

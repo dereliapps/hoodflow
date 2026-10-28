@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Added `llms.txt` and `llms-full.txt` (generated from the live market registry and guides) and explicit answer-engine crawler rules in `robots.txt`.
+- Added complete Open Graph/Twitter metadata to every public page. Child routes previously replaced the parent's `openGraph` object and lost `og:image`, `og:url` and `og:type`.
+- Expanded structured data: Organization with `sameAs`, WebSite, enriched WebApplication, Article dates, BreadcrumbList, CollectionPage/ItemList, and per-market FinancialProduct plus FAQPage.
+- Added answer-first FAQ copy to every Stock Token market page and corrected ETF page titles.
+- Sitemap `lastmod` now follows each page's real last change instead of one global release date.
+- Home page title now leads with "Stock Token Markets on Robinhood Chain"; the tagline stays in the social cards. Added crawlable footer links to Markets, How it works, Learn and Roadmap.
+
 ## 0.16.1 — 2026-08-11
 
 - Reorganized the product into Markets, Portfolio, Automate, Agents, Protection and More instead of exposing every workspace at once.

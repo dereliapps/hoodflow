@@ -23,7 +23,7 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(response.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
 
   const html = await response.text();
-  assert.match(html, /<title>HoodFlow \| Find the route\. Keep the signature\.<\/title>/i);
+  assert.match(html, /<title>HoodFlow \| Stock Token Markets on Robinhood Chain<\/title>/i);
   assert.match(html, /Choose the market\./);
   assert.match(html, /Keep the signature\./);
   assert.match(html, /Explore markets/);
@@ -41,7 +41,7 @@ test("server-renders the HoodFlow product shell", async () => {
   assert.match(html, /Stock Tokens are not shares/);
   assert.match(html, /review quote/i);
   assert.match(html, /Robinhood Chain/);
-  assert.match(html, /og-crypto\.png/);
+  assert.match(html, /og\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
@@ -550,4 +550,73 @@ test("ships a bounded, interactive Robinhood mainnet experience", async () => {
     "QQQ", "SGOV", "SLV", "SPY", "CUSO",
   ].map((ticker) => access(new URL(`../public/logos/${ticker}.png`, import.meta.url))));
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
+});
+
+async function renderPath(path) {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}-${path}`);
+  const { default: worker } = await import(workerUrl.href);
+  const response = await worker.fetch(
+    new Request(`http://localhost${path}`, { headers: { accept: "text/html" } }),
+    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  return { response, body: await response.text() };
+}
+
+function jsonLdNodes(html) {
+  return [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)]
+    .flatMap((match) => JSON.parse(match[1])["@graph"] ?? [JSON.parse(match[1])]);
+}
+
+test("publishes crawler and answer-engine discovery files", async () => {
+  const robots = (await renderPath("/robots.txt")).body;
+  assert.match(robots, /User-Agent: OAI-SearchBot/);
+  assert.match(robots, /User-Agent: ClaudeBot/);
+  assert.match(robots, /Disallow: \/api\//);
+  assert.match(robots, /Sitemap: https:\/\/hoodflow\.app\/sitemap\.xml/);
+
+  const sitemap = (await renderPath("/sitemap.xml")).body;
+  assert.match(sitemap, /https:\/\/hoodflow\.app\/stock-tokens\/aapl/);
+  assert.match(sitemap, /https:\/\/hoodflow\.app\/learn\/how-hoodflow-fees-work/);
+  assert.equal((sitemap.match(/<lastmod>/g) ?? []).length, (sitemap.match(/<loc>/g) ?? []).length, "every sitemap URL carries a lastmod");
+
+  const llms = await renderPath("/llms.txt");
+  assert.equal(llms.response.status, 200);
+  assert.match(llms.body, /^# HoodFlow/);
+  assert.match(llms.body, /\/stock-tokens\/aapl/);
+  assert.match(llms.body, /Stock Tokens are not shares/);
+
+  const full = await renderPath("/llms-full.txt");
+  assert.equal(full.response.status, 200);
+  assert.match(full.body, /Contract: 0x[0-9a-fA-F]{40}/);
+});
+
+test("market and guide pages carry complete social metadata and valid structured data", async () => {
+  for (const path of ["/stock-tokens", "/stock-tokens/aapl", "/learn", "/learn/how-hoodflow-fees-work", "/docs", "/security", "/roadmap", "/how-it-works"]) {
+    const { response, body } = await renderPath(path);
+    assert.equal(response.status, 200, path);
+    assert.match(body, /<meta property="og:image" content="https:\/\/hoodflow\.app\/og\.png"/, `${path} og:image`);
+    assert.match(body, new RegExp(`<meta property="og:url" content="https://hoodflow\\.app${path}"`), `${path} og:url`);
+    assert.match(body, new RegExp(`rel="canonical" href="https://hoodflow\\.app${path}"`), `${path} canonical`);
+    const types = jsonLdNodes(body).map((node) => node["@type"]);
+    assert.ok(types.includes("Organization") && types.includes("WebSite"), `${path} site graph`);
+    assert.ok(types.includes("BreadcrumbList"), `${path} breadcrumb`);
+  }
+
+  const token = await renderPath("/stock-tokens/nvda");
+  const nodes = jsonLdNodes(token.body);
+  const faq = nodes.find((node) => node["@type"] === "FAQPage");
+  assert.ok(faq && faq.mainEntity.length >= 4, "token FAQPage");
+  const visible = token.body.replace(/<!-- -->/g, "");
+  for (const item of faq.mainEntity) {
+    assert.ok(visible.includes(item.acceptedAnswer.text.replace(/&/g, "&amp;")), `FAQ answer is visible: ${item.name}`);
+  }
+  assert.ok(nodes.some((node) => node["@type"] === "FinancialProduct"), "token FinancialProduct");
+
+  const article = jsonLdNodes((await renderPath("/learn/how-hoodflow-fees-work")).body).find((node) => node["@type"] === "Article");
+  assert.ok(article.datePublished && article.dateModified, "Article dates");
+
+  const home = (await renderPath("/")).body;
+  for (const href of ["/stock-tokens", "/how-it-works", "/learn", "/roadmap"]) assert.ok(home.includes(`href="${href}"`), `home links to ${href}`);
 });

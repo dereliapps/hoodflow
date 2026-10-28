@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { absoluteUrl, breadcrumbJsonLd, jsonLdString, ORGANIZATION_ID, PAGE_LAST_MODIFIED, pageSocialMetadata, WEBSITE_ID } from "@/lib/seo";
 import {
   HOODFLOW_DCA_ADDRESS,
   PERMIT2_ADDRESS,
@@ -12,6 +13,25 @@ export const metadata: Metadata = {
   title: "Documentation",
   description: "Learn how Payday compares a cash-dividend Process Date with concurrent multiplier evidence, BellLock watches a market reopening, and HoodFlow keeps wallet execution user-controlled.",
   alternates: { canonical: "/docs" },
+  ...pageSocialMetadata({ path: "/docs", title: "Documentation", description: "Learn how Payday compares a cash-dividend Process Date with concurrent multiplier evidence, BellLock watches a market reopening, and HoodFlow keeps wallet execution user-controlled." }),
+};
+
+const structuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": absoluteUrl("/docs#page"),
+      url: absoluteUrl("/docs"),
+      name: "Documentation",
+      description: "Learn how Payday compares a cash-dividend Process Date with concurrent multiplier evidence, BellLock watches a market reopening, and HoodFlow keeps wallet execution user-controlled.",
+      inLanguage: "en",
+      dateModified: PAGE_LAST_MODIFIED.docs,
+      isPartOf: { "@id": WEBSITE_ID },
+      publisher: { "@id": ORGANIZATION_ID },
+    },
+    breadcrumbJsonLd([{ name: "HoodFlow", path: "/" }, { name: "Documentation", path: "/docs" }]),
+  ],
 };
 
 const explorer = "https://robinhoodchain.blockscout.com/address/";
@@ -42,6 +62,7 @@ function Step({ number, title, children }: { number: string; title: string; chil
 
 export default function DocsPage() {
   return <main className="seo-shell docs-shell">
+    <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdString(structuredData) }} />
     <header className="seo-nav">
       <Link href="/" className="seo-logo">hoodflow<span>MAINNET BETA</span></Link>
       <nav><Link href="/stock-tokens">Markets</Link><Link href="/learn">Learn</Link><Link href="/roadmap">Roadmap</Link><Link href="/security">Security</Link><Link href="/?view=assets" className="seo-cta">Open app</Link></nav>

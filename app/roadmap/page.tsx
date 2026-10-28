@@ -1,10 +1,30 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { absoluteUrl, breadcrumbJsonLd, jsonLdString, ORGANIZATION_ID, PAGE_LAST_MODIFIED, pageSocialMetadata, WEBSITE_ID } from "@/lib/seo";
 
 export const metadata: Metadata = {
   title: "Mainnet Beta Roadmap",
   description: "See what HoodFlow has shipped, what remains in progress and the objective security gates required to leave Mainnet Beta.",
   alternates: { canonical: "/roadmap" },
+  ...pageSocialMetadata({ path: "/roadmap", title: "Mainnet Beta Roadmap", description: "See what HoodFlow has shipped, what remains in progress and the objective security gates required to leave Mainnet Beta." }),
+};
+
+const structuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": absoluteUrl("/roadmap#page"),
+      url: absoluteUrl("/roadmap"),
+      name: "Mainnet Beta Roadmap",
+      description: "See what HoodFlow has shipped, what remains in progress and the objective security gates required to leave Mainnet Beta.",
+      inLanguage: "en",
+      dateModified: PAGE_LAST_MODIFIED.roadmap,
+      isPartOf: { "@id": WEBSITE_ID },
+      publisher: { "@id": ORGANIZATION_ID },
+    },
+    breadcrumbJsonLd([{ name: "HoodFlow", path: "/" }, { name: "Roadmap", path: "/roadmap" }]),
+  ],
 };
 
 const gates = [
@@ -19,6 +39,7 @@ const gates = [
 
 export default function RoadmapPage() {
   return <main className="seo-shell roadmap-shell">
+    <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdString(structuredData) }} />
     <header className="seo-nav"><Link href="/" className="seo-logo">hoodflow<span>MAINNET BETA</span></Link><nav><Link href="/stock-tokens">Markets</Link><Link href="/learn">Learn</Link><Link href="/security">Security</Link><Link href="/?view=assets" className="seo-cta">Open app</Link></nav></header>
     <section className="roadmap-hero"><div><p>PUBLIC DELIVERY PLAN</p><h1>Beta ends at a gate,<br /><em>not a marketing date.</em></h1></div><p>HoodFlow will remove the Mainnet Beta label only after every security and operations gate below is complete and publicly verifiable.</p></section>
     <section className="roadmap-progress"><div><strong>3 / 7</strong><span>EXIT GATES COMPLETE</span></div><p><i style={{ width: `${3 / 7 * 100}%` }} /></p><span>No promised date · status changes require evidence</span></section>
