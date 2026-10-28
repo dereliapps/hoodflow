@@ -1,11 +1,31 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { absoluteUrl, breadcrumbJsonLd, jsonLdString, ORGANIZATION_ID, PAGE_LAST_MODIFIED, pageSocialMetadata, WEBSITE_ID } from "@/lib/seo";
 import { HOODFLOW_DCA_ADDRESS, PERMIT2_ADDRESS, UNIVERSAL_ROUTER_ADDRESS, USDG_ADDRESS } from "@/lib/hoodflow-mainnet";
 
 export const metadata: Metadata = {
   title: "Security, Contracts & Trading Protections",
   description: "Review HoodFlow's Robinhood Chain contracts, router addresses, slippage protection, permission model, audit status and known limitations.",
   alternates: { canonical: "/security" },
+  ...pageSocialMetadata({ path: "/security", title: "Security, Contracts & Trading Protections", description: "Review HoodFlow's Robinhood Chain contracts, router addresses, slippage protection, permission model, audit status and known limitations." }),
+};
+
+const structuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": absoluteUrl("/security#page"),
+      url: absoluteUrl("/security"),
+      name: "Security, Contracts & Trading Protections",
+      description: "Review HoodFlow's Robinhood Chain contracts, router addresses, slippage protection, permission model, audit status and known limitations.",
+      inLanguage: "en",
+      dateModified: PAGE_LAST_MODIFIED.security,
+      isPartOf: { "@id": WEBSITE_ID },
+      publisher: { "@id": ORGANIZATION_ID },
+    },
+    breadcrumbJsonLd([{ name: "HoodFlow", path: "/" }, { name: "Security", path: "/security" }]),
+  ],
 };
 
 const explorer = "https://robinhoodchain.blockscout.com/address/";
@@ -13,6 +33,7 @@ const sourceRepository = "https://github.com/dereliapps/hoodflow";
 
 export default function SecurityPage() {
   return <main className="seo-shell">
+    <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdString(structuredData) }} />
     <header className="seo-nav"><Link href="/" className="seo-logo">hoodflow<span>MAINNET BETA</span></Link><nav><Link href="/stock-tokens">Markets</Link><Link href="/docs">Docs</Link><a href={sourceRepository} target="_blank" rel="noreferrer">Source</a><Link href="/how-it-works">How it works</Link><Link href="/?view=assets" className="seo-cta">Open app</Link></nav></header>
     <section className="seo-hero security-hero"><p>SECURITY & TRANSPARENCY</p><h1>Verify the system.<br /><em>Then verify the order.</em></h1><div><p>HoodFlow exposes the code, contracts, route rules and limitations that matter before a wallet signature. The independent audit is still pending; source review and responsible disclosure are open now.</p><span>Audit pending · source public · disclosure open</span></div></section>
     <section className="security-status"><div><span>INTERFACE</span><strong>MAINNET BETA</strong><p>Direct Buy and Sell are enabled only for reviewed full-fill routes.</p></div><div><span>INDEPENDENT AUDIT</span><strong className="pending">PENDING</strong><p>No audit badge is shown before a public final report and remediation log exist.</p></div><div><span>CUSTODY</span><strong>SELF-CUSTODY</strong><p>HoodFlow does not hold wallet keys or purchased tokens.</p></div></section>

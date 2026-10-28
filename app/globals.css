@@ -1382,3 +1382,12 @@ footer .x-social { display: inline-flex; align-items: center; gap: 5px; color: #
   .agents-basket { margin-top: 58px; }.agents-basket-heading h2 { font-size: 46px; }.agents-basket-shell { border-radius: 18px; }.agents-basket-builder,.agents-basket-plan { padding: 28px 18px; }.agents-basket-fields,.agents-basket-policy { grid-template-columns: 1fr; }.agents-basket-draft-leg { grid-template-columns: 22px minmax(0,1fr) 84px 44px; gap: 5px; padding-left: 7px; }.agents-basket-plan { min-height: 550px; }.agents-basket-plan > header { align-items: flex-start; flex-direction: column; }.agents-basket-plan > header > b { max-width: none; text-align: left; }.agents-basket-summary { grid-template-columns: 1fr 1fr; }.agents-basket-summary p { border-bottom: 1px solid #2d3a33; }.agents-basket-summary p:nth-child(2) { border-right: 0; }.agents-basket-summary p:first-child,.agents-basket-summary p:nth-child(3) { padding-left: 0; }.agents-basket-summary p:nth-child(3),.agents-basket-summary p:nth-child(4) { border-bottom: 0; }.agents-basket-plan-legs li { grid-template-columns: 24px 34px minmax(0,1fr); }.agents-basket-plan-legs img { width: 34px; height: 34px; }.agents-basket-plan-legs li > button,.agents-basket-plan-legs li > a,.agents-basket-plan-legs li > b { width: 100%; grid-column: 2 / -1; min-height: 44px; }.agents-basket-plan > footer { margin-top: 20px; }
   .basket-order-context { grid-template-columns: 9px minmax(0,1fr); }.basket-order-context > b { grid-column: 2; }
 }
+
+/* Answer-first FAQ blocks on SEO pages (visible text mirrors the FAQPage JSON-LD) */
+.seo-faq { width: min(1250px, calc(100% - 56px)); margin: 80px auto; display: grid; grid-template-columns: .4fr 1fr; gap: 30px; }
+.seo-faq > h2 { margin: 0; font-size: 23px; line-height: 1.1; letter-spacing: -1px; }
+.seo-faq dl { margin: 0; border-top: 1px solid #daddd6; }
+.seo-faq dl > div { padding: 22px 0; border-bottom: 1px solid #daddd6; }
+.seo-faq dt { margin: 0 0 8px; font-size: 16px; font-weight: 650; line-height: 1.3; }
+.seo-faq dd { margin: 0; color: #737c78; font-size: 14px; line-height: 1.65; }
+@media (max-width: 900px) { .seo-faq { width: calc(100% - 28px); grid-template-columns: 1fr; gap: 18px; margin: 56px auto; } }
